@@ -1,0 +1,111 @@
+from datetime import timedelta
+from uuid import UUID
+
+from sqlalchemy import and_, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.errors import AppError
+from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
+from app.core.utils import sha256_hex, utcnow
+from app.db.models import User, UserSession
+from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
+
+
+class AuthService:
+    @staticmethod
+    async def register(db: AsyncSession, req: RegisterRequest) -> User:
+        existing = await db.execute(
+            select(User).where(or_(User.username == req.username, User.email == req.email))
+        )
+        if existing.scalar_one_or_none():
+            raise AppError("username or email already exists", 409)
+        user = User(username=req.username, email=req.email, password_hash=hash_password(req.password))
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        return user
+
+    @staticmethod
+    async def login(db: AsyncSession, req: LoginRequest, user_agent: str | None, ip: str | None, refresh_ttl_days: int) -> TokenPair:
+        result = await db.execute(
+            select(User).where(or_(User.username == req.username_or_email, User.email == req.username_or_email))
+        )
+        user = result.scalar_one_or_none()
+        if not user or not verify_password(req.password, user.password_hash):
+            raise AppError("invalid credentials", 401)
+
+        session = UserSession(
+            user_id=user.id,
+            refresh_token_hash="",
+            user_agent=user_agent,
+            ip=ip,
+            expires_at=utcnow() + timedelta(days=refresh_ttl_days),
+        )
+        db.add(session)
+        await db.flush()
+
+        refresh = create_refresh_token(user.id, session.id)
+        session.refresh_token_hash = sha256_hex(refresh)
+        access = create_access_token(user.id)
+        await db.commit()
+        return TokenPair(access_token=access, refresh_token=refresh)
+
+    @staticmethod
+    async def refresh(db: AsyncSession, refresh_token: str, user_agent: str | None, ip: str | None, refresh_ttl_days: int) -> TokenPair:
+        payload = decode_token(refresh_token)
+        if payload.get("type") != "refresh":
+            raise AppError("invalid token type", 401)
+        sid = payload.get("sid")
+        sub = payload.get("sub")
+        if not sid or not sub:
+            raise AppError("invalid token payload", 401)
+
+        session = await db.get(UserSession, UUID(sid))
+        if not session or session.user_id != UUID(sub):
+            raise AppError("invalid session", 401)
+        if session.revoked_at is not None or session.expires_at < utcnow():
+            raise AppError("session expired or revoked", 401)
+        if session.refresh_token_hash != sha256_hex(refresh_token):
+            raise AppError("refresh token mismatch", 401)
+
+        session.revoked_at = utcnow()
+        await db.flush()
+
+        new_session = UserSession(
+            user_id=session.user_id,
+            refresh_token_hash="",
+            user_agent=user_agent,
+            ip=ip,
+            expires_at=utcnow() + timedelta(days=refresh_ttl_days),
+        )
+        db.add(new_session)
+        await db.flush()
+        new_refresh = create_refresh_token(session.user_id, new_session.id)
+        new_session.refresh_token_hash = sha256_hex(new_refresh)
+        new_access = create_access_token(session.user_id)
+        await db.commit()
+        return TokenPair(access_token=new_access, refresh_token=new_refresh)
+
+    @staticmethod
+    async def logout(db: AsyncSession, refresh_token: str) -> None:
+        payload = decode_token(refresh_token)
+        sid = payload.get("sid")
+        if not sid:
+            raise AppError("invalid token payload", 401)
+        session = await db.get(UserSession, UUID(sid))
+        if session and session.revoked_at is None:
+            session.revoked_at = utcnow()
+            await db.commit()
+
+    @staticmethod
+    async def get_user_from_access_token(db: AsyncSession, token: str) -> User:
+        payload = decode_token(token)
+        if payload.get("type") != "access":
+            raise AppError("invalid access token", 401)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise AppError("invalid access token payload", 401)
+        user = await db.get(User, UUID(user_id))
+        if not user:
+            raise AppError("user not found", 404)
+        return user
