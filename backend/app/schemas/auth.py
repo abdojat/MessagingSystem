@@ -1,3 +1,6 @@
+from datetime import datetime
+from uuid import UUID
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -24,3 +27,28 @@ class TokenPair(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+
+class MeResponse(BaseModel):
+    id: UUID
+    username: str
+    email: EmailStr | None
+    created_at: datetime
+
+
+class SessionResponse(BaseModel):
+    id: UUID
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    user_agent: str | None
+    ip: str | None
+
+
+class SessionListResponse(BaseModel):
+    items: list[SessionResponse]
+
+
+class LogoutAllResponse(BaseModel):
+    status: str = "ok"
+    revoked_count: int

@@ -13,10 +13,12 @@ from tests.test_utils import DummyAMQP
 async def test_publish_requires_owner_or_admin(db_session):
     owner = User(username="owner", email="owner@example.com", password_hash="x")
     member = User(username="member", email="member@example.com", password_hash="x")
-    db_session.add_all([owner, member])
+    pending = User(username="pending", email="pending@example.com", password_hash="x")
+    db_session.add_all([owner, member, pending])
     await db_session.commit()
     await db_session.refresh(owner)
     await db_session.refresh(member)
+    await db_session.refresh(pending)
 
     amqp = DummyAMQP()
     channel = await ChannelService.create_channel(
@@ -34,6 +36,14 @@ async def test_publish_requires_owner_or_admin(db_session):
             created_by_user_id=owner.id,
         )
     )
+    db_session.add(
+        ChannelMembership(
+            channel_id=channel.id,
+            user_id=pending.id,
+            role=MembershipRole.pending,
+            created_by_user_id=owner.id,
+        )
+    )
     await db_session.commit()
 
     with pytest.raises(AppError):
@@ -41,6 +51,14 @@ async def test_publish_requires_owner_or_admin(db_session):
             db_session,
             channel.id,
             member.id,
+            PublishMessageRequest(content_text="blocked"),
+        )
+
+    with pytest.raises(AppError):
+        await MessageService.publish_message(
+            db_session,
+            channel.id,
+            pending.id,
             PublishMessageRequest(content_text="blocked"),
         )
 

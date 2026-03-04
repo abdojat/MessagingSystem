@@ -12,3 +12,9 @@ class EventResponse(BaseModel):
     event_type: str
     payload: dict[str, Any]
     created_at: datetime
+
+
+class EventListResponse(BaseModel):
+    items: list[EventResponse]
+    next_cursor: str | None
+    has_more: bool

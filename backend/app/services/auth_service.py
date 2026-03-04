@@ -1,7 +1,7 @@
 from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -39,6 +39,7 @@ class AuthService:
             refresh_token_hash="",
             user_agent=user_agent,
             ip=ip,
+            last_used_at=utcnow(),
             expires_at=utcnow() + timedelta(days=refresh_ttl_days),
         )
         db.add(session)
@@ -76,10 +77,12 @@ class AuthService:
             refresh_token_hash="",
             user_agent=user_agent,
             ip=ip,
+            last_used_at=utcnow(),
             expires_at=utcnow() + timedelta(days=refresh_ttl_days),
         )
         db.add(new_session)
         await db.flush()
+        session.last_used_at = utcnow()
         new_refresh = create_refresh_token(session.user_id, new_session.id)
         new_session.refresh_token_hash = sha256_hex(new_refresh)
         new_access = create_access_token(session.user_id)
@@ -109,3 +112,33 @@ class AuthService:
         if not user:
             raise AppError("user not found", 404)
         return user
+
+    @staticmethod
+    async def list_sessions(db: AsyncSession, user_id: UUID) -> list[UserSession]:
+        rows = await db.execute(
+            select(UserSession).where(UserSession.user_id == user_id).order_by(UserSession.created_at.desc())
+        )
+        return list(rows.scalars().all())
+
+    @staticmethod
+    async def revoke_session(db: AsyncSession, user_id: UUID, session_id: UUID) -> None:
+        session = await db.get(UserSession, session_id)
+        if not session or session.user_id != user_id:
+            raise AppError("session not found", 404)
+        if session.revoked_at is None:
+            session.revoked_at = utcnow()
+            await db.commit()
+
+    @staticmethod
+    async def logout_all(db: AsyncSession, user_id: UUID) -> int:
+        now = utcnow()
+        result = await db.execute(
+            update(UserSession)
+            .where(
+                UserSession.user_id == user_id,
+                UserSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
+        await db.commit()
+        return int(result.rowcount or 0)

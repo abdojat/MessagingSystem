@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.utils import utcnow
 from app.db.models import (
+    Channel,
     ChannelCounter,
     ChannelMembership,
     ContentType,
@@ -22,10 +23,25 @@ from app.services.rbac import can_publish, can_read
 class MessageService:
     @staticmethod
     async def publish_message(db: AsyncSession, channel_id: UUID, sender_id: UUID, req: PublishMessageRequest) -> Message:
+        channel = await db.get(Channel, channel_id)
+        if not channel or channel.deleted_at is not None:
+            raise AppError("channel not found", 404)
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": sender_id})
         role = membership.role if membership else None
         if not can_publish(role):
             raise AppError("forbidden", 403)
+
+        if req.client_msg_id is not None:
+            existing = await db.execute(
+                select(Message).where(
+                    Message.channel_id == channel_id,
+                    Message.sender_user_id == sender_id,
+                    Message.client_msg_id == req.client_msg_id,
+                )
+            )
+            existing_message = existing.scalar_one_or_none()
+            if existing_message:
+                return existing_message
 
         seq_result = await db.execute(
             update(ChannelCounter)
@@ -45,11 +61,13 @@ class MessageService:
             content_type=content_type,
             content_text=req.content_text,
             content_json=req.content_json,
+            client_msg_id=req.client_msg_id,
         )
         db.add(message)
         await db.flush()
 
         payload = {
+            "type": "message",
             "message_id": str(message.id),
             "channel_id": str(channel_id),
             "sender_user_id": str(sender_id),
@@ -57,6 +75,7 @@ class MessageService:
             "content_type": content_type.value,
             "content_text": message.content_text,
             "content_json": message.content_json,
+            "client_msg_id": str(message.client_msg_id) if message.client_msg_id else None,
             "created_at": message.created_at.isoformat() if message.created_at else utcnow().isoformat(),
         }
         await enqueue_message_outbox(db, message.id, channel_id, payload)
@@ -72,24 +91,72 @@ class MessageService:
         return message
 
     @staticmethod
-    async def list_messages(db: AsyncSession, channel_id: UUID, user_id: UUID, before_seq_id: int | None, limit: int) -> list[Message]:
-        membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
-        role = membership.role if membership else None
-        if not can_read(role):
-            raise AppError("forbidden", 403)
+    async def get_message(db: AsyncSession, channel_id: UUID, user_id: UUID, message_id: UUID) -> Message:
+        await MessageService._assert_can_read(db, channel_id, user_id)
+        message = await db.get(Message, message_id)
+        if not message or message.channel_id != channel_id:
+            raise AppError("message not found", 404)
+        return message
+
+    @staticmethod
+    async def list_messages(
+        db: AsyncSession,
+        channel_id: UUID,
+        user_id: UUID,
+        before_seq_id: int | None,
+        after_seq_id: int | None,
+        limit: int,
+    ) -> tuple[list[Message], int | None, int | None, bool]:
+        await MessageService._assert_can_read(db, channel_id, user_id)
+        if before_seq_id is not None and after_seq_id is not None:
+            raise AppError("use either before_seq_id or after_seq_id, not both", 422)
 
         stmt = select(Message).where(Message.channel_id == channel_id)
         if before_seq_id is not None:
-            stmt = stmt.where(Message.seq_id < before_seq_id)
-        stmt = stmt.order_by(Message.seq_id.desc()).limit(limit)
-        rows = await db.execute(stmt)
-        return list(rows.scalars().all())
+            stmt = stmt.where(Message.seq_id < before_seq_id).order_by(Message.seq_id.desc())
+        elif after_seq_id is not None:
+            stmt = stmt.where(Message.seq_id > after_seq_id).order_by(Message.seq_id.asc())
+        else:
+            stmt = stmt.order_by(Message.seq_id.desc())
+
+        rows = await db.execute(stmt.limit(limit + 1))
+        values = list(rows.scalars().all())
+        has_more = len(values) > limit
+        page = values[:limit]
+
+        next_before_seq_id = page[-1].seq_id if page and (before_seq_id is not None or after_seq_id is None) else None
+        next_after_seq_id = page[-1].seq_id if page and after_seq_id is not None else None
+        return page, next_before_seq_id, next_after_seq_id, has_more
+
+    @staticmethod
+    async def messages_around(db: AsyncSession, channel_id: UUID, user_id: UUID, seq_id: int, limit: int) -> list[Message]:
+        await MessageService._assert_can_read(db, channel_id, user_id)
+        side = max(1, limit // 2)
+        left_rows = await db.execute(
+            select(Message)
+            .where(Message.channel_id == channel_id, Message.seq_id < seq_id)
+            .order_by(Message.seq_id.desc())
+            .limit(side)
+        )
+        center_rows = await db.execute(
+            select(Message).where(Message.channel_id == channel_id, Message.seq_id == seq_id).limit(1)
+        )
+        right_rows = await db.execute(
+            select(Message)
+            .where(Message.channel_id == channel_id, Message.seq_id > seq_id)
+            .order_by(Message.seq_id.asc())
+            .limit(side)
+        )
+        left = list(reversed(left_rows.scalars().all()))
+        center = list(center_rows.scalars().all())
+        right = list(right_rows.scalars().all())
+        return left + center + right
 
     @staticmethod
     async def mark_seen(db: AsyncSession, channel_id: UUID, user_id: UUID, req: SeenRequest) -> UserChannelState:
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
         role = membership.role if membership else None
-        if role is None:
+        if role not in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member, MembershipRole.pending}:
             raise AppError("not a member", 403)
 
         state = await db.get(UserChannelState, {"channel_id": channel_id, "user_id": user_id})
@@ -118,3 +185,14 @@ class MessageService:
         await db.commit()
         await db.refresh(state)
         return state
+
+    @staticmethod
+    async def _assert_can_read(db: AsyncSession, channel_id: UUID, user_id: UUID) -> MembershipRole:
+        channel = await db.get(Channel, channel_id)
+        if not channel or channel.deleted_at is not None:
+            raise AppError("channel not found", 404)
+        membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
+        role = membership.role if membership else None
+        if not can_read(role):
+            raise AppError("forbidden", 403)
+        return role

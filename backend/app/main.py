@@ -6,7 +6,7 @@ import aio_pika
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
 
-from app.api.routes import auth, channels, health, memberships, messages
+from app.api.routes import auth, channels, events, health, memberships, messages, users
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.logging import configure_logging
@@ -50,9 +50,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Channels Backend", version="0.1.0", lifespan=lifespan)
 
 app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(channels.router)
 app.include_router(memberships.router)
 app.include_router(messages.router)
+app.include_router(events.router)
 app.include_router(health.router)
 
 

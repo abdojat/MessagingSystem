@@ -1,9 +1,20 @@
+from uuid import UUID
+
 from fastapi import APIRouter, HTTPException, Request
 
-from app.api.deps import DBDep
+from app.api.deps import CurrentUserDep, DBDep
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.schemas.auth import LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest, TokenPair
+from app.schemas.auth import (
+    LoginRequest,
+    LogoutAllResponse,
+    LogoutRequest,
+    RefreshRequest,
+    RegisterRequest,
+    SessionListResponse,
+    SessionResponse,
+    TokenPair,
+)
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -57,5 +68,40 @@ async def logout(req: LogoutRequest, db: DBDep) -> dict:
     except (AppError, ValueError) as exc:
         code = exc.status_code if isinstance(exc, AppError) else 401
         msg = exc.message if isinstance(exc, AppError) else str(exc)
+        raise HTTPException(status_code=code, detail=msg) from exc
+    return {"status": "ok"}
+
+
+@router.get("/sessions", response_model=SessionListResponse)
+async def list_sessions(db: DBDep, user: CurrentUserDep) -> SessionListResponse:
+    sessions = await AuthService.list_sessions(db, user.id)
+    return SessionListResponse(
+        items=[
+            SessionResponse(
+                id=s.id,
+                created_at=s.created_at,
+                expires_at=s.expires_at,
+                revoked_at=s.revoked_at,
+                user_agent=s.user_agent,
+                ip=s.ip,
+            )
+            for s in sessions
+        ]
+    )
+
+
+@router.post("/logout_all", response_model=LogoutAllResponse)
+async def logout_all(db: DBDep, user: CurrentUserDep) -> LogoutAllResponse:
+    revoked_count = await AuthService.logout_all(db, user.id)
+    return LogoutAllResponse(revoked_count=revoked_count)
+
+
+@router.delete("/sessions/{session_id}")
+async def revoke_session(session_id: str, db: DBDep, user: CurrentUserDep) -> dict:
+    try:
+        await AuthService.revoke_session(db, user.id, UUID(session_id))
+    except (AppError, ValueError) as exc:
+        code = exc.status_code if isinstance(exc, AppError) else 422
+        msg = exc.message if isinstance(exc, AppError) else "invalid session id"
         raise HTTPException(status_code=code, detail=msg) from exc
     return {"status": "ok"}

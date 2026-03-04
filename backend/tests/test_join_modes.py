@@ -35,17 +35,38 @@ async def test_join_modes_behavior(db_session):
         amqp,
     )
 
-    joined = await ChannelService.join_channel(db_session, amqp, open_channel.id, u.id, JoinRequest())
+    status_joined, joined, _ = await ChannelService.join_channel(db_session, amqp, open_channel.id, u.id, JoinRequest())
+    assert status_joined == "joined"
     assert joined.role == MembershipRole.member
 
-    pending = await ChannelService.join_channel(db_session, amqp, approval_channel.id, u.id, JoinRequest())
+    u3 = User(username="user3", email="u3@example.com", password_hash="x")
+    db_session.add(u3)
+    await db_session.commit()
+    await db_session.refresh(u3)
+
+    status_pending, pending, _ = await ChannelService.join_channel(db_session, amqp, approval_channel.id, u3.id, JoinRequest())
+    assert status_pending == "pending"
     assert pending.role == MembershipRole.pending
+
+    u4 = User(username="user4", email="u4@example.com", password_hash="x")
+    db_session.add(u4)
+    await db_session.commit()
+    await db_session.refresh(u4)
+
+    requires_invite_status, requires_invite_membership, _ = await ChannelService.join_channel(
+        db_session, amqp, invite_channel.id, u4.id, JoinRequest()
+    )
+    assert requires_invite_status == "requires_invite"
+    assert requires_invite_membership is None
 
     invite = await ChannelService.create_invite(
         db_session,
         invite_channel.id,
         owner.id,
-        InviteRequest(invited_user_id=u.id, expires_in_hours=24),
+        InviteRequest(invited_user_id=u4.id, expires_in_hours=24),
     )
-    accepted = await ChannelService.accept_invite(db_session, amqp, invite.token, u.id)
+    status_invite_join, accepted, _ = await ChannelService.join_channel(
+        db_session, amqp, invite_channel.id, u4.id, JoinRequest(invite_token=invite.token)
+    )
+    assert status_invite_join == "joined"
     assert accepted.role == MembershipRole.member

@@ -43,7 +43,7 @@ class WSManager:
             await mark_user_offline(self._redis, uid)
 
     async def run_socket(self, websocket: WebSocket, user_id: UUID) -> None:
-        await websocket.send_json({"type": "hello", "user_id": str(user_id)})
+        await websocket.send_json({"type": "hello", "user_id": str(user_id), "server_time": utcnow().isoformat()})
         await self._send_history(websocket, user_id, overrides=None)
 
         redis_task = asyncio.create_task(self._redis_forward_loop(websocket, user_id))
@@ -108,10 +108,11 @@ class WSManager:
                 messages = msg_rows.scalars().all()
                 if not messages:
                     continue
+                is_truncated = len(messages) >= settings.ws_history_batch_limit
                 payload = {
                     "type": "history",
                     "channel_id": str(channel_id),
-                    "messages": [
+                    "items": [
                         {
                             "id": str(m.id),
                             "channel_id": str(m.channel_id),
@@ -124,6 +125,7 @@ class WSManager:
                         }
                         for m in messages
                     ],
+                    "is_truncated": is_truncated,
                 }
                 await websocket.send_json(payload)
 
@@ -161,7 +163,13 @@ class WSManager:
                 db.add(state)
             if seq_id is not None:
                 state.last_seen_seq_id = int(seq_id)
-            state.last_seen_at = utcnow()
+            if data.get("last_seen_at") is not None:
+                try:
+                    state.last_seen_at = datetime.fromisoformat(data["last_seen_at"])
+                except ValueError:
+                    state.last_seen_at = utcnow()
+            else:
+                state.last_seen_at = utcnow()
             await db.commit()
 
     async def _redis_forward_loop(self, websocket: WebSocket, user_id: UUID) -> None:

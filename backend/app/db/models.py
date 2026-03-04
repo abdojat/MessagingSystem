@@ -71,6 +71,7 @@ class UserSession(Base):
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -84,6 +85,7 @@ class Channel(Base):
     visibility: Mapped[ChannelVisibility] = mapped_column(Enum(ChannelVisibility, name="channel_visibility"), nullable=False)
     join_mode: Mapped[ChannelJoinMode] = mapped_column(Enum(ChannelJoinMode, name="channel_join_mode"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ChannelCounter(Base):
@@ -140,10 +142,12 @@ class Message(Base):
     content_type: Mapped[ContentType] = mapped_column(Enum(ContentType, name="content_type"), nullable=False)
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     content_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    client_msg_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("channel_id", "seq_id", name="uq_messages_channel_seq"),
+        UniqueConstraint("channel_id", "sender_user_id", "client_msg_id", name="uq_messages_client_msg"),
         Index("ix_messages_channel_created_at", "channel_id", "created_at"),
         Index("ix_messages_channel_seq", "channel_id", "seq_id"),
     )

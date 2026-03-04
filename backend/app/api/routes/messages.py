@@ -4,18 +4,20 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.api.deps import CurrentUserDep, DBDep
 from app.core.errors import AppError
-from app.schemas.messages import MessageResponse, PublishMessageRequest, SeenRequest, SeenResponse
+from app.schemas.messages import (
+    MessageAroundResponse,
+    MessageListResponse,
+    MessageResponse,
+    PublishMessageRequest,
+    SeenRequest,
+    SeenResponse,
+)
 from app.services.message_service import MessageService
 
 router = APIRouter(tags=["messages"])
 
 
-@router.post("/channels/{channel_id}/messages", response_model=MessageResponse, status_code=201)
-async def publish_message(channel_id: UUID, req: PublishMessageRequest, db: DBDep, user: CurrentUserDep) -> MessageResponse:
-    try:
-        message = await MessageService.publish_message(db, channel_id, user.id, req)
-    except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+def _to_message_response(message) -> MessageResponse:
     return MessageResponse(
         id=message.id,
         channel_id=message.channel_id,
@@ -24,35 +26,70 @@ async def publish_message(channel_id: UUID, req: PublishMessageRequest, db: DBDe
         content_type=message.content_type.value,
         content_text=message.content_text,
         content_json=message.content_json,
+        client_msg_id=message.client_msg_id,
         created_at=message.created_at,
     )
 
 
-@router.get("/channels/{channel_id}/messages", response_model=list[MessageResponse])
+@router.post("/channels/{channel_id}/messages", response_model=MessageResponse, status_code=201)
+async def publish_message(channel_id: UUID, req: PublishMessageRequest, db: DBDep, user: CurrentUserDep) -> MessageResponse:
+    try:
+        message = await MessageService.publish_message(db, channel_id, user.id, req)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return _to_message_response(message)
+
+
+@router.get("/channels/{channel_id}/messages", response_model=MessageListResponse)
 async def list_messages(
     channel_id: UUID,
     db: DBDep,
     user: CurrentUserDep,
-    before_seq_id: int | None = Query(default=None),
+    before_seq_id: int | None = Query(default=None, ge=1),
+    after_seq_id: int | None = Query(default=None, ge=1),
     limit: int = Query(default=50, ge=1, le=200),
-) -> list[MessageResponse]:
+) -> MessageListResponse:
     try:
-        messages = await MessageService.list_messages(db, channel_id, user.id, before_seq_id, limit)
+        messages, next_before, next_after, has_more = await MessageService.list_messages(
+            db,
+            channel_id,
+            user.id,
+            before_seq_id,
+            after_seq_id,
+            limit,
+        )
     except AppError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    return [
-        MessageResponse(
-            id=m.id,
-            channel_id=m.channel_id,
-            sender_user_id=m.sender_user_id,
-            seq_id=m.seq_id,
-            content_type=m.content_type.value,
-            content_text=m.content_text,
-            content_json=m.content_json,
-            created_at=m.created_at,
-        )
-        for m in messages
-    ]
+    return MessageListResponse(
+        items=[_to_message_response(m) for m in messages],
+        next_before_seq_id=next_before,
+        next_after_seq_id=next_after,
+        has_more=has_more,
+    )
+
+
+@router.get("/channels/{channel_id}/messages/around", response_model=MessageAroundResponse)
+async def list_messages_around(
+    channel_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    seq_id: int = Query(ge=1),
+    limit: int = Query(default=40, ge=3, le=200),
+) -> MessageAroundResponse:
+    try:
+        items = await MessageService.messages_around(db, channel_id, user.id, seq_id, limit)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return MessageAroundResponse(seq_id=seq_id, items=[_to_message_response(m) for m in items])
+
+
+@router.get("/channels/{channel_id}/messages/{message_id}", response_model=MessageResponse)
+async def get_message(channel_id: UUID, message_id: UUID, db: DBDep, user: CurrentUserDep) -> MessageResponse:
+    try:
+        message = await MessageService.get_message(db, channel_id, user.id, message_id)
+    except AppError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return _to_message_response(message)
 
 
 @router.post("/channels/{channel_id}/seen", response_model=SeenResponse)
@@ -65,5 +102,7 @@ async def seen(channel_id: UUID, req: SeenRequest, db: DBDep, user: CurrentUserD
         channel_id=state.channel_id,
         user_id=state.user_id,
         last_seen_seq_id=state.last_seen_seq_id,
+        last_seen_message_id=state.last_seen_message_id,
+        last_seen_at=state.last_seen_at,
         unread_count=state.unread_count,
     )
