@@ -44,6 +44,27 @@ docker compose up --build
 - `GET /channels/{channel_id}/members`
 - `GET /channels/{channel_id}/requests`
 
+`GET /channels` and `GET /channels/{channel_id}` include computed role + permissions for current user:
+```json
+{
+  "id": "2a165037-8143-47d7-aa8c-531aca0d9686",
+  "owner_user_id": "e4a913b3-e992-43e3-b47d-2591232a52de",
+  "name": "engineering",
+  "visibility": "public",
+  "join_mode": "open",
+  "created_at": "2026-03-04T10:00:00+00:00",
+  "my_role": "member",
+  "permissions": {
+    "can_publish": true,
+    "can_invite": false,
+    "can_approve": false,
+    "can_manage_members": false,
+    "can_edit_channel": false,
+    "can_delete_channel": false
+  }
+}
+```
+
 ## Invite Endpoints
 - `POST /channels/{channel_id}/invite`
 - `GET /channels/{channel_id}/invites` (masked token only)
@@ -54,6 +75,11 @@ docker compose up --build
 Invite request validation:
 - Generic link: `{"is_generic": true}`
 - Targeted invite: exactly one of `invited_user_id` or `invited_email`
+
+Invite token policy:
+- `POST /channels/{channel_id}/invite` returns full `token` once at creation time.
+- `GET /channels/{channel_id}/invites` never returns full token; it returns `masked_token` (and legacy `token_masked`) only.
+- To reuse an invite token later, create a new invite instead of revealing old tokens.
 
 ## Message Endpoints
 - `POST /channels/{channel_id}/messages`
@@ -68,7 +94,8 @@ Invite request validation:
   "items": [],
   "next_before_seq_id": 0,
   "next_after_seq_id": 0,
-  "has_more": false
+  "has_more": false,
+  "order": "desc"
 }
 ```
 
@@ -80,12 +107,22 @@ Rules:
 ## Events Endpoint
 - `GET /channels/{channel_id}/events?cursor=&limit=` (owner/admin)
 
+Cursor pagination shape for members/requests/events:
+```json
+{
+  "items": [],
+  "next_cursor": null,
+  "has_more": false
+}
+```
+
 ## WebSocket Protocol (`/ws`)
 Server -> client:
 - `hello`: `{"type":"hello","user_id":"...","server_time":"..."}`
 - `history`: `{"type":"history","channel_id":"...","items":[Message],"is_truncated":false}`
 - `message`: `{"type":"message","channel_id":"...","message":Message}`
 - `membership_update`: `{"type":"membership_update","channel_id":"...","user_id":"...","new_role":"...","reason":"..."}`
+- `channel_updated` (optional): `{"type":"channel_updated","channel_id":"...","patch":{"name":"...","visibility":"public","join_mode":"open"}}`
 
 Client -> server:
 - `sync`: `{"type":"sync","states":[{"channel_id":"...","last_seen_seq_id":12,"last_seen_at":"..."}]}`
@@ -108,7 +145,7 @@ curl -s http://localhost:8000/me -H "Authorization: Bearer $ACCESS"
 CHANNELS=$(curl -s http://localhost:8000/channels -H "Authorization: Bearer $ACCESS")
 CHANNEL_ID=$(echo "$CHANNELS" | jq -r '.[0].id')
 
-# open channel details
+# open channel details (already includes my_role + permissions)
 curl -s http://localhost:8000/channels/$CHANNEL_ID -H "Authorization: Bearer $ACCESS"
 
 # websocket connect (example helper)

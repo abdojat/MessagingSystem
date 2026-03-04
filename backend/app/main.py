@@ -3,16 +3,19 @@ import logging
 from contextlib import asynccontextmanager
 
 import aio_pika
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 
 from app.api.routes import auth, channels, events, health, memberships, messages, users
 from app.core.config import get_settings
-from app.core.errors import AppError
+from app.core.errors import AppError, default_error_code
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
 from app.mq.topology import ensure_topology
 from app.realtime.ws_manager import WSManager
+from app.schemas.common import ErrorResponse
 from app.services.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
@@ -56,6 +59,37 @@ app.include_router(memberships.router)
 app.include_router(messages.router)
 app.include_router(events.router)
 app.include_router(health.router)
+
+
+@app.exception_handler(AppError)
+async def handle_app_error(_: Request, exc: AppError) -> JSONResponse:
+    payload = ErrorResponse(code=exc.code, message=exc.message, details=exc.details).model_dump()
+    return JSONResponse(status_code=exc.status_code, content=payload)
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_error(_: Request, exc: HTTPException) -> JSONResponse:
+    detail = exc.detail
+    if isinstance(detail, dict):
+        code = str(detail.get("code") or default_error_code(exc.status_code))
+        message = str(detail.get("message") or "request failed")
+        details = detail.get("details")
+    else:
+        code = default_error_code(exc.status_code)
+        message = str(detail or "request failed")
+        details = None
+    payload = ErrorResponse(code=code, message=message, details=details).model_dump()
+    return JSONResponse(status_code=exc.status_code, content=payload)
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+    payload = ErrorResponse(
+        code="VALIDATION_ERROR",
+        message="validation error",
+        details={"errors": exc.errors()},
+    ).model_dump()
+    return JSONResponse(status_code=422, content=payload)
 
 
 @app.websocket("/ws")

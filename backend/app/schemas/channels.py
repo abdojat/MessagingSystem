@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
@@ -29,6 +30,8 @@ class ChannelPermissions(BaseModel):
     can_invite: bool
     can_approve: bool
     can_manage_members: bool
+    can_edit_channel: bool
+    can_delete_channel: bool
 
 
 class ChannelResponse(BaseModel):
@@ -53,9 +56,10 @@ class JoinRequest(BaseModel):
 
 
 class JoinOutcomeResponse(BaseModel):
-    status: str
-    role: MembershipRole | None
+    status: Literal["joined", "pending", "requires_invite", "already_member"]
+    role: MembershipRole | Literal["none"]
     message: str
+    channel: ChannelResponse | None = None
 
 
 class InviteRequest(BaseModel):
@@ -89,6 +93,8 @@ class InviteListItem(BaseModel):
     channel_id: UUID
     invited_user_id: UUID | None
     invited_email: EmailStr | None
+    is_generic: bool
+    masked_token: str
     token_masked: str
     created_by_user_id: UUID
     created_at: datetime

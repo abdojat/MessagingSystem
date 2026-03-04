@@ -17,6 +17,141 @@ components:
     SessionId: { name: session_id, in: path, required: true, schema: { type: string, format: uuid } }
     InviteId: { name: invite_id, in: path, required: true, schema: { type: string, format: uuid } }
     MessageId: { name: message_id, in: path, required: true, schema: { type: string, format: uuid } }
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message, details]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details: { type: object, nullable: true, additionalProperties: true }
+    ChannelPermissions:
+      type: object
+      required: [can_publish, can_invite, can_approve, can_manage_members, can_edit_channel, can_delete_channel]
+      properties:
+        can_publish: { type: boolean }
+        can_invite: { type: boolean }
+        can_approve: { type: boolean }
+        can_manage_members: { type: boolean }
+        can_edit_channel: { type: boolean }
+        can_delete_channel: { type: boolean }
+    ChannelResponse:
+      type: object
+      required: [id, owner_user_id, name, visibility, join_mode, created_at, my_role, permissions]
+      properties:
+        id: { type: string, format: uuid }
+        owner_user_id: { type: string, format: uuid }
+        name: { type: string }
+        visibility: { type: string, enum: [public, private] }
+        join_mode: { type: string, enum: [open, invite_only, approval_required] }
+        created_at: { type: string, format: date-time }
+        my_role: { type: string, enum: [owner, admin, member, pending, none] }
+        permissions: { $ref: '#/components/schemas/ChannelPermissions' }
+    MessageResponse:
+      type: object
+      required: [id, channel_id, sender_user_id, seq_id, content_type, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        channel_id: { type: string, format: uuid }
+        sender_user_id: { type: string, format: uuid }
+        seq_id: { type: integer }
+        content_type: { type: string, enum: [text, json] }
+        content_text: { type: string, nullable: true }
+        content_json: { type: object, nullable: true, additionalProperties: true }
+        client_msg_id: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+    MessageListResponse:
+      type: object
+      required: [items, has_more, next_before_seq_id, next_after_seq_id, order]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MessageResponse' }
+        has_more: { type: boolean }
+        next_before_seq_id: { type: integer, nullable: true }
+        next_after_seq_id: { type: integer, nullable: true }
+        order: { type: string, enum: [asc, desc] }
+      description: before_seq_id pages in desc order; after_seq_id pages in asc order.
+    JoinOutcomeResponse:
+      type: object
+      required: [status, role, message]
+      properties:
+        status: { type: string, enum: [joined, pending, requires_invite, already_member] }
+        role: { type: string, enum: [owner, admin, member, pending, none] }
+        message: { type: string }
+        channel:
+          allOf: [ { $ref: '#/components/schemas/ChannelResponse' } ]
+          nullable: true
+    InviteListItem:
+      type: object
+      required: [id, channel_id, invited_user_id, invited_email, is_generic, masked_token, created_by_user_id, created_at, expires_at, accepted_at, revoked_at]
+      properties:
+        id: { type: string, format: uuid }
+        channel_id: { type: string, format: uuid }
+        invited_user_id: { type: string, format: uuid, nullable: true }
+        invited_email: { type: string, nullable: true }
+        is_generic: { type: boolean }
+        masked_token: { type: string }
+        created_by_user_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+    WsHello:
+      type: object
+      required: [type, user_id, server_time]
+      properties:
+        type: { type: string, enum: [hello] }
+        user_id: { type: string, format: uuid }
+        server_time: { type: string, format: date-time }
+    WsHistory:
+      type: object
+      required: [type, channel_id, items, is_truncated]
+      properties:
+        type: { type: string, enum: [history] }
+        channel_id: { type: string, format: uuid }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MessageResponse' }
+        is_truncated: { type: boolean }
+    WsMessage:
+      type: object
+      required: [type, channel_id, message]
+      properties:
+        type: { type: string, enum: [message] }
+        channel_id: { type: string, format: uuid }
+        message: { $ref: '#/components/schemas/MessageResponse' }
+    WsMembershipUpdate:
+      type: object
+      required: [type, channel_id, user_id, new_role, reason]
+      properties:
+        type: { type: string, enum: [membership_update] }
+        channel_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        new_role: { type: string, enum: [owner, admin, member, pending, none] }
+        reason: { type: string }
+    WsSync:
+      type: object
+      required: [type, states]
+      properties:
+        type: { type: string, enum: [sync] }
+        states:
+          type: array
+          items:
+            type: object
+            required: [channel_id]
+            properties:
+              channel_id: { type: string, format: uuid }
+              last_seen_seq_id: { type: integer, nullable: true }
+              last_seen_at: { type: string, format: date-time, nullable: true }
+    WsSeen:
+      type: object
+      required: [type, channel_id, last_seen_seq_id]
+      properties:
+        type: { type: string, enum: [seen] }
+        channel_id: { type: string, format: uuid }
+        last_seen_seq_id: { type: integer }
+        last_seen_at: { type: string, format: date-time, nullable: true }
 
 paths:
   /health:
@@ -113,7 +248,7 @@ paths:
       security: [ { bearerAuth: [] } ]
       summary: List visible channels for current user
       responses:
-        '200': { description: ChannelResponse[] }
+        '200': { description: ChannelResponse[] (with my_role + permissions) }
 
   /channels/{channel_id}:
     get:
@@ -228,7 +363,7 @@ paths:
       summary: List invites (owner/admin)
       parameters: [ { $ref: '#/components/parameters/ChannelId' } ]
       responses:
-        '200': { description: InviteListResponse }
+        '200': { description: InviteListResponse (masked_token only, never full token) }
 
   /channels/{channel_id}/invites/{invite_id}/revoke:
     post:
@@ -342,7 +477,7 @@ paths:
         - { name: after_seq_id, in: query, schema: { type: integer, minimum: 1 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
-        '200': { description: MessageListResponse }
+        '200': { description: MessageListResponse (before_seq_id => desc, after_seq_id => asc) }
         '403': { description: forbidden }
         '404': { description: channel not found }
         '422': { description: both before_seq_id and after_seq_id set }
@@ -405,6 +540,14 @@ paths:
       x-websocket:
         auth: { query_token: true, bearer_header: true }
         accepted_client_messages: [sync, seen]
-        possible_server_messages: [hello, history, message]
+        possible_server_messages: [hello, history, message, membership_update, channel_updated]
+        server_payload_schemas:
+          hello: { $ref: '#/components/schemas/WsHello' }
+          history: { $ref: '#/components/schemas/WsHistory' }
+          message: { $ref: '#/components/schemas/WsMessage' }
+          membership_update: { $ref: '#/components/schemas/WsMembershipUpdate' }
+        client_payload_schemas:
+          sync: { $ref: '#/components/schemas/WsSync' }
+          seen: { $ref: '#/components/schemas/WsSeen' }
       responses:
         '101': { description: Switching Protocols }

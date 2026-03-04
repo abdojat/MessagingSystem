@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -38,6 +38,7 @@ class MessageListResponse(BaseModel):
     next_before_seq_id: int | None
     next_after_seq_id: int | None
     has_more: bool
+    order: Literal["asc", "desc"]
 
 
 class SeenRequest(BaseModel):
@@ -58,7 +59,7 @@ class SeenResponse(BaseModel):
     last_seen_seq_id: int | None
     last_seen_message_id: UUID | None
     last_seen_at: datetime | None
-    unread_count: int
+    unread_count: int | None
 
 
 class MessageAroundResponse(BaseModel):

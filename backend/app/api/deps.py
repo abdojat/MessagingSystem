@@ -6,7 +6,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import AppError
+from app.core.errors import AppError, to_http_exception
 from app.db.models import User
 from app.db.session import get_db
 from app.services.auth_service import AuthService
@@ -25,14 +25,20 @@ async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
 ) -> User:
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="missing bearer token")
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "AUTH_TOKEN_EXPIRED", "message": "missing bearer token", "details": None},
+        )
     token = authorization.split(" ", 1)[1].strip()
     try:
         return await AuthService.get_user_from_access_token(db, token)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail="invalid token") from exc
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "AUTH_TOKEN_EXPIRED", "message": str(exc) or "invalid token", "details": None},
+        ) from exc
 
 
 DBDep = Annotated[AsyncSession, Depends(get_db)]

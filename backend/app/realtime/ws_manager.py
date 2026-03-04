@@ -121,6 +121,7 @@ class WSManager:
                             "content_type": m.content_type.value,
                             "content_text": m.content_text,
                             "content_json": m.content_json,
+                            "client_msg_id": str(m.client_msg_id) if m.client_msg_id else None,
                             "created_at": m.created_at.isoformat(),
                         }
                         for m in messages

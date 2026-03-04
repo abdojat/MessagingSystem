@@ -1,9 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from app.api.deps import AMQPDep, CurrentUserDep, DBDep
-from app.core.errors import AppError
+from app.core.errors import AppError, to_http_exception
 from app.db.models import MembershipRole
 from app.schemas.channels import ChannelCreateRequest, ChannelPatchRequest, ChannelResponse, MyMembershipResponse
 from app.services.channel_service import ChannelService
@@ -16,7 +16,7 @@ async def create_channel(req: ChannelCreateRequest, db: DBDep, user: CurrentUser
     try:
         channel = await ChannelService.create_channel(db, user.id, req, amqp)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return ChannelResponse.model_validate(ChannelService.build_channel_payload(channel, MembershipRole.owner))
 
 
@@ -31,7 +31,7 @@ async def get_channel(channel_id: UUID, db: DBDep, user: CurrentUserDep) -> Chan
     try:
         channel = await ChannelService.get_channel_view(db, channel_id, user.id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return ChannelResponse.model_validate(channel)
 
 
@@ -41,7 +41,7 @@ async def patch_channel(channel_id: UUID, req: ChannelPatchRequest, db: DBDep, u
         channel = await ChannelService.update_channel(db, channel_id, user.id, req, amqp)
         membership = await ChannelService.get_membership(db, channel_id, user.id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return ChannelResponse.model_validate(ChannelService.build_channel_payload(channel, membership.role if membership else None))
 
 
@@ -50,7 +50,7 @@ async def delete_channel(channel_id: UUID, db: DBDep, user: CurrentUserDep, amqp
     try:
         await ChannelService.delete_channel(db, channel_id, user.id, amqp)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return {"status": "ok"}
 
 
@@ -60,7 +60,7 @@ async def my_membership(channel_id: UUID, db: DBDep, user: CurrentUserDep) -> My
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, user.id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     if not membership:
         return MyMembershipResponse(channel_id=channel_id, user_id=user.id, role="none")
     return MyMembershipResponse(

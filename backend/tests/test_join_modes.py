@@ -38,6 +38,9 @@ async def test_join_modes_behavior(db_session):
     status_joined, joined, _ = await ChannelService.join_channel(db_session, amqp, open_channel.id, u.id, JoinRequest())
     assert status_joined == "joined"
     assert joined.role == MembershipRole.member
+    status_already, already_member, _ = await ChannelService.join_channel(db_session, amqp, open_channel.id, u.id, JoinRequest())
+    assert status_already == "already_member"
+    assert already_member.role == MembershipRole.member
 
     u3 = User(username="user3", email="u3@example.com", password_hash="x")
     db_session.add(u3)

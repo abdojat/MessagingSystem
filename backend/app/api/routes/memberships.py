@@ -1,9 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from app.api.deps import AMQPDep, CurrentUserDep, DBDep
-from app.core.errors import AppError
+from app.core.errors import AppError, to_http_exception
 from app.db.models import MembershipRole
 from app.schemas.channels import (
     ChannelMembershipItem,
@@ -26,9 +26,16 @@ router = APIRouter(tags=["memberships"])
 async def join_channel(channel_id: UUID, req: JoinRequest, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> JoinOutcomeResponse:
     try:
         status, membership, message = await ChannelService.join_channel(db, amqp, channel_id, user.id, req)
+        channel_row = await ChannelService.get_channel_or_404(db, channel_id)
+        channel = ChannelService.build_channel_payload(channel_row, membership.role if membership else None)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    return JoinOutcomeResponse(status=status, role=membership.role if membership else None, message=message)
+        raise to_http_exception(exc) from exc
+    return JoinOutcomeResponse(
+        status=status,
+        role=membership.role if membership else "none",
+        message=message,
+        channel=channel,
+    )
 
 
 @router.post("/channels/{channel_id}/leave")
@@ -36,7 +43,7 @@ async def leave_channel(channel_id: UUID, db: DBDep, user: CurrentUserDep, amqp:
     try:
         await ChannelService.leave_channel(db, amqp, channel_id, user.id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return {"status": "ok"}
 
 
@@ -61,7 +68,7 @@ async def list_members(
             limit,
         )
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return ChannelMembershipListResponse(
         items=[
             ChannelMembershipItem(
@@ -90,7 +97,7 @@ async def list_pending_requests(
     try:
         rows, next_cursor, has_more = await ChannelService.list_pending_requests(db, channel_id, user.id, cursor, limit)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return ChannelMembershipListResponse(
         items=[
             ChannelMembershipItem(
@@ -113,7 +120,7 @@ async def create_invite(channel_id: UUID, req: InviteRequest, db: DBDep, user: C
     try:
         invite = await ChannelService.create_invite(db, channel_id, user.id, req)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return InviteResponse(id=invite.id, token=invite.token, channel_id=invite.channel_id, expires_at=invite.expires_at)
 
 
@@ -122,7 +129,7 @@ async def list_invites(channel_id: UUID, db: DBDep, user: CurrentUserDep) -> Inv
     try:
         invites = await ChannelService.list_invites(db, channel_id, user.id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return InviteListResponse(
         items=[
             InviteListItem(
@@ -130,6 +137,8 @@ async def list_invites(channel_id: UUID, db: DBDep, user: CurrentUserDep) -> Inv
                 channel_id=i.channel_id,
                 invited_user_id=i.invited_user_id,
                 invited_email=i.invited_email,
+                is_generic=i.invited_user_id is None and i.invited_email is None,
+                masked_token=ChannelService.mask_token(i.token),
                 token_masked=ChannelService.mask_token(i.token),
                 created_by_user_id=i.created_by_user_id,
                 created_at=i.created_at,
@@ -147,7 +156,7 @@ async def revoke_invite(channel_id: UUID, invite_id: UUID, db: DBDep, user: Curr
     try:
         await ChannelService.revoke_invite(db, channel_id, invite_id, user.id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return {"status": "ok"}
 
 
@@ -162,7 +171,7 @@ async def accept_invite(token: str, db: DBDep, user: CurrentUserDep, amqp: AMQPD
     try:
         membership = await ChannelService.accept_invite(db, amqp, token, user.id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
@@ -171,7 +180,7 @@ async def approve_member(channel_id: UUID, user_id: UUID, db: DBDep, user: Curre
     try:
         membership = await ChannelService.approve_member(db, amqp, channel_id, user.id, user_id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
@@ -180,7 +189,7 @@ async def add_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUs
     try:
         membership = await ChannelService.add_member_direct(db, amqp, channel_id, user.id, user_id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
@@ -189,7 +198,7 @@ async def promote_member(channel_id: UUID, user_id: UUID, db: DBDep, user: Curre
     try:
         membership = await ChannelService.promote_member(db, channel_id, user.id, user_id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
@@ -198,7 +207,7 @@ async def demote_member(channel_id: UUID, user_id: UUID, db: DBDep, user: Curren
     try:
         membership = await ChannelService.demote_member(db, channel_id, user.id, user_id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
@@ -207,5 +216,5 @@ async def remove_member(channel_id: UUID, user_id: UUID, db: DBDep, user: Curren
     try:
         await ChannelService.remove_member(db, amqp, channel_id, user.id, user_id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return {"status": "ok"}

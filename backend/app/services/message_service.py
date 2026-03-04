@@ -25,11 +25,11 @@ class MessageService:
     async def publish_message(db: AsyncSession, channel_id: UUID, sender_id: UUID, req: PublishMessageRequest) -> Message:
         channel = await db.get(Channel, channel_id)
         if not channel or channel.deleted_at is not None:
-            raise AppError("channel not found", 404)
+            raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": sender_id})
         role = membership.role if membership else None
         if not can_publish(role):
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
 
         if req.client_msg_id is not None:
             existing = await db.execute(
@@ -95,7 +95,7 @@ class MessageService:
         await MessageService._assert_can_read(db, channel_id, user_id)
         message = await db.get(Message, message_id)
         if not message or message.channel_id != channel_id:
-            raise AppError("message not found", 404)
+            raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
         return message
 
     @staticmethod
@@ -109,7 +109,7 @@ class MessageService:
     ) -> tuple[list[Message], int | None, int | None, bool]:
         await MessageService._assert_can_read(db, channel_id, user_id)
         if before_seq_id is not None and after_seq_id is not None:
-            raise AppError("use either before_seq_id or after_seq_id, not both", 422)
+            raise AppError("use either before_seq_id or after_seq_id, not both", 422, code="VALIDATION_ERROR")
 
         stmt = select(Message).where(Message.channel_id == channel_id)
         if before_seq_id is not None:
@@ -157,7 +157,7 @@ class MessageService:
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
         role = membership.role if membership else None
         if role not in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member, MembershipRole.pending}:
-            raise AppError("not a member", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
 
         state = await db.get(UserChannelState, {"channel_id": channel_id, "user_id": user_id})
         if not state:
@@ -190,9 +190,9 @@ class MessageService:
     async def _assert_can_read(db: AsyncSession, channel_id: UUID, user_id: UUID) -> MembershipRole:
         channel = await db.get(Channel, channel_id)
         if not channel or channel.deleted_at is not None:
-            raise AppError("channel not found", 404)
+            raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
         role = membership.role if membership else None
         if not can_read(role):
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
         return role

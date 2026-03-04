@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.api.deps import CurrentUserDep, DBDep
 from app.core.config import get_settings
-from app.core.errors import AppError
+from app.core.errors import AppError, to_http_exception
 from app.schemas.auth import (
     LoginRequest,
     LogoutAllResponse,
@@ -25,7 +25,7 @@ async def register(req: RegisterRequest, db: DBDep) -> dict:
     try:
         user = await AuthService.register(db, req)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return {"id": str(user.id), "username": user.username, "email": user.email}
 
 
@@ -41,7 +41,7 @@ async def login(req: LoginRequest, db: DBDep, request: Request) -> TokenPair:
             refresh_ttl_days=settings.jwt_refresh_ttl_days,
         )
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
 
 
 @router.post("/refresh", response_model=TokenPair)
@@ -56,9 +56,12 @@ async def refresh(req: RefreshRequest, db: DBDep, request: Request) -> TokenPair
             refresh_ttl_days=settings.jwt_refresh_ttl_days,
         )
     except (AppError, ValueError) as exc:
-        code = exc.status_code if isinstance(exc, AppError) else 401
-        msg = exc.message if isinstance(exc, AppError) else str(exc)
-        raise HTTPException(status_code=code, detail=msg) from exc
+        if isinstance(exc, AppError):
+            raise to_http_exception(exc) from exc
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "AUTH_TOKEN_EXPIRED", "message": str(exc), "details": None},
+        ) from exc
 
 
 @router.post("/logout")
@@ -66,9 +69,12 @@ async def logout(req: LogoutRequest, db: DBDep) -> dict:
     try:
         await AuthService.logout(db, req.refresh_token)
     except (AppError, ValueError) as exc:
-        code = exc.status_code if isinstance(exc, AppError) else 401
-        msg = exc.message if isinstance(exc, AppError) else str(exc)
-        raise HTTPException(status_code=code, detail=msg) from exc
+        if isinstance(exc, AppError):
+            raise to_http_exception(exc) from exc
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "AUTH_TOKEN_EXPIRED", "message": str(exc), "details": None},
+        ) from exc
     return {"status": "ok"}
 
 
@@ -101,7 +107,10 @@ async def revoke_session(session_id: str, db: DBDep, user: CurrentUserDep) -> di
     try:
         await AuthService.revoke_session(db, user.id, UUID(session_id))
     except (AppError, ValueError) as exc:
-        code = exc.status_code if isinstance(exc, AppError) else 422
-        msg = exc.message if isinstance(exc, AppError) else "invalid session id"
-        raise HTTPException(status_code=code, detail=msg) from exc
+        if isinstance(exc, AppError):
+            raise to_http_exception(exc) from exc
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "VALIDATION_ERROR", "message": "invalid session id", "details": None},
+        ) from exc
     return {"status": "ok"}

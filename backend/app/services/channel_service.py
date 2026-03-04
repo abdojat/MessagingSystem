@@ -22,7 +22,7 @@ from app.db.models import (
 from app.mq.publisher import bind_user_channel, unbind_user_channel
 from app.schemas.channels import ChannelCreateRequest, ChannelPatchRequest, InviteRequest, JoinRequest
 from app.services.event_service import log_event
-from app.services.outbox_service import enqueue_channel_event_outbox
+from app.services.outbox_service import enqueue_channel_event_outbox, enqueue_user_event_outbox
 from app.services.rbac import can_approve, can_demote, can_invite, can_promote, can_publish, can_remove
 
 MEMBERSHIP_CURSOR_SEP = "|"
@@ -35,17 +35,21 @@ class ChannelService:
         return await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
 
     @staticmethod
-    def build_permissions(role: MembershipRole | None) -> dict[str, bool]:
+    def build_permissions(role: MembershipRole | None, channel: Channel | None = None) -> dict[str, bool]:
         is_manage_members = role in {MembershipRole.owner, MembershipRole.admin}
+        can_edit_channel = role == MembershipRole.owner
         return {
             "can_publish": can_publish(role),
             "can_invite": can_invite(role),
             "can_approve": can_approve(role),
             "can_manage_members": is_manage_members,
+            "can_edit_channel": can_edit_channel,
+            "can_delete_channel": can_edit_channel,
         }
 
     @staticmethod
     def build_channel_payload(channel: Channel, role: MembershipRole | None) -> dict:
+        my_role: MembershipRole | str = role if role is not None else "none"
         return {
             "id": channel.id,
             "owner_user_id": channel.owner_user_id,
@@ -53,9 +57,14 @@ class ChannelService:
             "visibility": channel.visibility,
             "join_mode": channel.join_mode,
             "created_at": channel.created_at,
-            "my_role": role if role is not None else "none",
-            "permissions": ChannelService.build_permissions(role),
+            "my_role": my_role,
+            "permissions": ChannelService.build_permissions(role, channel),
         }
+
+    @staticmethod
+    def compute_my_role_and_permissions(channel: Channel, role: MembershipRole | None) -> tuple[MembershipRole | str, dict[str, bool]]:
+        my_role: MembershipRole | str = role if role is not None else "none"
+        return my_role, ChannelService.build_permissions(role, channel)
 
     @staticmethod
     async def create_channel(db: AsyncSession, owner_user_id: UUID, req: ChannelCreateRequest, amqp: aio_pika.RobustConnection) -> Channel:
@@ -113,16 +122,32 @@ class ChannelService:
     async def get_channel_or_404(db: AsyncSession, channel_id: UUID) -> Channel:
         channel = await db.get(Channel, channel_id)
         if not channel or channel.deleted_at is not None:
-            raise AppError("channel not found", 404)
+            raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         return channel
 
     @staticmethod
+    async def _get_channel_with_role(db: AsyncSession, channel_id: UUID, user_id: UUID) -> tuple[Channel | None, MembershipRole | None]:
+        row = await db.execute(
+            select(Channel, ChannelMembership.role)
+            .outerjoin(
+                ChannelMembership,
+                and_(ChannelMembership.channel_id == Channel.id, ChannelMembership.user_id == user_id),
+            )
+            .where(Channel.id == channel_id)
+            .where(Channel.deleted_at.is_(None))
+        )
+        data = row.first()
+        if not data:
+            return None, None
+        return data[0], data[1]
+
+    @staticmethod
     async def get_channel_view(db: AsyncSession, channel_id: UUID, user_id: UUID) -> dict:
-        channel = await ChannelService.get_channel_or_404(db, channel_id)
-        membership = await ChannelService.get_membership(db, channel_id, user_id)
-        role = membership.role if membership else None
+        channel, role = await ChannelService._get_channel_with_role(db, channel_id, user_id)
+        if not channel:
+            raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         if channel.visibility == ChannelVisibility.private and role is None:
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
         return ChannelService.build_channel_payload(channel, role)
 
     @staticmethod
@@ -136,7 +161,7 @@ class ChannelService:
         channel = await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not membership or membership.role != MembershipRole.owner:
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
 
         if req.name is not None:
             channel.name = req.name
@@ -161,13 +186,15 @@ class ChannelService:
             db,
             uuid.uuid4(),
             channel_id,
-            "channel_update",
+            "channel_updated",
             {
-                "type": "channel_update",
+                "type": "channel_updated",
                 "channel_id": str(channel_id),
-                "name": channel.name,
-                "visibility": channel.visibility.value,
-                "join_mode": channel.join_mode.value,
+                "patch": {
+                    "name": channel.name,
+                    "visibility": channel.visibility.value,
+                    "join_mode": channel.join_mode.value,
+                },
             },
         )
         await db.commit()
@@ -184,7 +211,7 @@ class ChannelService:
         channel = await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not membership or membership.role != MembershipRole.owner:
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
 
         channel.deleted_at = utcnow()
         await log_event(
@@ -263,7 +290,7 @@ class ChannelService:
             status = "joined"
             message = "joined channel"
         else:
-            raise AppError("join not allowed", 403)
+            raise AppError("join not allowed", 403, code="FORBIDDEN")
 
         db.add(membership)
         await log_event(
@@ -300,7 +327,7 @@ class ChannelService:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not can_invite(membership.role if membership else None):
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
 
         token = make_invite_token()
         invite = ChannelInvite(
@@ -328,7 +355,7 @@ class ChannelService:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not membership or membership.role not in {MembershipRole.owner, MembershipRole.admin}:
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
         rows = await db.execute(
             select(ChannelInvite).where(ChannelInvite.channel_id == channel_id).order_by(ChannelInvite.created_at.desc())
         )
@@ -339,10 +366,10 @@ class ChannelService:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not membership or membership.role not in {MembershipRole.owner, MembershipRole.admin}:
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
         invite = await db.get(ChannelInvite, invite_id)
         if not invite or invite.channel_id != channel_id:
-            raise AppError("invite not found", 404)
+            raise AppError("invite not found", 404, code="INVITE_INVALID")
         if invite.revoked_at is None:
             invite.revoked_at = utcnow()
             await log_event(
@@ -401,21 +428,23 @@ class ChannelService:
         )
         data = result.first()
         if not data:
-            raise AppError("invite not found", 404)
+            raise AppError("invite not found", 404, code="INVITE_INVALID")
         invite, channel = data
         if channel.deleted_at is not None:
-            raise AppError("channel not found", 404)
-        if invite.revoked_at or invite.expires_at < utcnow():
-            raise AppError("invite invalid", 400)
+            raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
+        if invite.revoked_at:
+            raise AppError("invite revoked", 400, code="INVITE_REVOKED")
+        if invite.expires_at < utcnow():
+            raise AppError("invite expired", 400, code="INVITE_EXPIRED")
         if invite.accepted_at:
             existing = await ChannelService.get_membership(db, invite.channel_id, user_id)
             if existing and existing.role in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member}:
                 return existing
-            raise AppError("invite already accepted", 409)
+            raise AppError("invite already accepted", 409, code="INVITE_ALREADY_ACCEPTED")
         if invite.invited_user_id and invite.invited_user_id != user_id:
-            raise AppError("invite not for user", 403)
+            raise AppError("invite not for user", 403, code="FORBIDDEN")
         if invite.invited_email and user.email != invite.invited_email:
-            raise AppError("invite email mismatch", 403)
+            raise AppError("invite email mismatch", 403, code="FORBIDDEN")
 
         membership = await ChannelService.get_membership(db, invite.channel_id, user_id)
         if membership:
@@ -466,9 +495,9 @@ class ChannelService:
         actor = await ChannelService.get_membership(db, channel_id, actor_id)
         target = await ChannelService.get_membership(db, channel_id, target_id)
         if not actor or not target:
-            raise AppError("membership not found", 404)
+            raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if not can_approve(actor.role):
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
         if target.role != MembershipRole.pending:
             raise AppError("target is not pending", 400)
 
@@ -507,7 +536,7 @@ class ChannelService:
     ) -> ChannelMembership:
         actor = await ChannelService.get_membership(db, channel_id, actor_id)
         if not actor or actor.role not in {MembershipRole.owner, MembershipRole.admin}:
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
 
         target = await ChannelService.get_membership(db, channel_id, target_id)
         if target:
@@ -550,9 +579,9 @@ class ChannelService:
         actor = await ChannelService.get_membership(db, channel_id, actor_id)
         target = await ChannelService.get_membership(db, channel_id, target_id)
         if not actor or not target:
-            raise AppError("membership not found", 404)
+            raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if not can_promote(actor.role, target.role):
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
         target.role = MembershipRole.admin
         await log_event(
             db,
@@ -576,9 +605,9 @@ class ChannelService:
         actor = await ChannelService.get_membership(db, channel_id, actor_id)
         target = await ChannelService.get_membership(db, channel_id, target_id)
         if not actor or not target:
-            raise AppError("membership not found", 404)
+            raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if not can_demote(actor.role, target.role):
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
         target.role = MembershipRole.member
         await log_event(
             db,
@@ -602,9 +631,9 @@ class ChannelService:
         actor = await ChannelService.get_membership(db, channel_id, actor_id)
         target = await ChannelService.get_membership(db, channel_id, target_id)
         if not actor or not target:
-            raise AppError("membership not found", 404)
+            raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if not can_remove(actor.role, target.role):
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
 
         await db.delete(target)
         await log_event(
@@ -638,9 +667,9 @@ class ChannelService:
     ) -> None:
         membership = await ChannelService.get_membership(db, channel_id, user_id)
         if not membership:
-            raise AppError("membership not found", 404)
+            raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if membership.role == MembershipRole.owner:
-            raise AppError("owner cannot leave channel without transferring ownership", 409)
+            raise AppError("owner cannot leave channel without transferring ownership", 409, code="OWNER_CANNOT_LEAVE")
         await db.delete(membership)
         await log_event(
             db,
@@ -759,25 +788,29 @@ class ChannelService:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not membership or membership.role not in {MembershipRole.owner, MembershipRole.admin}:
-            raise AppError("forbidden", 403)
+            raise AppError("forbidden", 403, code="FORBIDDEN")
 
     @staticmethod
     async def _validate_invite(db: AsyncSession, channel_id: UUID, token: str, user_id: UUID) -> ChannelInvite:
         user = await db.get(User, user_id)
         if not user:
-            raise AppError("user not found", 404)
+            raise AppError("invalid invite", 404, code="INVITE_INVALID")
         row = await db.execute(
             select(ChannelInvite).where(ChannelInvite.channel_id == channel_id, ChannelInvite.token == token)
         )
         invite = row.scalar_one_or_none()
         if not invite:
-            raise AppError("invalid invite", 400)
-        if invite.revoked_at or invite.accepted_at or invite.expires_at < utcnow():
-            raise AppError("invite expired or used", 400)
+            raise AppError("invalid invite", 400, code="INVITE_INVALID")
+        if invite.revoked_at:
+            raise AppError("invite revoked", 400, code="INVITE_REVOKED")
+        if invite.accepted_at:
+            raise AppError("invite already accepted", 409, code="INVITE_ALREADY_ACCEPTED")
+        if invite.expires_at < utcnow():
+            raise AppError("invite expired", 400, code="INVITE_EXPIRED")
         if invite.invited_user_id and invite.invited_user_id != user_id:
-            raise AppError("invite is not for this user", 403)
+            raise AppError("invite is not for this user", 403, code="FORBIDDEN")
         if invite.invited_email and invite.invited_email != user.email:
-            raise AppError("invite is not for this email", 403)
+            raise AppError("invite is not for this email", 403, code="FORBIDDEN")
         return invite
 
     @staticmethod
@@ -788,18 +821,27 @@ class ChannelService:
         role: MembershipRole | None,
         reason: str,
     ) -> None:
+        target_payload = {
+            "type": "membership_update",
+            "channel_id": str(channel_id),
+            "user_id": str(user_id),
+            "new_role": role.value if role else "none",
+            "reason": reason,
+        }
         await enqueue_channel_event_outbox(
             db,
             uuid.uuid4(),
             channel_id,
             "membership_update",
-            {
-                "type": "membership_update",
-                "channel_id": str(channel_id),
-                "user_id": str(user_id),
-                "new_role": role.value if role else "none",
-                "reason": reason,
-            },
+            target_payload,
+        )
+        await enqueue_user_event_outbox(
+            db,
+            uuid.uuid4(),
+            channel_id,
+            user_id,
+            "membership_update_target",
+            target_payload,
         )
 
     @staticmethod
@@ -818,4 +860,4 @@ class ChannelService:
             created_raw, id_raw = cursor.split(MEMBERSHIP_CURSOR_SEP, 1)
             return datetime.fromisoformat(created_raw), UUID(id_raw)
         except (ValueError, TypeError) as exc:
-            raise AppError("invalid cursor", 422) from exc
+            raise AppError("invalid cursor", 422, code="VALIDATION_ERROR") from exc

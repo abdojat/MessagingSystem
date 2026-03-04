@@ -1,9 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from app.api.deps import CurrentUserDep, DBDep
-from app.core.errors import AppError
+from app.core.errors import AppError, to_http_exception
 from app.schemas.events import EventListResponse, EventResponse
 from app.services.channel_service import ChannelService
 
@@ -21,7 +21,7 @@ async def list_channel_events(
     try:
         events, next_cursor, has_more = await ChannelService.get_events(db, channel_id, user.id, cursor, limit)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return EventListResponse(
         items=[
             EventResponse(

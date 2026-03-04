@@ -42,3 +42,24 @@ async def enqueue_channel_event_outbox(
     db.add(row)
     await db.flush()
     return row
+
+
+async def enqueue_user_event_outbox(
+    db: AsyncSession,
+    aggregate_id: UUID,
+    channel_id: UUID,
+    user_id: UUID,
+    event_type: str,
+    payload: dict,
+) -> Outbox:
+    row = Outbox(
+        aggregate_type=event_type,
+        aggregate_id=aggregate_id,
+        channel_id=channel_id,
+        payload=payload,
+        routing_key=f"user.{user_id}",
+        status=OutboxStatus.pending,
+    )
+    db.add(row)
+    await db.flush()
+    return row

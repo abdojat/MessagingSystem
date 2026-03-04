@@ -21,6 +21,11 @@ WS_PROTOCOL_DOC = {
             "new_role": "owner|admin|member|pending|none",
             "reason": "approved|removed|promoted|demoted|left|join|added|invite_accepted",
         },
+        "channel_updated": {
+            "type": "channel_updated",
+            "channel_id": "uuid",
+            "patch": {"name": "string?", "visibility": "public|private?", "join_mode": "open|invite_only|approval_required?"},
+        },
     },
     "client_to_server": {
         "sync": {"type": "sync", "states": [{"channel_id": "uuid", "last_seen_seq_id": 0, "last_seen_at": "iso-datetime"}]},

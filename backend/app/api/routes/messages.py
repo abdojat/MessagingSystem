@@ -1,9 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 from app.api.deps import CurrentUserDep, DBDep
-from app.core.errors import AppError
+from app.core.errors import AppError, to_http_exception
 from app.schemas.messages import (
     MessageAroundResponse,
     MessageListResponse,
@@ -36,7 +36,7 @@ async def publish_message(channel_id: UUID, req: PublishMessageRequest, db: DBDe
     try:
         message = await MessageService.publish_message(db, channel_id, user.id, req)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return _to_message_response(message)
 
 
@@ -59,12 +59,13 @@ async def list_messages(
             limit,
         )
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return MessageListResponse(
         items=[_to_message_response(m) for m in messages],
         next_before_seq_id=next_before,
         next_after_seq_id=next_after,
         has_more=has_more,
+        order="asc" if after_seq_id is not None else "desc",
     )
 
 
@@ -79,7 +80,7 @@ async def list_messages_around(
     try:
         items = await MessageService.messages_around(db, channel_id, user.id, seq_id, limit)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return MessageAroundResponse(seq_id=seq_id, items=[_to_message_response(m) for m in items])
 
 
@@ -88,7 +89,7 @@ async def get_message(channel_id: UUID, message_id: UUID, db: DBDep, user: Curre
     try:
         message = await MessageService.get_message(db, channel_id, user.id, message_id)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return _to_message_response(message)
 
 
@@ -97,7 +98,7 @@ async def seen(channel_id: UUID, req: SeenRequest, db: DBDep, user: CurrentUserD
     try:
         state = await MessageService.mark_seen(db, channel_id, user.id, req)
     except AppError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        raise to_http_exception(exc) from exc
     return SeenResponse(
         channel_id=state.channel_id,
         user_id=state.user_id,
