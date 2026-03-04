@@ -5,7 +5,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
 
 COPY backend/pyproject.toml /app/pyproject.toml
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . && \
+    pip install --no-cache-dir pytest pytest-asyncio aiosqlite asgi-lifespan
 
 COPY backend /app
 

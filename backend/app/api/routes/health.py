@@ -14,17 +14,26 @@ async def health(request: Request) -> dict:
     redis_ok = False
     amqp_ok = False
 
-    async with SessionLocal() as db:
-        await db.execute(text("SELECT 1"))
-        db_ok = True
+    try:
+        async with SessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+            db_ok = True
+    except Exception:
+        db_ok = False
 
-    redis: Redis = request.app.state.redis
-    await redis.ping()
-    redis_ok = True
+    try:
+        redis: Redis = request.app.state.redis
+        await redis.ping()
+        redis_ok = True
+    except Exception:
+        redis_ok = False
 
-    amqp: aio_pika.RobustConnection = request.app.state.amqp
-    ch = await amqp.channel()
-    await ch.close()
-    amqp_ok = True
+    try:
+        amqp: aio_pika.RobustConnection = request.app.state.amqp
+        ch = await amqp.channel()
+        await ch.close()
+        amqp_ok = True
+    except Exception:
+        amqp_ok = False
 
     return {"status": "ok", "db": db_ok, "redis": redis_ok, "rabbitmq": amqp_ok}

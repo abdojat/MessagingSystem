@@ -83,7 +83,7 @@ class UploadCreateResponse(BaseModel):
     file_id: UUID
     upload_url: str
     method: str = "PUT"
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = Field(default_factory=dict)
     public_url: str | None = None
 
 
@@ -93,7 +93,7 @@ class SyncChannelCursor(BaseModel):
 
 
 class SyncRequest(BaseModel):
-    channels: list[SyncChannelCursor] = []
+    channels: list[SyncChannelCursor] = Field(default_factory=list)
     since: datetime | None = None
     limit: int = Field(default=200, ge=1, le=500)
 
@@ -120,8 +120,10 @@ class SeenRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_required_marker(self) -> "SeenRequest":
-        if self.last_seen_message_id is None and self.last_seen_seq_id is None:
-            raise ValueError("provide at least one of last_seen_message_id or last_seen_seq_id")
+        has_message = self.last_seen_message_id is not None
+        has_seq = self.last_seen_seq_id is not None
+        if has_message == has_seq:
+            raise ValueError("provide exactly one of last_seen_message_id or last_seen_seq_id")
         return self
 
 

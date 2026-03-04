@@ -87,6 +87,7 @@ class WSManager:
 
     async def _send_history(self, websocket: WebSocket, user_id: UUID, channel_ids: list[str], from_seq_id: int | None = None) -> None:
         async with self._session_factory() as db:
+            sync_items: list[dict[str, Any]] = []
             for channel_id_raw in channel_ids:
                 channel_id = UUID(channel_id_raw)
                 stmt = select(Message).where(Message.channel_id == channel_id, Message.deleted_at.is_(None))
@@ -95,18 +96,18 @@ class WSManager:
                 stmt = stmt.order_by(Message.seq_id.asc()).limit(100)
                 rows = await db.execute(stmt)
                 items = rows.scalars().all()
-                if not items:
-                    continue
-                await websocket.send_json(
-                    build_envelope(
-                        "history",
-                        {
-                            "channel_id": channel_id_raw,
-                            "items": [self._message_payload(m) for m in items],
-                            "is_truncated": len(items) >= 100,
-                        },
-                    )
+                sync_items.extend(self._message_payload(m) for m in items)
+            await websocket.send_json(
+                build_envelope(
+                    "sync",
+                    {
+                        "server_time": utcnow().isoformat(),
+                        "channels": [],
+                        "membership_updates": [],
+                        "messages": sync_items,
+                    },
                 )
+            )
 
     def _message_payload(self, m: Message) -> dict[str, Any]:
         return {
@@ -169,7 +170,6 @@ class WSManager:
         granted = sorted(list(wanted & allowed))
         self._subscriptions[id(websocket)] = set(granted)
         await self._send_history(websocket, user_id, granted, from_seq_id=req.from_seq_id)
-        await websocket.send_json(build_envelope("subscribed", {"channel_ids": granted}, request_id=request_id))
 
     async def _handle_unsubscribe(self, websocket: WebSocket, payload: dict[str, Any], request_id: UUID | None) -> None:
         try:
@@ -181,7 +181,18 @@ class WSManager:
         for channel_id in req.channel_ids:
             current.discard(str(channel_id))
         self._subscriptions[id(websocket)] = current
-        await websocket.send_json(build_envelope("unsubscribed", {"channel_ids": [str(cid) for cid in req.channel_ids]}, request_id=request_id))
+        await websocket.send_json(
+            build_envelope(
+                "sync",
+                {
+                    "server_time": utcnow().isoformat(),
+                    "channels": [],
+                    "membership_updates": [],
+                    "messages": [],
+                },
+                request_id=request_id,
+            )
+        )
 
     async def _handle_resume(self, websocket: WebSocket, user_id: UUID, payload: dict[str, Any], request_id: UUID | None) -> None:
         try:
@@ -191,7 +202,7 @@ class WSManager:
             return
         async with self._session_factory() as db:
             items: list[dict[str, Any]] = []
-            for cursor in req.cursors:
+            for cursor in req.channels:
                 stmt = (
                     select(Message)
                     .where(
@@ -205,7 +216,19 @@ class WSManager:
                 rows = await db.execute(stmt)
                 for message in rows.scalars().all():
                     items.append(self._message_payload(message))
-            await websocket.send_json(build_envelope("sync", {"items": items, "since": req.since.isoformat() if req.since else None}, request_id))
+            await websocket.send_json(
+                build_envelope(
+                    "sync",
+                    {
+                        "server_time": utcnow().isoformat(),
+                        "since": req.since.isoformat() if req.since else None,
+                        "channels": [],
+                        "membership_updates": [],
+                        "messages": items,
+                    },
+                    request_id,
+                )
+            )
 
     async def _apply_seen(self, user_id: UUID, payload: dict[str, Any]) -> None:
         channel_id = UUID(str(payload["channel_id"]))

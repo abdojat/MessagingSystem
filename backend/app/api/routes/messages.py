@@ -75,6 +75,7 @@ async def list_messages(
     before_seq_id: int | None = Query(default=None, ge=1),
     after_seq_id: int | None = Query(default=None, ge=1),
     limit: int = Query(default=50, ge=1, le=200),
+    order: str | None = Query(default=None, pattern="^(asc|desc)$"),
 ) -> MessageListResponse:
     try:
         messages, next_before, next_after, has_more = await MessageService.list_messages(
@@ -84,6 +85,7 @@ async def list_messages(
             before_seq_id,
             after_seq_id,
             limit,
+            order,
         )
     except AppError as exc:
         raise to_http_exception(exc) from exc
@@ -92,7 +94,7 @@ async def list_messages(
         next_before_seq_id=next_before,
         next_after_seq_id=next_after,
         has_more=has_more,
-        order="asc" if after_seq_id is not None else "desc",
+        order=order or ("asc" if after_seq_id is not None else "desc"),
     )
 
 

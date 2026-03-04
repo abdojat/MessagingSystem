@@ -29,7 +29,7 @@ class WSResumeCursor(BaseModel):
 
 
 class WSResumePayload(BaseModel):
-    cursors: list[WSResumeCursor] = Field(default_factory=list)
+    channels: list[WSResumeCursor] = Field(default_factory=list)
     since: datetime | None = None
 
 

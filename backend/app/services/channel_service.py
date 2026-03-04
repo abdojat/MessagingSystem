@@ -313,6 +313,7 @@ class ChannelService:
                 role=MembershipRole.member,
                 approved_at=utcnow(),
                 created_by_user_id=invite.created_by_user_id,
+                invited_by_user_id=invite.created_by_user_id,
             )
             status = "joined"
             message = "joined via invite token"

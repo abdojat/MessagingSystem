@@ -18,10 +18,29 @@ API docs:
 docker compose run --rm backend sh -lc "alembic upgrade head"
 ```
 
+## Seed Demo Data
+```bash
+python scripts/seed_demo.py
+```
+
 ## Tests
 ```bash
 docker compose run --rm backend sh -lc "pytest -q"
 ```
+
+## Environment Variables
+- `DATABASE_URL`
+- `RABBITMQ_URL`
+- `REDIS_URL`
+- `JWT_SECRET`
+- `JWT_ACCESS_TTL_MIN`
+- `JWT_REFRESH_TTL_DAYS`
+- `CORS_ORIGINS` (JSON array, e.g. `["http://localhost:3000","http://localhost:5173"]`)
+- `UPLOAD_MAX_SIZE_BYTES` (supports up to `1073741824` bytes / 1GB)
+- `UPLOADS_BASE_DIR` (docker volume path)
+- `API_V1_PREFIX` (default `/v1`)
+- `OUTBOX_POLL_INTERVAL`
+- `WORKER_ONLINE_SCAN_INTERVAL`
 
 ## Key Endpoints (`/v1`)
 
@@ -105,6 +124,12 @@ curl -s -X POST http://localhost:8000/v1/sync \
   -H "Authorization: Bearer $ACCESS" \
   -H 'Content-Type: application/json' \
   -d '{"channels":[{"channel_id":"'$CHANNEL_ID'","last_seen_seq_id":5}],"since":null,"limit":200}'
+
+# seen marker (exactly one of last_seen_seq_id / last_seen_message_id)
+curl -s -X POST http://localhost:8000/v1/channels/$CHANNEL_ID/seen \
+  -H "Authorization: Bearer $ACCESS" \
+  -H 'Content-Type: application/json' \
+  -d '{"last_seen_seq_id":10}'
 ```
 
 ## WebSocket (`/ws` and `/v1/ws`)
@@ -123,13 +148,12 @@ Client -> server types:
 - `auth` `{ "token": "jwt" }` (only needed when no query/header token used)
 - `subscribe` `{ "channel_ids": ["uuid"], "from_seq_id": 10 }`
 - `unsubscribe` `{ "channel_ids": ["uuid"] }`
-- `resume` `{ "cursors": [{"channel_id":"uuid","last_seen_seq_id":123}], "since": null }`
+- `resume` `{ "channels": [{"channel_id":"uuid","last_seen_seq_id":123}], "since": null }`
 - `seen` `{ "channel_id":"uuid","last_seen_seq_id":10 }`
 - `ping` `{}`
 
 Server -> client types:
 - `hello`
-- `history`
 - `message`
 - `message_updated`
 - `reaction_updated`

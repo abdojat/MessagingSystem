@@ -1,7 +1,7 @@
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -18,10 +18,11 @@ from app.db.models import (
     PinnedMessage,
     Upload,
     UserChannelState,
+    Event,
 )
 from app.schemas.messages import MessagePatchRequest, PublishMessageRequest, SeenRequest, SyncRequest, UploadCreateRequest
 from app.services.event_service import log_event
-from app.services.outbox_service import enqueue_message_outbox
+from app.services.outbox_service import enqueue_channel_event_outbox, enqueue_message_outbox
 from app.services.rbac import can_publish, can_read
 
 
@@ -114,27 +115,45 @@ class MessageService:
         before_seq_id: int | None,
         after_seq_id: int | None,
         limit: int,
+        order: str | None = None,
     ) -> tuple[list[Message], int | None, int | None, bool]:
         await MessageService._assert_can_read(db, channel_id, user_id)
         if before_seq_id is not None and after_seq_id is not None:
             raise AppError("use either before_seq_id or after_seq_id, not both", 422, code="VALIDATION_ERROR")
+        if order is None:
+            order = "asc" if after_seq_id is not None else "desc"
+        if order not in {"asc", "desc"}:
+            raise AppError("order must be asc or desc", 422, code="VALIDATION_ERROR")
 
         stmt = select(Message).where(Message.channel_id == channel_id)
         stmt = stmt.where(Message.deleted_at.is_(None))
         if before_seq_id is not None:
-            stmt = stmt.where(Message.seq_id < before_seq_id).order_by(Message.seq_id.desc())
+            stmt = stmt.where(Message.seq_id < before_seq_id)
+            stmt = stmt.order_by(Message.seq_id.asc() if order == "asc" else Message.seq_id.desc())
         elif after_seq_id is not None:
-            stmt = stmt.where(Message.seq_id > after_seq_id).order_by(Message.seq_id.asc())
+            stmt = stmt.where(Message.seq_id > after_seq_id)
+            stmt = stmt.order_by(Message.seq_id.asc() if order == "asc" else Message.seq_id.desc())
         else:
-            stmt = stmt.order_by(Message.seq_id.desc())
+            stmt = stmt.order_by(Message.seq_id.asc() if order == "asc" else Message.seq_id.desc())
 
         rows = await db.execute(stmt.limit(limit + 1))
         values = list(rows.scalars().all())
         has_more = len(values) > limit
         page = values[:limit]
 
-        next_before_seq_id = page[-1].seq_id if page and (before_seq_id is not None or after_seq_id is None) else None
-        next_after_seq_id = page[-1].seq_id if page and after_seq_id is not None else None
+        if not page:
+            return page, None, None, has_more
+
+        next_before_seq_id = None
+        next_after_seq_id = None
+        if before_seq_id is not None:
+            next_before_seq_id = page[-1].seq_id
+        elif after_seq_id is not None:
+            next_after_seq_id = page[-1].seq_id
+        elif order == "desc":
+            next_before_seq_id = page[-1].seq_id
+        else:
+            next_after_seq_id = page[-1].seq_id
         return page, next_before_seq_id, next_after_seq_id, has_more
 
     @staticmethod
@@ -174,22 +193,38 @@ class MessageService:
             db.add(state)
 
         if req.last_seen_message_id is not None:
-            state.last_seen_message_id = req.last_seen_message_id
+            message = await db.get(Message, req.last_seen_message_id)
+            if not message or message.channel_id != channel_id:
+                raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
+            state.last_seen_message_id = message.id
+            state.last_seen_seq_id = message.seq_id
         if req.last_seen_seq_id is not None:
             state.last_seen_seq_id = req.last_seen_seq_id
+            state.last_seen_message_id = None
         if req.last_seen_at is not None:
             state.last_seen_at = req.last_seen_at
         else:
             state.last_seen_at = utcnow()
 
-        if state.last_seen_seq_id is not None:
-            unread_result = await db.execute(
-                select(func.count(Message.id)).where(
-                    Message.channel_id == channel_id,
-                    Message.seq_id > state.last_seen_seq_id,
-                )
-            )
-            state.unread_count = int(unread_result.scalar_one())
+        counter = await db.get(ChannelCounter, {"channel_id": channel_id})
+        max_seq = int(counter.next_seq) if counter else 0
+        seen_seq = int(state.last_seen_seq_id or 0)
+        state.unread_count = max(0, max_seq - seen_seq)
+        await enqueue_channel_event_outbox(
+            db,
+            uuid4(),
+            channel_id,
+            "seen",
+            {
+                "type": "seen",
+                "channel_id": str(channel_id),
+                "user_id": str(user_id),
+                "last_seen_message_id": str(state.last_seen_message_id) if state.last_seen_message_id else None,
+                "last_seen_seq_id": state.last_seen_seq_id,
+                "unread_count": state.unread_count,
+                "last_seen_at": (state.last_seen_at or utcnow()).isoformat(),
+            },
+        )
 
         await db.commit()
         await db.refresh(state)
@@ -381,6 +416,20 @@ class MessageService:
         if not existing:
             db.add(PinnedMessage(channel_id=channel_id, message_id=message_id, pinned_by_user_id=actor_user_id))
         message.is_pinned = True
+        await db.flush()
+        await enqueue_message_outbox(
+            db,
+            message.id,
+            channel_id,
+            {
+                "type": "message_updated",
+                "op": "pin",
+                "channel_id": str(channel_id),
+                "message_id": str(message_id),
+                "seq_id": message.seq_id,
+                "is_pinned": True,
+            },
+        )
         await db.commit()
 
     @staticmethod
@@ -394,6 +443,20 @@ class MessageService:
         message = await db.get(Message, message_id)
         if message and message.channel_id == channel_id:
             message.is_pinned = False
+            await db.flush()
+            await enqueue_message_outbox(
+                db,
+                message.id,
+                channel_id,
+                {
+                    "type": "message_updated",
+                    "op": "unpin",
+                    "channel_id": str(channel_id),
+                    "message_id": str(message_id),
+                    "seq_id": message.seq_id,
+                    "is_pinned": False,
+                },
+            )
         await db.commit()
 
     @staticmethod
@@ -413,6 +476,8 @@ class MessageService:
         settings = get_settings()
         if req.size_bytes > settings.upload_max_size_bytes:
             raise AppError("file too large", 422, code="VALIDATION_ERROR")
+        if "/" not in req.content_type:
+            raise AppError("invalid content_type", 422, code="VALIDATION_ERROR")
         upload = Upload(
             owner_user_id=actor_user_id,
             filename=req.filename,
@@ -445,6 +510,7 @@ class MessageService:
 
         channels_payload: list[dict] = []
         messages_payload: list[Message] = []
+        membership_updates: list[dict] = []
         remaining = req.limit
         for cid in selected:
             if remaining <= 0:
@@ -463,10 +529,36 @@ class MessageService:
             messages_payload.extend(chunk)
             remaining -= len(chunk)
 
+        if req.since is not None:
+            membership_rows = await db.execute(
+                select(Event)
+                .where(
+                    Event.created_at >= req.since,
+                    or_(
+                        Event.event_type.like("membership.%"),
+                        Event.event_type.like("member.%"),
+                        Event.event_type == "invite.accepted",
+                    ),
+                )
+                .order_by(Event.created_at.asc())
+                .limit(max(1, req.limit))
+            )
+            for event in membership_rows.scalars().all():
+                membership_updates.append(
+                    {
+                        "id": str(event.id),
+                        "channel_id": str(event.channel_id) if event.channel_id else None,
+                        "actor_user_id": str(event.actor_user_id) if event.actor_user_id else None,
+                        "event_type": event.event_type,
+                        "payload": event.payload,
+                        "created_at": event.created_at.isoformat(),
+                    }
+                )
+
         return {
             "server_time": utcnow(),
             "channels": channels_payload,
-            "membership_updates": [],
+            "membership_updates": membership_updates,
             "messages": messages_payload,
         }
 

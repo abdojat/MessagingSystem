@@ -6,6 +6,7 @@ from app.api.deps import AMQPDep, CurrentUserDep, DBDep
 from app.core.errors import AppError, to_http_exception
 from app.schemas.channels import (
     ChannelCreateRequest,
+    ChannelListItem,
     ChannelListResponse,
     ChannelPatchRequest,
     ChannelResponse,
@@ -36,7 +37,7 @@ async def list_channels(
 ) -> ChannelListResponse:
     channels, next_cursor, has_more = await ChannelService.list_channels(db, user.id, cursor, limit)
     return ChannelListResponse(
-        items=[ChannelResponse.model_validate(ch) for ch in channels],
+        items=[ChannelListItem.model_validate(ch) for ch in channels],
         next_cursor=next_cursor,
         has_more=has_more,
     )
