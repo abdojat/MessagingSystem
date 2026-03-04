@@ -27,7 +27,7 @@ async def get_current_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
             status_code=401,
-            detail={"code": "AUTH_TOKEN_EXPIRED", "message": "missing bearer token", "details": None},
+            detail={"code": "AUTH_INVALID", "message": "missing bearer token", "details": None},
         )
     token = authorization.split(" ", 1)[1].strip()
     try:
@@ -37,7 +37,7 @@ async def get_current_user(
     except ValueError as exc:
         raise HTTPException(
             status_code=401,
-            detail={"code": "AUTH_TOKEN_EXPIRED", "message": str(exc) or "invalid token", "details": None},
+            detail={"code": "AUTH_EXPIRED", "message": str(exc) or "invalid token", "details": None},
         ) from exc
 
 

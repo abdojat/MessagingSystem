@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query
 
 from app.api.deps import AMQPDep, CurrentUserDep, DBDep
 from app.core.errors import AppError, to_http_exception
+from app.db.models import ChannelVisibility
 from app.schemas.channels import (
     ChannelCreateRequest,
     ChannelListItem,
@@ -33,9 +34,23 @@ async def list_channels(
     db: DBDep,
     user: CurrentUserDep,
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=50),
+    q: str | None = Query(default=None, min_length=1, max_length=255),
+    visibility: str | None = Query(default=None, pattern="^(public|private)$"),
+    scope: str = Query(default="my", pattern="^(my|discover)$"),
 ) -> ChannelListResponse:
-    channels, next_cursor, has_more = await ChannelService.list_channels(db, user.id, cursor, limit)
+    if q is not None:
+        q = q.strip() or None
+    visibility_enum = ChannelVisibility(visibility) if visibility is not None else None
+    channels, next_cursor, has_more = await ChannelService.list_channels(
+        db,
+        user.id,
+        cursor,
+        limit,
+        q=q,
+        visibility=visibility_enum,
+        scope=scope,
+    )
     return ChannelListResponse(
         items=[ChannelListItem.model_validate(ch) for ch in channels],
         next_cursor=next_cursor,

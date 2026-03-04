@@ -16,7 +16,9 @@ from app.db.models import ChannelMembership, MembershipRole, Message, UserChanne
 from app.mq.publisher import bind_user_channel
 from app.realtime.protocol import (
     WSResumePayload,
+    WSSeenPayload,
     WSSubscribePayload,
+    WSSyncPayload,
     WSUnsubscribePayload,
     build_envelope,
     build_error,
@@ -151,13 +153,44 @@ class WSManager:
                 await self._handle_unsubscribe(websocket, payload, envelope.request_id)
             elif msg_type == "resume":
                 await self._handle_resume(websocket, user_id, payload, envelope.request_id)
+            elif msg_type == "sync":
+                await self._handle_sync_request(websocket, payload, envelope.request_id)
             elif msg_type == "seen":
-                await self._apply_seen(user_id, payload)
-                await websocket.send_json(build_envelope("seen", payload, request_id=envelope.request_id))
+                await self._handle_seen(websocket, user_id, payload, envelope.request_id)
             else:
                 await websocket.send_json(
                     build_error("unsupported message type", "VALIDATION_ERROR", envelope.request_id, details={"type": msg_type})
                 )
+
+    async def _handle_sync_request(self, websocket: WebSocket, payload: dict[str, Any], request_id: UUID | None) -> None:
+        try:
+            req = WSSyncPayload.model_validate(payload)
+        except Exception as exc:
+            await websocket.send_json(build_error("invalid sync payload", "VALIDATION_ERROR", request_id, {"error": str(exc)}))
+            return
+        await websocket.send_json(
+            build_error(
+                "use REST /sync for backfill",
+                "SYNC_USE_REST",
+                request_id,
+                {"states": [state.model_dump(mode="json") for state in req.states]},
+            )
+        )
+
+    async def _handle_seen(
+        self,
+        websocket: WebSocket,
+        user_id: UUID,
+        payload: dict[str, Any],
+        request_id: UUID | None,
+    ) -> None:
+        try:
+            req = WSSeenPayload.model_validate(payload)
+        except Exception as exc:
+            await websocket.send_json(build_error("invalid seen payload", "VALIDATION_ERROR", request_id, {"error": str(exc)}))
+            return
+        await self._apply_seen(user_id, req.model_dump(mode="json"))
+        await websocket.send_json(build_envelope("seen", req.model_dump(mode="json"), request_id=request_id))
 
     async def _handle_subscribe(self, websocket: WebSocket, user_id: UUID, payload: dict[str, Any], request_id: UUID | None) -> None:
         try:

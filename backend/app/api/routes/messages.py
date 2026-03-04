@@ -2,10 +2,10 @@ from uuid import UUID
 
 from pathlib import Path
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
-from app.api.deps import CurrentUserDep, DBDep
+from app.api.deps import CurrentUserDep, DBDep, RedisDep
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.db.models import Upload
@@ -26,6 +26,7 @@ from app.schemas.messages import (
     UploadCreateResponse,
 )
 from app.services.message_service import MessageService
+from app.services.rate_limit_service import RateLimitService
 
 router = APIRouter(tags=["messages"])
 
@@ -59,7 +60,37 @@ async def _to_message_response_with_reactions(db: DBDep, user_id: UUID, message)
 
 
 @router.post("/channels/{channel_id}/messages", response_model=MessageResponse, status_code=201)
-async def publish_message(channel_id: UUID, req: PublishMessageRequest, db: DBDep, user: CurrentUserDep) -> MessageResponse:
+async def publish_message(
+    channel_id: UUID,
+    req: PublishMessageRequest,
+    db: DBDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
+) -> MessageResponse:
+    burst_retry = await RateLimitService.hit(
+        redis,
+        f"rl:msg:{user.id}:{channel_id}:burst",
+        limit=40,
+        window_seconds=1,
+    )
+    if burst_retry is not None:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "RATE_LIMITED", "message": "rate limit exceeded", "details": {"retry_after_seconds": burst_retry}},
+            headers={"Retry-After": str(burst_retry)},
+        )
+    sustained_retry = await RateLimitService.hit(
+        redis,
+        f"rl:msg:{user.id}:{channel_id}:sustained",
+        limit=200,
+        window_seconds=10,
+    )
+    if sustained_retry is not None:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "RATE_LIMITED", "message": "rate limit exceeded", "details": {"retry_after_seconds": sustained_retry}},
+            headers={"Retry-After": str(sustained_retry)},
+        )
     try:
         message = await MessageService.publish_message(db, channel_id, user.id, req)
     except AppError as exc:
@@ -67,7 +98,22 @@ async def publish_message(channel_id: UUID, req: PublishMessageRequest, db: DBDe
     return await _to_message_response_with_reactions(db, user.id, message)
 
 
-@router.get("/channels/{channel_id}/messages", response_model=MessageListResponse)
+@router.get(
+    "/channels/{channel_id}/messages",
+    response_model=MessageListResponse,
+    openapi_extra={
+        "examples": {
+            "before_seq": {
+                "summary": "Fetch older messages",
+                "value": {"before_seq_id": 120, "limit": 50, "order": "desc"},
+            },
+            "after_seq": {
+                "summary": "Fetch newer messages",
+                "value": {"after_seq_id": 120, "limit": 50, "order": "asc"},
+            },
+        }
+    },
+)
 async def list_messages(
     channel_id: UUID,
     db: DBDep,
@@ -75,7 +121,7 @@ async def list_messages(
     before_seq_id: int | None = Query(default=None, ge=1),
     after_seq_id: int | None = Query(default=None, ge=1),
     limit: int = Query(default=50, ge=1, le=200),
-    order: str | None = Query(default=None, pattern="^(asc|desc)$"),
+    order: str = Query(default="desc", pattern="^(asc|desc)$"),
 ) -> MessageListResponse:
     try:
         messages, next_before, next_after, has_more = await MessageService.list_messages(
@@ -94,7 +140,7 @@ async def list_messages(
         next_before_seq_id=next_before,
         next_after_seq_id=next_after,
         has_more=has_more,
-        order=order or ("asc" if after_seq_id is not None else "desc"),
+        order=order,
     )
 
 
@@ -104,10 +150,16 @@ async def list_messages_around(
     db: DBDep,
     user: CurrentUserDep,
     seq_id: int = Query(ge=1),
-    limit: int = Query(default=40, ge=3, le=200),
+    limit: int | None = Query(default=None, ge=3, le=200),
+    limit_before: int = Query(default=30, ge=0, le=100),
+    limit_after: int = Query(default=30, ge=0, le=100),
 ) -> MessageAroundResponse:
+    if limit is not None:
+        side = max(1, limit // 2)
+        limit_before = side
+        limit_after = side
     try:
-        items = await MessageService.messages_around(db, channel_id, user.id, seq_id, limit)
+        items = await MessageService.messages_around(db, channel_id, user.id, seq_id, limit_before, limit_after)
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return MessageAroundResponse(
@@ -259,7 +311,7 @@ async def put_upload_content(file_id: UUID, request: Request, db: DBDep, user: C
 @router.get("/uploads/{file_id}/content")
 async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> Response:
     upload = await db.get(Upload, file_id)
-    if not upload or upload.owner_user_id != user.id:
+    if not upload or not await MessageService.can_access_upload(db, user.id, file_id):
         raise to_http_exception(AppError("upload not found", 404, code="NOT_FOUND"))
     settings = get_settings()
     path = Path(settings.uploads_base_dir) / upload.storage_path
@@ -268,7 +320,23 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
     return Response(content=path.read_bytes(), media_type=upload.content_type)
 
 
-@router.post("/sync", response_model=SyncResponse)
+@router.post(
+    "/sync",
+    response_model=SyncResponse,
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "example": {
+                        "channels": [{"channel_id": "00000000-0000-0000-0000-000000000001", "last_seen_seq_id": 42}],
+                        "since": None,
+                        "limit": 500,
+                    }
+                }
+            }
+        }
+    },
+)
 async def sync(req: SyncRequest, db: DBDep, user: CurrentUserDep) -> SyncResponse:
     try:
         payload = await MessageService.sync(db, user.id, req)
@@ -276,7 +344,7 @@ async def sync(req: SyncRequest, db: DBDep, user: CurrentUserDep) -> SyncRespons
         raise to_http_exception(exc) from exc
     return SyncResponse(
         server_time=payload["server_time"],
-        channels=payload["channels"],
+        channel_updates=payload["channel_updates"],
         membership_updates=payload["membership_updates"],
         messages=[await _to_message_response_with_reactions(db, user.id, m) for m in payload["messages"]],
     )

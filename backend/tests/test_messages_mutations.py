@@ -1,9 +1,10 @@
 import uuid
 
 import pytest
+from sqlalchemy import select, func
 
 from app.core.errors import AppError
-from app.db.models import ChannelMembership, MembershipRole, User
+from app.db.models import ChannelMembership, MembershipRole, Message, User
 from app.schemas.channels import ChannelCreateRequest
 from app.schemas.messages import MessagePatchRequest, PublishMessageRequest
 from app.services.channel_service import ChannelService
@@ -40,6 +41,8 @@ async def test_publish_idempotency_by_client_msg_id(db_session):
     )
     assert first.id == second.id
     assert first.seq_id == second.seq_id == 1
+    count_result = await db_session.execute(select(func.count(Message.id)).where(Message.channel_id == channel.id))
+    assert int(count_result.scalar_one() or 0) == 1
 
 
 @pytest.mark.asyncio

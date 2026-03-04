@@ -1,7 +1,9 @@
 from pathlib import Path
+import hashlib
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -49,6 +51,7 @@ class MessageService:
             if existing_message:
                 return existing_message
 
+        attachments = await MessageService._normalize_attachments(db, sender_id, req.attachments)
         seq_result = await db.execute(
             update(ChannelCounter)
             .where(ChannelCounter.channel_id == channel_id)
@@ -69,7 +72,7 @@ class MessageService:
             content_json=req.content_json,
             reply_to_message_id=req.reply_to_message_id,
             reply_to_seq_id=req.reply_to_seq_id,
-            attachments=req.attachments,
+            attachments=attachments,
             client_msg_id=req.client_msg_id,
         )
         db.add(message)
@@ -84,6 +87,7 @@ class MessageService:
             "content_type": content_type.value,
             "content_text": message.content_text,
             "content_json": message.content_json,
+            "attachments": message.attachments,
             "client_msg_id": str(message.client_msg_id) if message.client_msg_id else None,
             "created_at": message.created_at.isoformat() if message.created_at else utcnow().isoformat(),
         }
@@ -95,7 +99,22 @@ class MessageService:
             channel_id=channel_id,
             actor_user_id=sender_id,
         )
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            if req.client_msg_id is not None:
+                conflict = await db.execute(
+                    select(Message).where(
+                        Message.channel_id == channel_id,
+                        Message.sender_user_id == sender_id,
+                        Message.client_msg_id == req.client_msg_id,
+                    )
+                )
+                existing_message = conflict.scalar_one_or_none()
+                if existing_message is not None:
+                    return existing_message
+            raise AppError("message conflict", 409, code="CONFLICT") from exc
         await db.refresh(message)
         return message
 
@@ -119,11 +138,11 @@ class MessageService:
     ) -> tuple[list[Message], int | None, int | None, bool]:
         await MessageService._assert_can_read(db, channel_id, user_id)
         if before_seq_id is not None and after_seq_id is not None:
-            raise AppError("use either before_seq_id or after_seq_id, not both", 422, code="VALIDATION_ERROR")
+            raise AppError("use either before_seq_id or after_seq_id, not both", 400, code="PAGINATION_INVALID")
         if order is None:
-            order = "asc" if after_seq_id is not None else "desc"
+            order = "desc"
         if order not in {"asc", "desc"}:
-            raise AppError("order must be asc or desc", 422, code="VALIDATION_ERROR")
+            raise AppError("order must be asc or desc", 400, code="VALIDATION_ERROR")
 
         stmt = select(Message).where(Message.channel_id == channel_id)
         stmt = stmt.where(Message.deleted_at.is_(None))
@@ -146,25 +165,27 @@ class MessageService:
 
         next_before_seq_id = None
         next_after_seq_id = None
-        if before_seq_id is not None:
-            next_before_seq_id = page[-1].seq_id
-        elif after_seq_id is not None:
-            next_after_seq_id = page[-1].seq_id
-        elif order == "desc":
-            next_before_seq_id = page[-1].seq_id
+        if order == "desc":
+            next_before_seq_id = min(m.seq_id for m in page)
         else:
-            next_after_seq_id = page[-1].seq_id
+            next_after_seq_id = max(m.seq_id for m in page)
         return page, next_before_seq_id, next_after_seq_id, has_more
 
     @staticmethod
-    async def messages_around(db: AsyncSession, channel_id: UUID, user_id: UUID, seq_id: int, limit: int) -> list[Message]:
+    async def messages_around(
+        db: AsyncSession,
+        channel_id: UUID,
+        user_id: UUID,
+        seq_id: int,
+        limit_before: int,
+        limit_after: int,
+    ) -> list[Message]:
         await MessageService._assert_can_read(db, channel_id, user_id)
-        side = max(1, limit // 2)
         left_rows = await db.execute(
             select(Message)
             .where(Message.channel_id == channel_id, Message.seq_id < seq_id, Message.deleted_at.is_(None))
             .order_by(Message.seq_id.desc())
-            .limit(side)
+            .limit(limit_before)
         )
         center_rows = await db.execute(
             select(Message).where(Message.channel_id == channel_id, Message.seq_id == seq_id, Message.deleted_at.is_(None)).limit(1)
@@ -173,7 +194,7 @@ class MessageService:
             select(Message)
             .where(Message.channel_id == channel_id, Message.seq_id > seq_id, Message.deleted_at.is_(None))
             .order_by(Message.seq_id.asc())
-            .limit(side)
+            .limit(limit_after)
         )
         left = list(reversed(left_rows.scalars().all()))
         center = list(center_rows.scalars().all())
@@ -329,7 +350,7 @@ class MessageService:
             select(MessageReaction.emoji).where(
                 MessageReaction.message_id == message_id,
                 MessageReaction.user_id == actor_user_id,
-            )
+            ).order_by(MessageReaction.emoji.asc())
         )
         return {
             "counts": {emoji: int(count) for emoji, count in rows.all()},
@@ -475,9 +496,12 @@ class MessageService:
     async def create_upload(db: AsyncSession, actor_user_id: UUID, req: UploadCreateRequest) -> Upload:
         settings = get_settings()
         if req.size_bytes > settings.upload_max_size_bytes:
-            raise AppError("file too large", 422, code="VALIDATION_ERROR")
+            raise AppError("file too large", 400, code="VALIDATION_ERROR")
         if "/" not in req.content_type:
-            raise AppError("invalid content_type", 422, code="VALIDATION_ERROR")
+            raise AppError("invalid content_type", 400, code="VALIDATION_ERROR")
+        allowed_prefixes = ("image/", "video/", "audio/", "text/", "application/json", "application/pdf")
+        if not req.content_type.startswith(allowed_prefixes):
+            raise AppError("content_type not allowed", 400, code="VALIDATION_ERROR")
         upload = Upload(
             owner_user_id=actor_user_id,
             filename=req.filename,
@@ -496,7 +520,8 @@ class MessageService:
     async def sync(db: AsyncSession, actor_user_id: UUID, req: SyncRequest) -> dict:
         from app.services.channel_service import ChannelService
 
-        channel_ids = [entry.channel_id for entry in req.channels]
+        channel_state = {entry.channel_id: int(entry.last_seen_seq_id or 0) for entry in req.channels}
+        channel_ids = list(channel_state.keys())
         membership_rows = await db.execute(
             select(ChannelMembership.channel_id, ChannelMembership.role)
             .where(ChannelMembership.user_id == actor_user_id)
@@ -504,33 +529,35 @@ class MessageService:
         )
         membership_map = {cid: role for cid, role in membership_rows.all()}
         if channel_ids:
-            selected = [cid for cid in channel_ids if cid in membership_map]
+            selected = sorted([cid for cid in channel_ids if cid in membership_map], key=lambda v: str(v))
         else:
-            selected = list(membership_map.keys())
+            selected = sorted(list(membership_map.keys()), key=lambda v: str(v))
 
-        channels_payload: list[dict] = []
-        messages_payload: list[Message] = []
-        membership_updates: list[dict] = []
-        remaining = req.limit
+        channel_updates: list[dict] = []
         for cid in selected:
-            if remaining <= 0:
-                break
             channel = await ChannelService.get_channel_or_404(db, cid)
-            channels_payload.append(await ChannelService._enrich_channel_payload(db, channel, actor_user_id, membership_map[cid]))
-            cursor = next((c for c in req.channels if c.channel_id == cid), None)
-            seq_marker = cursor.last_seen_seq_id if cursor and cursor.last_seen_seq_id is not None else 0
+            channel_updates.append(
+                {
+                    "channel_id": channel.id,
+                    "patch": await ChannelService._enrich_channel_payload(db, channel, actor_user_id, membership_map[cid]),
+                    "updated_at": channel.updated_at,
+                }
+            )
+
+        messages_payload: list[Message] = []
+        for cid in selected:
+            seq_marker = channel_state.get(cid, 0)
             rows = await db.execute(
                 select(Message)
                 .where(Message.channel_id == cid, Message.seq_id > seq_marker, Message.deleted_at.is_(None))
                 .order_by(Message.seq_id.asc())
-                .limit(remaining)
             )
-            chunk = list(rows.scalars().all())
-            messages_payload.extend(chunk)
-            remaining -= len(chunk)
+            messages_payload.extend(list(rows.scalars().all()))
+        messages_payload = sorted(messages_payload, key=lambda m: (str(m.channel_id), int(m.seq_id)))[: req.limit]
 
+        membership_updates: list[dict] = []
         if req.since is not None:
-            membership_rows = await db.execute(
+            membership_event_rows = await db.execute(
                 select(Event)
                 .where(
                     Event.created_at >= req.since,
@@ -543,21 +570,26 @@ class MessageService:
                 .order_by(Event.created_at.asc())
                 .limit(max(1, req.limit))
             )
-            for event in membership_rows.scalars().all():
+            for event in membership_event_rows.scalars().all():
+                payload = event.payload or {}
+                channel_id_raw = payload.get("channel_id") or event.channel_id
+                user_id_raw = payload.get("user_id") or event.actor_user_id
+                if not channel_id_raw or not user_id_raw:
+                    continue
+                new_role = str(payload.get("new_role") or "none")
                 membership_updates.append(
                     {
-                        "id": str(event.id),
-                        "channel_id": str(event.channel_id) if event.channel_id else None,
-                        "actor_user_id": str(event.actor_user_id) if event.actor_user_id else None,
-                        "event_type": event.event_type,
-                        "payload": event.payload,
-                        "created_at": event.created_at.isoformat(),
+                        "channel_id": channel_id_raw,
+                        "user_id": user_id_raw,
+                        "new_role": new_role if new_role in {"owner", "admin", "member", "pending", "none"} else "none",
+                        "reason": str(payload.get("reason") or event.event_type),
+                        "updated_at": event.created_at,
                     }
                 )
 
         return {
             "server_time": utcnow(),
-            "channels": channels_payload,
+            "channel_updates": channel_updates,
             "membership_updates": membership_updates,
             "messages": messages_payload,
         }
@@ -574,7 +606,11 @@ class MessageService:
         if not upload or upload.owner_user_id != actor_user_id:
             raise AppError("upload not found", 404, code="NOT_FOUND")
         if len(content) != upload.size_bytes:
-            raise AppError("uploaded size mismatch", 422, code="VALIDATION_ERROR")
+            raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
+        if upload.checksum:
+            digest = hashlib.sha256(content).hexdigest()
+            if digest != upload.checksum:
+                raise AppError("checksum mismatch", 400, code="VALIDATION_ERROR")
 
         base_dir = Path(settings.uploads_base_dir)
         full_path = base_dir / upload.storage_path
@@ -584,3 +620,63 @@ class MessageService:
         await db.commit()
         await db.refresh(upload)
         return upload
+
+    @staticmethod
+    async def can_access_upload(db: AsyncSession, actor_user_id: UUID, file_id: UUID) -> bool:
+        upload = await db.get(Upload, file_id)
+        if not upload:
+            return False
+        if upload.owner_user_id == actor_user_id:
+            return True
+        memberships = await db.execute(
+            select(ChannelMembership.channel_id).where(
+                ChannelMembership.user_id == actor_user_id,
+                ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+            )
+        )
+        member_channels = set(memberships.scalars().all())
+        if not member_channels:
+            return False
+        rows = await db.execute(select(Message).where(Message.deleted_at.is_(None), Message.attachments.is_not(None)))
+        file_id_raw = str(file_id)
+        for message in rows.scalars().all():
+            if message.channel_id not in member_channels:
+                continue
+            for item in (message.attachments or []):
+                item_file_id = str(item.get("file_id") or "")
+                if item_file_id == file_id_raw:
+                    return True
+        return False
+
+    @staticmethod
+    async def _normalize_attachments(
+        db: AsyncSession,
+        actor_user_id: UUID,
+        attachments: list[dict] | None,
+    ) -> list[dict] | None:
+        if not attachments:
+            return attachments
+        normalized: list[dict] = []
+        for raw_item in attachments:
+            file_id_raw = raw_item.get("file_id")
+            if not file_id_raw:
+                raise AppError("attachment.file_id is required", 400, code="VALIDATION_ERROR")
+            try:
+                file_id = UUID(str(file_id_raw))
+            except ValueError as exc:
+                raise AppError("invalid attachment file_id", 400, code="VALIDATION_ERROR") from exc
+            upload = await db.get(Upload, file_id)
+            if upload is None:
+                raise AppError("attachment file not found", 404, code="NOT_FOUND")
+            if upload.owner_user_id != actor_user_id:
+                raise AppError("forbidden attachment", 403, code="FORBIDDEN")
+            normalized.append(
+                {
+                    "file_id": str(file_id),
+                    "content_type": upload.content_type,
+                    "filename": upload.filename,
+                    "size_bytes": int(upload.size_bytes),
+                    "url": f"/v1/uploads/{file_id}/content",
+                }
+            )
+        return normalized

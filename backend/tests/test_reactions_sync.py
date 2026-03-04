@@ -81,3 +81,4 @@ async def test_sync_respects_limit_and_seen_seq(db_session):
     assert len(payload["messages"]) == 2
     assert payload["messages"][0].seq_id == 3
     assert payload["messages"][1].seq_id == 4
+    assert payload["channel_updates"]

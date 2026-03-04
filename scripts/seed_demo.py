@@ -31,10 +31,12 @@ def main() -> None:
         alice = register_or_login(client, "alice", "alice@example.com")
         bob = register_or_login(client, "bob", "bob@example.com")
         carol = register_or_login(client, "carol", "carol@example.com")
+        dave = register_or_login(client, "dave", "dave@example.com")
 
         alice_h = {"Authorization": f"Bearer {alice['access_token']}"}
         bob_h = {"Authorization": f"Bearer {bob['access_token']}"}
         carol_h = {"Authorization": f"Bearer {carol['access_token']}"}
+        dave_h = {"Authorization": f"Bearer {dave['access_token']}"}
 
         public_channel = client.post(
             f"{BASE}/channels",
@@ -48,30 +50,18 @@ def main() -> None:
             json={"name": "private-approval", "visibility": "private", "join_mode": "approval_required"},
         ).json()
 
-        invite_only_channel = client.post(
-            f"{BASE}/channels",
-            headers=alice_h,
-            json={"name": "private-invite", "visibility": "private", "join_mode": "invite_only"},
-        ).json()
-
-        client.post(f"{BASE}/channels/{public_channel['id']}/join", headers=bob_h, json={}).raise_for_status()
-
-        # Pending flow + approval
-        client.post(f"{BASE}/channels/{private_channel['id']}/join", headers=carol_h, json={}).raise_for_status()
+        client.post(f"{BASE}/channels/{public_channel['id']}/join", headers=bob_h, json={}).raise_for_status()  # member
         client.post(
-            f"{BASE}/channels/{private_channel['id']}/members/{carol['user_id']}/approve",
+            f"{BASE}/channels/{public_channel['id']}/members/{bob['user_id']}/promote",
+            headers=alice_h,
+        ).raise_for_status()  # admin
+
+        client.post(f"{BASE}/channels/{public_channel['id']}/join", headers=carol_h, json={}).raise_for_status()  # member
+        client.post(f"{BASE}/channels/{private_channel['id']}/join", headers=dave_h, json={}).raise_for_status()  # pending
+        client.post(
+            f"{BASE}/channels/{private_channel['id']}/members/{dave['user_id']}/approve",
             headers=alice_h,
         ).raise_for_status()
-
-        # Invite-only flow
-        invite = client.post(
-            f"{BASE}/channels/{invite_only_channel['id']}/invite",
-            headers=alice_h,
-            json={"invited_user_id": bob["user_id"], "expires_in_hours": 24},
-        )
-        invite.raise_for_status()
-        token = invite.json()["token"]
-        client.post(f"{BASE}/invites/{token}/accept", headers=bob_h).raise_for_status()
 
         client.post(
             f"{BASE}/channels/{public_channel['id']}/messages",
@@ -91,11 +81,15 @@ def main() -> None:
         print(
             json.dumps(
                 {
-                    "users": {"alice": alice["user_id"], "bob": bob["user_id"], "carol": carol["user_id"]},
+                    "users": {
+                        "alice_owner": alice["user_id"],
+                        "bob_admin": bob["user_id"],
+                        "carol_member": carol["user_id"],
+                        "dave_pending_then_member": dave["user_id"],
+                    },
                     "public_channel": public_channel["id"],
                     "private_channel": private_channel["id"],
-                    "invite_only_channel": invite_only_channel["id"],
-                    "history_count": len(history.json()),
+                    "history_count": len(history.json().get("items", [])),
                 },
                 indent=2,
             )

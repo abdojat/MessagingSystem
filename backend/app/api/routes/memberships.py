@@ -55,7 +55,7 @@ async def list_members(
     role: MembershipRole | None = Query(default=None),
     q: str | None = Query(default=None, min_length=1, max_length=255),
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=200),
 ) -> ChannelMembershipListResponse:
     try:
         rows, next_cursor, has_more = await ChannelService.list_members(
@@ -93,11 +93,20 @@ async def list_pending_requests(
     channel_id: UUID,
     db: DBDep,
     user: CurrentUserDep,
+    q: str | None = Query(default=None, min_length=1, max_length=255),
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=200),
 ) -> ChannelMembershipListResponse:
     try:
-        rows, next_cursor, has_more = await ChannelService.list_pending_requests(db, channel_id, user.id, cursor, limit)
+        rows, next_cursor, has_more = await ChannelService.list_members(
+            db=db,
+            channel_id=channel_id,
+            actor_user_id=user.id,
+            role=MembershipRole.pending,
+            q=q.strip() if q else None,
+            cursor=cursor,
+            limit=limit,
+        )
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return ChannelMembershipListResponse(
@@ -129,9 +138,23 @@ async def create_invite(channel_id: UUID, req: InviteRequest, db: DBDep, user: C
 
 
 @router.get("/channels/{channel_id}/invites", response_model=InviteListResponse)
-async def list_invites(channel_id: UUID, db: DBDep, user: CurrentUserDep) -> InviteListResponse:
+async def list_invites(
+    channel_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    status: str | None = Query(default=None, pattern="^(active|revoked|accepted|expired)$"),
+) -> InviteListResponse:
     try:
-        invites = await ChannelService.list_invites(db, channel_id, user.id)
+        invites, next_cursor, has_more = await ChannelService.list_invites(
+            db,
+            channel_id,
+            user.id,
+            cursor=cursor,
+            limit=limit,
+            status=status,
+        )
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return InviteListResponse(
@@ -151,7 +174,9 @@ async def list_invites(channel_id: UUID, db: DBDep, user: CurrentUserDep) -> Inv
                 revoked_at=i.revoked_at,
             )
             for i in invites
-        ]
+        ],
+        next_cursor=next_cursor,
+        has_more=has_more,
     )
 
 

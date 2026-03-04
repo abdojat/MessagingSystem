@@ -86,7 +86,7 @@ async def handle_http_error(_: Request, exc: HTTPException) -> JSONResponse:
         message = str(detail or "request failed")
         details = None
     payload = ErrorResponse(code=code, message=message, details=details).model_dump()
-    return JSONResponse(status_code=exc.status_code, content=payload)
+    return JSONResponse(status_code=exc.status_code, content=payload, headers=exc.headers)
 
 
 @app.exception_handler(RequestValidationError)
@@ -96,7 +96,7 @@ async def handle_validation_error(_: Request, exc: RequestValidationError) -> JS
         message="validation error",
         details={"errors": exc.errors()},
     ).model_dump()
-    return JSONResponse(status_code=422, content=payload)
+    return JSONResponse(status_code=400, content=payload)
 
 
 @app.exception_handler(Exception)
@@ -125,20 +125,20 @@ async def _run_websocket(websocket: WebSocket) -> None:
     if not token:
         await websocket.accept()
         try:
-            auth_msg = await websocket.receive_json()
+            auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=5)
         except Exception:
-            await websocket.send_json(build_error("missing auth", code="UNAUTHORIZED"))
-            await websocket.close(code=4401, reason="missing token")
+            await websocket.send_json(build_error("missing auth", code="AUTH_INVALID"))
+            await websocket.close(code=1008, reason="missing token")
             return
         if auth_msg.get("type") != "auth":
-            await websocket.send_json(build_error("missing auth", code="UNAUTHORIZED"))
-            await websocket.close(code=4401, reason="missing token")
+            await websocket.send_json(build_error("missing auth", code="AUTH_INVALID"))
+            await websocket.close(code=1008, reason="missing token")
             return
         payload = auth_msg.get("payload") or {}
         token = payload.get("token")
         if not token:
-            await websocket.send_json(build_error("missing auth token", code="UNAUTHORIZED"))
-            await websocket.close(code=4401, reason="missing token")
+            await websocket.send_json(build_error("missing auth token", code="AUTH_INVALID"))
+            await websocket.close(code=1008, reason="missing token")
             return
         await _run_websocket_with_token(websocket, token, pre_accepted=True)
         return
@@ -151,8 +151,8 @@ async def _run_websocket_with_token(websocket: WebSocket, token: str, pre_accept
             user = await AuthService.get_user_from_access_token(db, token)
         except (AppError, ValueError):
             if pre_accepted:
-                await websocket.send_json(build_error("invalid token", code="UNAUTHORIZED"))
-            await websocket.close(code=4401, reason="invalid token")
+                await websocket.send_json(build_error("invalid token", code="AUTH_INVALID"))
+            await websocket.close(code=1008, reason="invalid token")
             return
 
     manager: WSManager = app.state.ws_manager

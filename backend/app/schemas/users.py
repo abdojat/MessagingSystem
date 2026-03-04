@@ -28,4 +28,4 @@ class UserSearchResponse(BaseModel):
 
 
 class UserSearchQuery(BaseModel):
-    query: str = Field(min_length=1, max_length=255)
+    q: str = Field(min_length=1, max_length=255)

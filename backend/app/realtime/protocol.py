@@ -33,6 +33,22 @@ class WSResumePayload(BaseModel):
     since: datetime | None = None
 
 
+class WSSyncState(BaseModel):
+    channel_id: UUID
+    last_seen_seq_id: int | None = None
+    last_seen_at: datetime | None = None
+
+
+class WSSyncPayload(BaseModel):
+    states: list[WSSyncState] = Field(default_factory=list)
+
+
+class WSSeenPayload(BaseModel):
+    channel_id: UUID
+    last_seen_seq_id: int | None = None
+    last_seen_at: datetime | None = None
+
+
 def build_envelope(msg_type: str, payload: dict[str, Any], request_id: UUID | None = None) -> dict[str, Any]:
     return {
         "type": msg_type,
@@ -42,7 +58,12 @@ def build_envelope(msg_type: str, payload: dict[str, Any], request_id: UUID | No
     }
 
 
-def build_error(message: str, code: str = "BAD_REQUEST", request_id: UUID | None = None, details: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_error(
+    message: str,
+    code: str = "VALIDATION_ERROR",
+    request_id: UUID | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return build_envelope(
         "error",
         {

@@ -29,7 +29,7 @@ class MessageResponse(BaseModel):
     channel_id: UUID
     sender_user_id: UUID
     seq_id: int
-    content_type: str
+    content_type: Literal["text", "json"]
     content_text: str | None
     content_json: dict[str, Any] | None
     reply_to_message_id: UUID | None = None
@@ -95,13 +95,27 @@ class SyncChannelCursor(BaseModel):
 class SyncRequest(BaseModel):
     channels: list[SyncChannelCursor] = Field(default_factory=list)
     since: datetime | None = None
-    limit: int = Field(default=200, ge=1, le=500)
+    limit: int = Field(default=500, ge=1, le=2000)
+
+
+class SyncMembershipUpdate(BaseModel):
+    channel_id: UUID
+    user_id: UUID
+    new_role: Literal["owner", "admin", "member", "pending", "none"]
+    reason: str
+    updated_at: datetime
+
+
+class SyncChannelUpdate(BaseModel):
+    channel_id: UUID
+    patch: dict[str, Any]
+    updated_at: datetime
 
 
 class SyncResponse(BaseModel):
     server_time: datetime
-    channels: list[dict[str, Any]]
-    membership_updates: list[dict[str, Any]]
+    channel_updates: list[SyncChannelUpdate]
+    membership_updates: list[SyncMembershipUpdate]
     messages: list[MessageResponse]
 
 

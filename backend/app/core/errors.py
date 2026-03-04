@@ -20,9 +20,9 @@ class AppError(Exception):
 
 def default_error_code(status_code: int) -> str:
     if status_code == 400:
-        return "BAD_REQUEST"
+        return "VALIDATION_ERROR"
     if status_code == 401:
-        return "UNAUTHORIZED"
+        return "AUTH_INVALID"
     if status_code == 403:
         return "FORBIDDEN"
     if status_code == 404:

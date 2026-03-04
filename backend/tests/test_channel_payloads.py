@@ -29,7 +29,13 @@ async def test_channel_responses_include_role_and_permissions(db_session):
     assert owner_view["permissions"]["can_edit_channel"] is True
     assert owner_view["permissions"]["can_delete_channel"] is True
 
-    channels_for_outsider, _, _ = await ChannelService.list_channels(db_session, outsider.id, None, 50)
+    channels_for_outsider, _, _ = await ChannelService.list_channels(
+        db_session,
+        outsider.id,
+        None,
+        50,
+        scope="discover",
+    )
     outsider_view = next(ch for ch in channels_for_outsider if ch["id"] == channel.id)
     assert outsider_view["my_role"] == "none"
     assert outsider_view["permissions"]["can_publish"] is False

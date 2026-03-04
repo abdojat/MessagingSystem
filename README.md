@@ -55,7 +55,7 @@ Auth:
 - `GET /v1/me`
 
 Users:
-- `GET /v1/users/search?query=...&limit=...&cursor=...`
+- `GET /v1/users/search?q=...&limit=...&cursor=...`
 - `GET /v1/users/{user_id}`
 
 Channels:
@@ -155,6 +155,7 @@ Client -> server types:
 Server -> client types:
 - `hello`
 - `message`
+- `history` `{ "channel_id":"uuid", "items":[...], "is_truncated": true|false }` (optional)
 - `message_updated`
 - `reaction_updated`
 - `membership_update`
@@ -163,3 +164,48 @@ Server -> client types:
 - `seen`
 - `pong`
 - `error` (same `{code,message,details}` shape in `payload`)
+
+## Frontend Contracts
+
+- All list endpoints are cursor-based unless messages, which are seq-based.
+- Default pagination limits are conservative and clamped server-side.
+- Cursor validation errors return `400` with code `PAGINATION_INVALID`.
+
+Users:
+- `GET /users/search`: `q` (required, trimmed), `limit` default `20` max `50`, `cursor`.
+- Order is deterministic: username asc, then id asc.
+
+Channels:
+- `GET /channels`: `limit` default `20` max `50`, `cursor`, optional `q`, `visibility`, `scope=my|discover` (default `my`).
+- `my` scope lists only channels where caller has membership.
+- `discover` scope lists public channels not yet joined.
+- Stable order: `last_message_at desc nulls last, created_at desc, id desc`.
+- `GET /channels/{id}/members`: `limit` default `50` max `200`, `cursor`, optional `role`, optional `q`.
+- Stable order: role weight (`owner,admin,member,pending`), username asc, id asc.
+- `GET /channels/{id}/requests`: same pagination contract, filtered to pending.
+- `GET /channels/{id}/invites`: `limit` default `50` max `200`, `cursor`, optional `status=active|revoked|accepted|expired`, order `created_at desc, id desc`.
+- `GET /channels/{id}/events`: `limit` default `50` max `200`, `cursor`, order `created_at desc, id desc`.
+
+Messages:
+- `GET /channels/{id}/messages`: seq pagination with `before_seq_id` or `after_seq_id` (mutually exclusive), `limit` default `50` max `200`, `order=asc|desc` default `desc`.
+- If both `before_seq_id` and `after_seq_id` are provided, server returns `400 PAGINATION_INVALID`.
+- Response includes `{next_before_seq_id,next_after_seq_id,has_more,order}`.
+- `GET /channels/{id}/messages/around`: `seq_id` required, `limit_before`/`limit_after` default `30` max `100`.
+
+Idempotency and ordering:
+- `POST /channels/{id}/messages` is idempotent on `(channel_id,sender_user_id,client_msg_id)`.
+- Duplicate sends with same `client_msg_id` return the original message.
+- `seq_id` is channel-local and strictly increasing; duplicates are prevented by DB constraints + transactional counter update.
+
+Sync and reconnect:
+- `POST /sync` body supports `channels[{channel_id,last_seen_seq_id}]`, optional `since`, `limit` default `500` max `2000`.
+- Response shape: `{server_time, channel_updates, membership_updates, messages}`.
+- `messages` are deterministic and sorted by `(channel_id, seq_id)`.
+- WS is realtime-first; clients should use REST `/sync` for backfill.
+- WS auth methods: query `token`, `Authorization: Bearer`, or first message `{"type":"auth","payload":{"token":"..."}}`.
+- If auth is missing/invalid, socket is closed with policy violation.
+
+Errors:
+- Unified error payload: `{code,message,details}`.
+- Core codes: `VALIDATION_ERROR`, `AUTH_INVALID`, `AUTH_EXPIRED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `INTERNAL_ERROR`.
+- Domain codes include `INVITE_EXPIRED`, `INVITE_REVOKED`, `INVITE_INVALID`, `PAGINATION_INVALID`, and join/invite rule codes.

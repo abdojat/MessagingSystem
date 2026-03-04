@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.api.deps import CurrentUserDep, DBDep
+from app.api.deps import CurrentUserDep, DBDep, RedisDep
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.schemas.auth import (
@@ -16,12 +16,32 @@ from app.schemas.auth import (
     TokenPair,
 )
 from app.services.auth_service import AuthService
+from app.services.rate_limit_service import RateLimitService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+async def _enforce_auth_rate_limits(redis: RedisDep, scope: str, ip: str, identity: str) -> None:
+    ip_retry = await RateLimitService.hit(redis, f"rl:auth:{scope}:ip:{ip}", limit=30, window_seconds=60)
+    if ip_retry is not None:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "RATE_LIMITED", "message": "rate limit exceeded", "details": {"retry_after_seconds": ip_retry}},
+            headers={"Retry-After": str(ip_retry)},
+        )
+    user_retry = await RateLimitService.hit(redis, f"rl:auth:{scope}:identity:{identity.lower()}", limit=20, window_seconds=60)
+    if user_retry is not None:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "RATE_LIMITED", "message": "rate limit exceeded", "details": {"retry_after_seconds": user_retry}},
+            headers={"Retry-After": str(user_retry)},
+        )
+
+
 @router.post("/register", status_code=201)
-async def register(req: RegisterRequest, db: DBDep) -> dict:
+async def register(req: RegisterRequest, db: DBDep, request: Request, redis: RedisDep) -> dict:
+    ip = request.client.host if request.client else "unknown"
+    await _enforce_auth_rate_limits(redis, "register", ip, req.username)
     try:
         user = await AuthService.register(db, req)
     except AppError as exc:
@@ -30,8 +50,10 @@ async def register(req: RegisterRequest, db: DBDep) -> dict:
 
 
 @router.post("/login", response_model=TokenPair)
-async def login(req: LoginRequest, db: DBDep, request: Request) -> TokenPair:
+async def login(req: LoginRequest, db: DBDep, request: Request, redis: RedisDep) -> TokenPair:
     settings = get_settings()
+    ip = request.client.host if request.client else "unknown"
+    await _enforce_auth_rate_limits(redis, "login", ip, req.username_or_email)
     try:
         return await AuthService.login(
             db,
@@ -45,8 +67,10 @@ async def login(req: LoginRequest, db: DBDep, request: Request) -> TokenPair:
 
 
 @router.post("/refresh", response_model=TokenPair)
-async def refresh(req: RefreshRequest, db: DBDep, request: Request) -> TokenPair:
+async def refresh(req: RefreshRequest, db: DBDep, request: Request, redis: RedisDep) -> TokenPair:
     settings = get_settings()
+    ip = request.client.host if request.client else "unknown"
+    await _enforce_auth_rate_limits(redis, "refresh", ip, ip)
     try:
         return await AuthService.refresh(
             db,
@@ -60,7 +84,7 @@ async def refresh(req: RefreshRequest, db: DBDep, request: Request) -> TokenPair
             raise to_http_exception(exc) from exc
         raise HTTPException(
             status_code=401,
-            detail={"code": "AUTH_TOKEN_EXPIRED", "message": str(exc), "details": None},
+            detail={"code": "AUTH_EXPIRED", "message": str(exc), "details": None},
         ) from exc
 
 
@@ -73,7 +97,7 @@ async def logout(req: LogoutRequest, db: DBDep) -> dict:
             raise to_http_exception(exc) from exc
         raise HTTPException(
             status_code=401,
-            detail={"code": "AUTH_TOKEN_EXPIRED", "message": str(exc), "details": None},
+            detail={"code": "AUTH_EXPIRED", "message": str(exc), "details": None},
         ) from exc
     return {"status": "ok"}
 

@@ -16,7 +16,7 @@ async def list_channel_events(
     db: DBDep,
     user: CurrentUserDep,
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=200),
 ) -> EventListResponse:
     try:
         events, next_cursor, has_more = await ChannelService.get_events(db, channel_id, user.id, cursor, limit)

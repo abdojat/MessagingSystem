@@ -1,9 +1,8 @@
 import base64
-from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.api.deps import CurrentUserDep, DBDep
 from app.core.errors import AppError, to_http_exception
@@ -28,50 +27,53 @@ async def me(user: CurrentUserDep) -> MeResponse:
     )
 
 
-def _encode_cursor(created_at: datetime, user_id: UUID) -> str:
-    raw = f"{created_at.isoformat()}|{user_id}"
+def _encode_cursor(username: str, user_id: UUID) -> str:
+    raw = f"{username.lower()}|{user_id}"
     return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")
 
 
-def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
+def _decode_cursor(cursor: str) -> tuple[str, UUID]:
     try:
         raw = base64.urlsafe_b64decode(cursor.encode("utf-8")).decode("utf-8")
-        created_at_raw, user_id_raw = raw.split("|", 1)
-        return datetime.fromisoformat(created_at_raw), UUID(user_id_raw)
+        username_raw, user_id_raw = raw.split("|", 1)
+        return username_raw, UUID(user_id_raw)
     except Exception as exc:
-        raise AppError("invalid cursor", 422, code="VALIDATION_ERROR") from exc
+        raise AppError("invalid cursor", 400, code="PAGINATION_INVALID") from exc
 
 
 @router.get("/users/search", response_model=UserSearchResponse)
 async def search_users(
     db: DBDep,
     _: CurrentUserDep,
-    query: str = Query(min_length=1, max_length=255),
+    q: str = Query(min_length=1, max_length=255),
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=50),
 ) -> UserSearchResponse:
-    q = f"%{query.strip()}%"
+    q_raw = q.strip()
+    if not q_raw:
+        raise to_http_exception(AppError("q cannot be empty", 400, code="VALIDATION_ERROR"))
+    pattern = f"%{q_raw}%"
     stmt = (
         select(User)
-        .where(or_(User.username.ilike(q), User.display_name.ilike(q)))
-        .order_by(User.created_at.desc(), User.id.desc())
+        .where(or_(User.username.ilike(pattern), User.display_name.ilike(pattern)))
+        .order_by(func.lower(User.username).asc(), User.id.asc())
     )
     if cursor:
         try:
-            cursor_created_at, cursor_user_id = _decode_cursor(cursor)
+            cursor_username, cursor_user_id = _decode_cursor(cursor)
         except AppError as exc:
             raise to_http_exception(exc) from exc
         stmt = stmt.where(
             or_(
-                User.created_at < cursor_created_at,
-                and_(User.created_at == cursor_created_at, User.id < cursor_user_id),
+                func.lower(User.username) > cursor_username,
+                and_(func.lower(User.username) == cursor_username, User.id > cursor_user_id),
             )
         )
     rows = await db.execute(stmt.limit(limit + 1))
     users = list(rows.scalars().all())
     has_more = len(users) > limit
     page = users[:limit]
-    next_cursor = _encode_cursor(page[-1].created_at, page[-1].id) if has_more and page else None
+    next_cursor = _encode_cursor(page[-1].username, page[-1].id) if has_more and page else None
     return UserSearchResponse(
         items=[
             UserSearchItem(

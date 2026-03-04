@@ -138,7 +138,7 @@ class InviteListItem(BaseModel):
     invited_email: EmailStr | None
     is_generic: bool
     masked_token: str
-    token_masked: str
+    token_masked: str | None = Field(default=None, deprecated=True)
     created_by_user_id: UUID
     created_at: datetime
     expires_at: datetime
@@ -148,6 +148,8 @@ class InviteListItem(BaseModel):
 
 class InviteListResponse(BaseModel):
     items: list[InviteListItem]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class InvitePreviewChannel(BaseModel):

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 import aio_pika
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -20,7 +20,6 @@ from app.db.models import (
     MembershipRole,
     Message,
     UserChannelState,
-    ChannelCounter,
     User,
 )
 from app.mq.publisher import bind_user_channel, unbind_user_channel
@@ -31,6 +30,12 @@ from app.services.rbac import can_approve, can_demote, can_invite, can_promote, 
 
 MEMBERSHIP_CURSOR_SEP = "|"
 ALLOWED_MEMBER_ROLES = {MembershipRole.owner, MembershipRole.admin, MembershipRole.member, MembershipRole.pending}
+ROLE_WEIGHT = {
+    MembershipRole.owner: 0,
+    MembershipRole.admin: 1,
+    MembershipRole.member: 2,
+    MembershipRole.pending: 3,
+}
 
 
 class ChannelService:
@@ -126,34 +131,80 @@ class ChannelService:
         user_id: UUID,
         cursor: str | None,
         limit: int,
+        q: str | None = None,
+        visibility: ChannelVisibility | None = None,
+        scope: str = "my",
     ) -> tuple[list[dict], str | None, bool]:
+        last_message_sq = (
+            select(Message.channel_id, func.max(Message.created_at).label("last_message_at"))
+            .where(Message.deleted_at.is_(None))
+            .group_by(Message.channel_id)
+            .subquery()
+        )
         stmt = (
-            select(Channel, ChannelMembership.role)
+            select(Channel, ChannelMembership.role, last_message_sq.c.last_message_at)
             .outerjoin(
                 ChannelMembership,
                 and_(ChannelMembership.channel_id == Channel.id, ChannelMembership.user_id == user_id),
             )
+            .outerjoin(last_message_sq, last_message_sq.c.channel_id == Channel.id)
             .where(Channel.deleted_at.is_(None))
-            .where(or_(Channel.visibility == ChannelVisibility.public, ChannelMembership.user_id.is_not(None)))
-            .order_by(Channel.created_at.desc())
-        )
-        if cursor:
-            cursor_created_at, cursor_channel_id = ChannelService._decode_cursor(cursor)
-            stmt = stmt.where(
-                or_(
-                    Channel.created_at < cursor_created_at,
-                    and_(Channel.created_at == cursor_created_at, Channel.id < cursor_channel_id),
-                )
+            .order_by(
+                last_message_sq.c.last_message_at.desc().nulls_last(),
+                Channel.created_at.desc(),
+                Channel.id.desc(),
             )
+        )
+        if scope == "my":
+            stmt = stmt.where(ChannelMembership.user_id.is_not(None))
+        elif scope == "discover":
+            stmt = stmt.where(Channel.visibility == ChannelVisibility.public).where(ChannelMembership.user_id.is_(None))
+        else:
+            raise AppError("scope must be my or discover", 400, code="VALIDATION_ERROR")
+        if visibility is not None:
+            stmt = stmt.where(Channel.visibility == visibility)
+        if q:
+            pattern = f"%{q.strip()}%"
+            stmt = stmt.where(Channel.name.ilike(pattern))
+        if cursor:
+            cursor_last_message_at, cursor_created_at, cursor_channel_id = ChannelService._decode_channel_cursor(cursor)
+            if cursor_last_message_at is None:
+                stmt = stmt.where(last_message_sq.c.last_message_at.is_(None)).where(
+                    or_(
+                        Channel.created_at < cursor_created_at,
+                        and_(Channel.created_at == cursor_created_at, Channel.id < cursor_channel_id),
+                    )
+                )
+            else:
+                stmt = stmt.where(
+                    or_(
+                        and_(
+                            last_message_sq.c.last_message_at.is_not(None),
+                            last_message_sq.c.last_message_at < cursor_last_message_at,
+                        ),
+                        and_(
+                            last_message_sq.c.last_message_at == cursor_last_message_at,
+                            or_(
+                                Channel.created_at < cursor_created_at,
+                                and_(Channel.created_at == cursor_created_at, Channel.id < cursor_channel_id),
+                            ),
+                        ),
+                        last_message_sq.c.last_message_at.is_(None),
+                    )
+                )
         rows = await db.execute(stmt.limit(limit + 1))
         all_rows = rows.all()
         has_more = len(all_rows) > limit
         page = all_rows[:limit]
-        items = [await ChannelService._enrich_channel_payload(db, channel, user_id, role) for channel, role in page]
+        items = [await ChannelService._enrich_channel_payload(db, channel, user_id, role) for channel, role, _ in page]
         next_cursor = None
         if has_more and page:
-            last_channel = page[-1][0]
-            next_cursor = ChannelService._encode_cursor(last_channel.created_at, last_channel.id)
+            last_channel, _, last_message_at = page[-1]
+            next_cursor = ChannelService._encode_channel_cursor(
+                last_message_at,
+                last_channel.created_at,
+                last_channel.id,
+            )
         return items, next_cursor, has_more
 
     @staticmethod
@@ -398,15 +449,48 @@ class ChannelService:
         return invite
 
     @staticmethod
-    async def list_invites(db: AsyncSession, channel_id: UUID, actor_user_id: UUID) -> list[ChannelInvite]:
+    async def list_invites(
+        db: AsyncSession,
+        channel_id: UUID,
+        actor_user_id: UUID,
+        cursor: str | None = None,
+        limit: int = 50,
+        status: str | None = None,
+    ) -> tuple[list[ChannelInvite], str | None, bool]:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not membership or membership.role not in {MembershipRole.owner, MembershipRole.admin}:
             raise AppError("forbidden", 403, code="FORBIDDEN")
-        rows = await db.execute(
-            select(ChannelInvite).where(ChannelInvite.channel_id == channel_id).order_by(ChannelInvite.created_at.desc())
-        )
-        return list(rows.scalars().all())
+        stmt = select(ChannelInvite).where(ChannelInvite.channel_id == channel_id)
+        now = utcnow()
+        if status == "active":
+            stmt = stmt.where(ChannelInvite.revoked_at.is_(None), ChannelInvite.accepted_at.is_(None), ChannelInvite.expires_at >= now)
+        elif status == "revoked":
+            stmt = stmt.where(ChannelInvite.revoked_at.is_not(None))
+        elif status == "accepted":
+            stmt = stmt.where(ChannelInvite.accepted_at.is_not(None))
+        elif status == "expired":
+            stmt = stmt.where(ChannelInvite.expires_at < now, ChannelInvite.revoked_at.is_(None), ChannelInvite.accepted_at.is_(None))
+        elif status is not None:
+            raise AppError("invalid invite status", 400, code="VALIDATION_ERROR")
+        stmt = stmt.order_by(ChannelInvite.created_at.desc(), ChannelInvite.id.desc())
+        if cursor:
+            cursor_created_at, cursor_invite_id = ChannelService._decode_cursor(cursor)
+            stmt = stmt.where(
+                or_(
+                    ChannelInvite.created_at < cursor_created_at,
+                    and_(ChannelInvite.created_at == cursor_created_at, ChannelInvite.id < cursor_invite_id),
+                )
+            )
+        rows = await db.execute(stmt.limit(limit + 1))
+        values = list(rows.scalars().all())
+        has_more = len(values) > limit
+        page = values[:limit]
+        next_cursor = None
+        if has_more and page:
+            last = page[-1]
+            next_cursor = ChannelService._encode_cursor(last.created_at, last.id)
+        return page, next_cursor, has_more
 
     @staticmethod
     async def revoke_invite(db: AsyncSession, channel_id: UUID, invite_id: UUID, actor_user_id: UUID) -> ChannelInvite:
@@ -753,12 +837,18 @@ class ChannelService:
         limit: int,
     ) -> tuple[list[tuple[ChannelMembership, User]], str | None, bool]:
         await ChannelService._assert_manage_membership_access(db, channel_id, actor_user_id)
+        role_order = case(
+            (ChannelMembership.role == MembershipRole.owner, 0),
+            (ChannelMembership.role == MembershipRole.admin, 1),
+            (ChannelMembership.role == MembershipRole.member, 2),
+            else_=3,
+        )
         stmt = (
             select(ChannelMembership, User)
             .join(User, User.id == ChannelMembership.user_id)
             .where(ChannelMembership.channel_id == channel_id)
             .where(ChannelMembership.role.in_(list(ALLOWED_MEMBER_ROLES)))
-            .order_by(ChannelMembership.created_at.desc(), ChannelMembership.user_id.desc())
+            .order_by(role_order.asc(), func.lower(User.username).asc(), User.id.asc())
         )
         if role is not None:
             stmt = stmt.where(ChannelMembership.role == role)
@@ -766,13 +856,16 @@ class ChannelService:
             pattern = f"%{q.strip()}%"
             stmt = stmt.where(or_(User.username.ilike(pattern), User.email.ilike(pattern)))
         if cursor:
-            cursor_created_at, cursor_user_id = ChannelService._decode_cursor(cursor)
+            cursor_role_weight, cursor_username, cursor_user_id = ChannelService._decode_member_cursor(cursor)
             stmt = stmt.where(
                 or_(
-                    ChannelMembership.created_at < cursor_created_at,
+                    role_order > cursor_role_weight,
                     and_(
-                        ChannelMembership.created_at == cursor_created_at,
-                        ChannelMembership.user_id < cursor_user_id,
+                        role_order == cursor_role_weight,
+                        or_(
+                            func.lower(User.username) > cursor_username,
+                            and_(func.lower(User.username) == cursor_username, User.id > cursor_user_id),
+                        ),
                     ),
                 )
             )
@@ -782,8 +875,12 @@ class ChannelService:
         page = values[:limit]
         next_cursor = None
         if has_more and page:
-            last_membership = page[-1][0]
-            next_cursor = ChannelService._encode_cursor(last_membership.created_at, last_membership.user_id)
+            last_membership, last_user = page[-1]
+            next_cursor = ChannelService._encode_member_cursor(
+                last_membership.role,
+                last_user.username,
+                last_user.id,
+            )
         return page, next_cursor, has_more
 
     @staticmethod
@@ -906,12 +1003,42 @@ class ChannelService:
             created_raw, id_raw = decoded.split(MEMBERSHIP_CURSOR_SEP, 1)
             return datetime.fromisoformat(created_raw), UUID(id_raw)
         except (ValueError, TypeError) as exc:
-            raise AppError("invalid cursor", 422, code="VALIDATION_ERROR") from exc
+            raise AppError("invalid cursor", 400, code="PAGINATION_INVALID") from exc
 
     @staticmethod
     def _encode_cursor(created_at: datetime, entity_id: UUID) -> str:
         raw = f"{created_at.isoformat()}{MEMBERSHIP_CURSOR_SEP}{entity_id}"
         return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")
+
+    @staticmethod
+    def _encode_member_cursor(role: MembershipRole, username: str, user_id: UUID) -> str:
+        raw = f"{ROLE_WEIGHT[role]}{MEMBERSHIP_CURSOR_SEP}{username.lower()}{MEMBERSHIP_CURSOR_SEP}{user_id}"
+        return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")
+
+    @staticmethod
+    def _decode_member_cursor(cursor: str) -> tuple[int, str, UUID]:
+        try:
+            decoded = base64.urlsafe_b64decode(cursor.encode("utf-8")).decode("utf-8")
+            role_raw, username_raw, user_id_raw = decoded.split(MEMBERSHIP_CURSOR_SEP, 2)
+            return int(role_raw), username_raw, UUID(user_id_raw)
+        except (ValueError, TypeError) as exc:
+            raise AppError("invalid cursor", 400, code="PAGINATION_INVALID") from exc
+
+    @staticmethod
+    def _encode_channel_cursor(last_message_at: datetime | None, created_at: datetime, channel_id: UUID) -> str:
+        last_raw = last_message_at.isoformat() if last_message_at else ""
+        raw = f"{last_raw}{MEMBERSHIP_CURSOR_SEP}{created_at.isoformat()}{MEMBERSHIP_CURSOR_SEP}{channel_id}"
+        return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")
+
+    @staticmethod
+    def _decode_channel_cursor(cursor: str) -> tuple[datetime | None, datetime, UUID]:
+        try:
+            decoded = base64.urlsafe_b64decode(cursor.encode("utf-8")).decode("utf-8")
+            last_raw, created_raw, channel_raw = decoded.split(MEMBERSHIP_CURSOR_SEP, 2)
+            last = datetime.fromisoformat(last_raw) if last_raw else None
+            return last, datetime.fromisoformat(created_raw), UUID(channel_raw)
+        except (ValueError, TypeError) as exc:
+            raise AppError("invalid cursor", 400, code="PAGINATION_INVALID") from exc
 
     @staticmethod
     async def _enrich_channel_payload(
