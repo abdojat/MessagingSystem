@@ -1,11 +1,6 @@
-# Phase-3 Channels Backend (FastAPI + Postgres + RabbitMQ + Redis)
+# Channels Backend (FastAPI + Postgres + RabbitMQ + Redis)
 
-Backend for a Telegram-like channel system with:
-- JWT auth + refresh sessions
-- channel lifecycle and membership RBAC
-- invite links and previews
-- message persistence + outbox fanout + websocket delivery
-- audit events and cursor pagination
+Telegram-like backend with auth, channels, memberships, messages, invites, events, sync, uploads, and websocket fanout.
 
 ## Run
 ```bash
@@ -13,185 +8,134 @@ cp .env.example .env
 docker compose up --build
 ```
 
-API: `http://localhost:8000`  
-Docs: `http://localhost:8000/docs`
+API docs:
+- `http://localhost:8000/docs`
+- Versioned API prefix: `/v1`
+- Legacy unversioned routes remain available as temporary aliases.
 
-If you changed migrations and see errors like `relation "channels" does not exist` or `relation "outbox" does not exist`, reset local data volume and start again:
+## Migrations
 ```bash
-docker compose down -v
-docker compose up --build
-```
-
-## Auth + Session Endpoints
-- `POST /auth/register`
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `POST /auth/logout`
-- `GET /me`
-- `GET /auth/sessions` (current user only)
-- `DELETE /auth/sessions/{session_id}` (current user only)
-- `POST /auth/logout_all` (revokes all current-user refresh sessions, including current session)
-
-## Channel Endpoints
-- `POST /channels`
-- `GET /channels` (includes `my_role` + `permissions`)
-- `GET /channels/{channel_id}` (includes `my_role` + `permissions`)
-- `PATCH /channels/{channel_id}` (owner only)
-- `DELETE /channels/{channel_id}` (owner only, soft delete)
-- `GET /channels/{channel_id}/my-membership`
-- `POST /channels/{channel_id}/join`
-- `POST /channels/{channel_id}/leave`
-- `GET /channels/{channel_id}/members`
-- `GET /channels/{channel_id}/requests`
-
-`GET /channels` and `GET /channels/{channel_id}` include computed role + permissions for current user:
-```json
-{
-  "id": "2a165037-8143-47d7-aa8c-531aca0d9686",
-  "owner_user_id": "e4a913b3-e992-43e3-b47d-2591232a52de",
-  "name": "engineering",
-  "visibility": "public",
-  "join_mode": "open",
-  "created_at": "2026-03-04T10:00:00+00:00",
-  "my_role": "member",
-  "permissions": {
-    "can_publish": true,
-    "can_invite": false,
-    "can_approve": false,
-    "can_manage_members": false,
-    "can_edit_channel": false,
-    "can_delete_channel": false
-  }
-}
-```
-
-## Invite Endpoints
-- `POST /channels/{channel_id}/invite`
-- `GET /channels/{channel_id}/invites` (masked token only)
-- `POST /channels/{channel_id}/invites/{invite_id}/revoke`
-- `GET /invites/{token}` (preview)
-- `POST /invites/{token}/accept`
-
-Invite request validation:
-- Generic link: `{"is_generic": true}`
-- Targeted invite: exactly one of `invited_user_id` or `invited_email`
-
-Invite token policy:
-- `POST /channels/{channel_id}/invite` returns full `token` once at creation time.
-- `GET /channels/{channel_id}/invites` never returns full token; it returns `masked_token` (and legacy `token_masked`) only.
-- To reuse an invite token later, create a new invite instead of revealing old tokens.
-
-## Message Endpoints
-- `POST /channels/{channel_id}/messages`
-- `GET /channels/{channel_id}/messages/{message_id}`
-- `GET /channels/{channel_id}/messages?before_seq_id=&after_seq_id=&limit=`
-- `GET /channels/{channel_id}/messages/around?seq_id=&limit=`
-- `POST /channels/{channel_id}/seen`
-
-`GET /channels/{channel_id}/messages` response:
-```json
-{
-  "items": [],
-  "next_before_seq_id": 0,
-  "next_after_seq_id": 0,
-  "has_more": false,
-  "order": "desc"
-}
-```
-
-Rules:
-- `before_seq_id`: returns `seq_id < before_seq_id`, ordered descending.
-- `after_seq_id`: returns `seq_id > after_seq_id`, ordered ascending.
-- provide only one of `before_seq_id` or `after_seq_id`.
-
-## Events Endpoint
-- `GET /channels/{channel_id}/events?cursor=&limit=` (owner/admin)
-
-Cursor pagination shape for members/requests/events:
-```json
-{
-  "items": [],
-  "next_cursor": null,
-  "has_more": false
-}
-```
-
-## WebSocket Protocol (`/ws`)
-Server -> client:
-- `hello`: `{"type":"hello","user_id":"...","server_time":"..."}`
-- `history`: `{"type":"history","channel_id":"...","items":[Message],"is_truncated":false}`
-- `message`: `{"type":"message","channel_id":"...","message":Message}`
-- `membership_update`: `{"type":"membership_update","channel_id":"...","user_id":"...","new_role":"...","reason":"..."}`
-- `channel_updated` (optional): `{"type":"channel_updated","channel_id":"...","patch":{"name":"...","visibility":"public","join_mode":"open"}}`
-
-Client -> server:
-- `sync`: `{"type":"sync","states":[{"channel_id":"...","last_seen_seq_id":12,"last_seen_at":"..."}]}`
-- `seen`: `{"type":"seen","channel_id":"...","last_seen_seq_id":12,"last_seen_at":"..."}`
-
-Membership changes (`approve/remove/promote/demote` and related role updates) emit `membership_update`.
-
-## Common Frontend Flow (curl)
-```bash
-# login
-TOKENS=$(curl -s -X POST http://localhost:8000/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username_or_email":"alice","password":"password123"}')
-ACCESS=$(echo "$TOKENS" | jq -r .access_token)
-
-# me
-curl -s http://localhost:8000/me -H "Authorization: Bearer $ACCESS"
-
-# list channels
-CHANNELS=$(curl -s http://localhost:8000/channels -H "Authorization: Bearer $ACCESS")
-CHANNEL_ID=$(echo "$CHANNELS" | jq -r '.[0].id')
-
-# open channel details (already includes my_role + permissions)
-curl -s http://localhost:8000/channels/$CHANNEL_ID -H "Authorization: Bearer $ACCESS"
-
-# websocket connect (example helper)
-python scripts/ws_client.py --url ws://localhost:8000 --token "$ACCESS"
-
-# load history
-curl -s "http://localhost:8000/channels/$CHANNEL_ID/messages?limit=20" \
-  -H "Authorization: Bearer $ACCESS"
-
-# publish
-curl -s -X POST http://localhost:8000/channels/$CHANNEL_ID/messages \
-  -H "Authorization: Bearer $ACCESS" \
-  -H 'Content-Type: application/json' \
-  -d '{"content_text":"hello from frontend","client_msg_id":"11111111-1111-1111-1111-111111111111"}'
-
-# seen
-curl -s -X POST http://localhost:8000/channels/$CHANNEL_ID/seen \
-  -H "Authorization: Bearer $ACCESS" \
-  -H 'Content-Type: application/json' \
-  -d '{"last_seen_seq_id":20,"last_seen_at":"2026-03-04T10:00:00+00:00"}'
-```
-
-## Invite Flow (curl)
-```bash
-# owner creates invite
-INVITE=$(curl -s -X POST http://localhost:8000/channels/$CHANNEL_ID/invite \
-  -H "Authorization: Bearer $OWNER_ACCESS" \
-  -H 'Content-Type: application/json' \
-  -d '{"invited_email":"bob@example.com","expires_in_hours":24}')
-TOKEN=$(echo "$INVITE" | jq -r .token)
-INVITE_ID=$(echo "$INVITE" | jq -r .id)
-
-# preview
-curl -s http://localhost:8000/invites/$TOKEN
-
-# accept
-curl -s -X POST http://localhost:8000/invites/$TOKEN/accept \
-  -H "Authorization: Bearer $BOB_ACCESS"
-
-# optional revoke
-curl -s -X POST http://localhost:8000/channels/$CHANNEL_ID/invites/$INVITE_ID/revoke \
-  -H "Authorization: Bearer $OWNER_ACCESS"
+docker compose run --rm backend sh -lc "alembic upgrade head"
 ```
 
 ## Tests
 ```bash
-docker compose build backend
-docker compose run --rm backend sh -lc "pip install pytest pytest-asyncio && pytest -q"
+docker compose run --rm backend sh -lc "pytest -q"
 ```
+
+## Key Endpoints (`/v1`)
+
+Auth:
+- `POST /v1/auth/register`
+- `POST /v1/auth/login`
+- `POST /v1/auth/refresh`
+- `POST /v1/auth/logout`
+- `GET /v1/auth/sessions`
+- `DELETE /v1/auth/sessions/{session_id}`
+- `POST /v1/auth/logout_all`
+- `GET /v1/me`
+
+Users:
+- `GET /v1/users/search?query=...&limit=...&cursor=...`
+- `GET /v1/users/{user_id}`
+
+Channels:
+- `POST /v1/channels`
+- `GET /v1/channels?limit=...&cursor=...`
+- `GET /v1/channels/{channel_id}`
+- `PATCH /v1/channels/{channel_id}`
+- `DELETE /v1/channels/{channel_id}`
+- `GET /v1/channels/{channel_id}/stats`
+- `GET /v1/channels/{channel_id}/members`
+- `GET /v1/channels/{channel_id}/requests`
+- `POST /v1/channels/{channel_id}/join`
+- `POST /v1/channels/{channel_id}/leave`
+
+Invites:
+- `POST /v1/channels/{channel_id}/invite`
+- `GET /v1/channels/{channel_id}/invites`
+- `POST /v1/channels/{channel_id}/invites/{invite_id}/revoke`
+- `GET /v1/invites/{token}`
+- `POST /v1/invites/{token}/accept`
+
+Messages:
+- `POST /v1/channels/{channel_id}/messages`
+- `GET /v1/channels/{channel_id}/messages`
+- `GET /v1/channels/{channel_id}/messages/{message_id}`
+- `PATCH /v1/channels/{channel_id}/messages/{message_id}`
+- `DELETE /v1/channels/{channel_id}/messages/{message_id}`
+- `POST /v1/channels/{channel_id}/messages/{message_id}/reactions`
+- `DELETE /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}`
+- `POST /v1/channels/{channel_id}/pins/{message_id}`
+- `DELETE /v1/channels/{channel_id}/pins/{message_id}`
+- `GET /v1/channels/{channel_id}/pins`
+- `POST /v1/channels/{channel_id}/seen`
+
+Uploads:
+- `POST /v1/uploads`
+- `PUT /v1/uploads/{file_id}/content`
+- `GET /v1/uploads/{file_id}/content`
+
+Sync:
+- `POST /v1/sync`
+
+Health:
+- `GET /v1/health`
+
+## Example curl
+```bash
+# login
+TOKENS=$(curl -s -X POST http://localhost:8000/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username_or_email":"alice","password":"password123"}')
+ACCESS=$(echo "$TOKENS" | jq -r .access_token)
+
+# list channels (frontend-ready summary)
+curl -s "http://localhost:8000/v1/channels?limit=20" \
+  -H "Authorization: Bearer $ACCESS"
+
+# idempotent message send
+curl -s -X POST http://localhost:8000/v1/channels/$CHANNEL_ID/messages \
+  -H "Authorization: Bearer $ACCESS" \
+  -H 'Content-Type: application/json' \
+  -d '{"content_text":"hello","client_msg_id":"11111111-1111-1111-1111-111111111111"}'
+
+# sync
+curl -s -X POST http://localhost:8000/v1/sync \
+  -H "Authorization: Bearer $ACCESS" \
+  -H 'Content-Type: application/json' \
+  -d '{"channels":[{"channel_id":"'$CHANNEL_ID'","last_seen_seq_id":5}],"since":null,"limit":200}'
+```
+
+## WebSocket (`/ws` and `/v1/ws`)
+
+Envelope (client and server):
+```json
+{
+  "type": "string",
+  "request_id": "uuid|null",
+  "payload": {},
+  "ts": "2026-03-04T12:00:00+00:00"
+}
+```
+
+Client -> server types:
+- `auth` `{ "token": "jwt" }` (only needed when no query/header token used)
+- `subscribe` `{ "channel_ids": ["uuid"], "from_seq_id": 10 }`
+- `unsubscribe` `{ "channel_ids": ["uuid"] }`
+- `resume` `{ "cursors": [{"channel_id":"uuid","last_seen_seq_id":123}], "since": null }`
+- `seen` `{ "channel_id":"uuid","last_seen_seq_id":10 }`
+- `ping` `{}`
+
+Server -> client types:
+- `hello`
+- `history`
+- `message`
+- `message_updated`
+- `reaction_updated`
+- `membership_update`
+- `channel_updated`
+- `sync`
+- `seen`
+- `pong`
+- `error` (same `{code,message,details}` shape in `payload`)

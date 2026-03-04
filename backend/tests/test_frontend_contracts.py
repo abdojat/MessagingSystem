@@ -38,8 +38,8 @@ async def test_get_channels_and_get_channel_include_my_role_and_permissions(db_s
         DummyAMQP(),
     )
 
-    channels = await list_channels_route(db_session, outsider)
-    row = next(item for item in channels if item.id == channel.id)
+    channels = await list_channels_route(db_session, outsider, None, 50)
+    row = next(item for item in channels.items if item.id == channel.id)
     assert row.my_role == "none"
     assert row.permissions.can_publish is False
     assert row.permissions.can_edit_channel is False
