@@ -16,6 +16,7 @@ async def enqueue_message_outbox(
         aggregate_id=message_id,
         channel_id=channel_id,
         payload=payload,
+        type=str(payload.get("type", "message")),
         routing_key=f"channel.{channel_id}",
         status=OutboxStatus.pending,
     )
@@ -36,6 +37,7 @@ async def enqueue_channel_event_outbox(
         aggregate_id=aggregate_id,
         channel_id=channel_id,
         payload=payload,
+        type=event_type,
         routing_key=f"channel.{channel_id}",
         status=OutboxStatus.pending,
     )
@@ -57,6 +59,7 @@ async def enqueue_user_event_outbox(
         aggregate_id=aggregate_id,
         channel_id=channel_id,
         payload=payload,
+        type=event_type,
         routing_key=f"user.{user_id}",
         status=OutboxStatus.pending,
     )

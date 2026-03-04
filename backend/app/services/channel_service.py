@@ -1,9 +1,10 @@
 import uuid
+import base64
 from datetime import datetime, timedelta
 from uuid import UUID
 
 import aio_pika
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -17,6 +18,9 @@ from app.db.models import (
     ChannelVisibility,
     Event,
     MembershipRole,
+    Message,
+    UserChannelState,
+    ChannelCounter,
     User,
 )
 from app.mq.publisher import bind_user_channel, unbind_user_channel
@@ -54,9 +58,19 @@ class ChannelService:
             "id": channel.id,
             "owner_user_id": channel.owner_user_id,
             "name": channel.name,
+            "description": channel.description,
+            "avatar_url": channel.avatar_url,
             "visibility": channel.visibility,
             "join_mode": channel.join_mode,
             "created_at": channel.created_at,
+            "updated_at": channel.updated_at,
+            "deleted_at": channel.deleted_at,
+            "member_count": 0,
+            "pending_count": 0,
+            "last_message": None,
+            "last_message_at": None,
+            "my_last_seen_seq_id": None,
+            "unread_count": 0,
             "my_role": my_role,
             "permissions": ChannelService.build_permissions(role, channel),
         }
@@ -71,6 +85,8 @@ class ChannelService:
         channel = Channel(
             owner_user_id=owner_user_id,
             name=req.name,
+            description=req.description,
+            avatar_url=req.avatar_url,
             visibility=req.visibility,
             join_mode=req.join_mode,
         )
@@ -105,8 +121,13 @@ class ChannelService:
         return channel
 
     @staticmethod
-    async def list_channels(db: AsyncSession, user_id: UUID) -> list[dict]:
-        rows = await db.execute(
+    async def list_channels(
+        db: AsyncSession,
+        user_id: UUID,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[dict], str | None, bool]:
+        stmt = (
             select(Channel, ChannelMembership.role)
             .outerjoin(
                 ChannelMembership,
@@ -116,7 +137,24 @@ class ChannelService:
             .where(or_(Channel.visibility == ChannelVisibility.public, ChannelMembership.user_id.is_not(None)))
             .order_by(Channel.created_at.desc())
         )
-        return [ChannelService.build_channel_payload(channel, role) for channel, role in rows.all()]
+        if cursor:
+            cursor_created_at, cursor_channel_id = ChannelService._decode_cursor(cursor)
+            stmt = stmt.where(
+                or_(
+                    Channel.created_at < cursor_created_at,
+                    and_(Channel.created_at == cursor_created_at, Channel.id < cursor_channel_id),
+                )
+            )
+        rows = await db.execute(stmt.limit(limit + 1))
+        all_rows = rows.all()
+        has_more = len(all_rows) > limit
+        page = all_rows[:limit]
+        items = [await ChannelService._enrich_channel_payload(db, channel, user_id, role) for channel, role in page]
+        next_cursor = None
+        if has_more and page:
+            last_channel = page[-1][0]
+            next_cursor = ChannelService._encode_cursor(last_channel.created_at, last_channel.id)
+        return items, next_cursor, has_more
 
     @staticmethod
     async def get_channel_or_404(db: AsyncSession, channel_id: UUID) -> Channel:
@@ -148,7 +186,7 @@ class ChannelService:
             raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         if channel.visibility == ChannelVisibility.private and role is None:
             raise AppError("forbidden", 403, code="FORBIDDEN")
-        return ChannelService.build_channel_payload(channel, role)
+        return await ChannelService._enrich_channel_payload(db, channel, user_id, role)
 
     @staticmethod
     async def update_channel(
@@ -165,6 +203,10 @@ class ChannelService:
 
         if req.name is not None:
             channel.name = req.name
+        if req.description is not None:
+            channel.description = req.description
+        if req.avatar_url is not None:
+            channel.avatar_url = req.avatar_url
         if req.visibility is not None:
             channel.visibility = req.visibility
         if req.join_mode is not None:
@@ -176,6 +218,8 @@ class ChannelService:
             {
                 "channel_id": str(channel_id),
                 "name": channel.name,
+                "description": channel.description,
+                "avatar_url": channel.avatar_url,
                 "visibility": channel.visibility.value,
                 "join_mode": channel.join_mode.value,
             },
@@ -192,6 +236,8 @@ class ChannelService:
                 "channel_id": str(channel_id),
                 "patch": {
                     "name": channel.name,
+                    "description": channel.description,
+                    "avatar_url": channel.avatar_url,
                     "visibility": channel.visibility.value,
                     "join_mode": channel.join_mode.value,
                 },
@@ -457,6 +503,7 @@ class ChannelService:
                 role=MembershipRole.member,
                 approved_at=utcnow(),
                 created_by_user_id=invite.created_by_user_id,
+                invited_by_user_id=invite.created_by_user_id,
             )
             db.add(membership)
 
@@ -549,6 +596,7 @@ class ChannelService:
                 role=MembershipRole.member,
                 approved_at=utcnow(),
                 created_by_user_id=actor_id,
+                invited_by_user_id=actor_id,
             )
             db.add(target)
         await log_event(
@@ -851,13 +899,108 @@ class ChannelService:
         return f"{token[:4]}...{token[-4:]}"
 
     @staticmethod
-    def _encode_cursor(created_at: datetime, entity_id: UUID) -> str:
-        return f"{created_at.isoformat()}{MEMBERSHIP_CURSOR_SEP}{entity_id}"
-
-    @staticmethod
     def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
         try:
-            created_raw, id_raw = cursor.split(MEMBERSHIP_CURSOR_SEP, 1)
+            decoded = base64.urlsafe_b64decode(cursor.encode("utf-8")).decode("utf-8")
+            created_raw, id_raw = decoded.split(MEMBERSHIP_CURSOR_SEP, 1)
             return datetime.fromisoformat(created_raw), UUID(id_raw)
         except (ValueError, TypeError) as exc:
             raise AppError("invalid cursor", 422, code="VALIDATION_ERROR") from exc
+
+    @staticmethod
+    def _encode_cursor(created_at: datetime, entity_id: UUID) -> str:
+        raw = f"{created_at.isoformat()}{MEMBERSHIP_CURSOR_SEP}{entity_id}"
+        return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")
+
+    @staticmethod
+    async def _enrich_channel_payload(
+        db: AsyncSession,
+        channel: Channel,
+        user_id: UUID,
+        role: MembershipRole | None,
+    ) -> dict:
+        payload = ChannelService.build_channel_payload(channel, role)
+
+        members_result = await db.execute(
+            select(func.count(ChannelMembership.user_id)).where(
+                ChannelMembership.channel_id == channel.id,
+                ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+            )
+        )
+        pending_result = await db.execute(
+            select(func.count(ChannelMembership.user_id)).where(
+                ChannelMembership.channel_id == channel.id,
+                ChannelMembership.role == MembershipRole.pending,
+            )
+        )
+        payload["member_count"] = int(members_result.scalar_one() or 0)
+        payload["pending_count"] = int(pending_result.scalar_one() or 0) if role in {MembershipRole.owner, MembershipRole.admin} else 0
+
+        last_msg_result = await db.execute(
+            select(Message)
+            .where(Message.channel_id == channel.id, Message.deleted_at.is_(None))
+            .order_by(Message.seq_id.desc())
+            .limit(1)
+        )
+        last_message = last_msg_result.scalar_one_or_none()
+        if last_message:
+            payload["last_message"] = {
+                "id": last_message.id,
+                "channel_id": last_message.channel_id,
+                "sender_user_id": last_message.sender_user_id,
+                "seq_id": last_message.seq_id,
+                "content_type": last_message.content_type.value,
+                "content_text": last_message.content_text,
+                "content_json": last_message.content_json,
+                "reply_to_message_id": last_message.reply_to_message_id,
+                "reply_to_seq_id": last_message.reply_to_seq_id,
+                "attachments": last_message.attachments,
+                "is_pinned": last_message.is_pinned,
+                "client_msg_id": last_message.client_msg_id,
+                "created_at": last_message.created_at,
+                "updated_at": last_message.updated_at,
+                "edited_at": last_message.edited_at,
+                "deleted_at": last_message.deleted_at,
+                "reactions_summary": {"counts": {}, "my_reaction": []},
+            }
+            payload["last_message_at"] = last_message.created_at
+
+        state = await db.get(UserChannelState, {"channel_id": channel.id, "user_id": user_id})
+        counter = await db.get(ChannelCounter, {"channel_id": channel.id})
+        payload["my_last_seen_seq_id"] = state.last_seen_seq_id if state else None
+        next_seq = int(counter.next_seq) if counter else 0
+        seen_seq = int(state.last_seen_seq_id) if state and state.last_seen_seq_id is not None else 0
+        payload["unread_count"] = max(0, next_seq - seen_seq)
+        return payload
+
+    @staticmethod
+    async def get_channel_stats(db: AsyncSession, channel_id: UUID, user_id: UUID) -> dict:
+        channel = await ChannelService.get_channel_or_404(db, channel_id)
+        membership = await ChannelService.get_membership(db, channel_id, user_id)
+        if channel.visibility == ChannelVisibility.private and membership is None:
+            raise AppError("forbidden", 403, code="FORBIDDEN")
+        member_count_result = await db.execute(
+            select(func.count(ChannelMembership.user_id)).where(
+                ChannelMembership.channel_id == channel_id,
+                ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+            )
+        )
+        pending_count_result = await db.execute(
+            select(func.count(ChannelMembership.user_id)).where(
+                ChannelMembership.channel_id == channel_id,
+                ChannelMembership.role == MembershipRole.pending,
+            )
+        )
+        message_count_result = await db.execute(
+            select(func.count(Message.id)).where(Message.channel_id == channel_id, Message.deleted_at.is_(None))
+        )
+        last_message_result = await db.execute(
+            select(Message.created_at).where(Message.channel_id == channel_id).order_by(Message.seq_id.desc()).limit(1)
+        )
+        return {
+            "channel_id": channel_id,
+            "member_count": int(member_count_result.scalar_one() or 0),
+            "pending_count": int(pending_count_result.scalar_one() or 0),
+            "message_count": int(message_count_result.scalar_one() or 0),
+            "last_message_at": last_message_result.scalar_one_or_none(),
+        }

@@ -59,7 +59,7 @@ async def run_outbox_publisher(amqp: aio_pika.RobustConnection) -> None:
                             text(
                                 """
                                 UPDATE outbox
-                                SET status='sent', sent_at=now(), last_error=NULL
+                                SET status='sent', sent_at=now(), published_at=now(), last_error=NULL
                                 WHERE id = :id
                                 """
                             ),

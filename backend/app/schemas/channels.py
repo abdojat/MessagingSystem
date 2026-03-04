@@ -5,22 +5,33 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.db.models import ChannelJoinMode, ChannelVisibility, MembershipRole
+from app.schemas.messages import MessageResponse
 
 
 class ChannelCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=1000)
+    avatar_url: str | None = Field(default=None, max_length=2048)
     visibility: ChannelVisibility
     join_mode: ChannelJoinMode
 
 
 class ChannelPatchRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=1000)
+    avatar_url: str | None = Field(default=None, max_length=2048)
     visibility: ChannelVisibility | None = None
     join_mode: ChannelJoinMode | None = None
 
     @model_validator(mode="after")
     def validate_non_empty(self) -> "ChannelPatchRequest":
-        if self.name is None and self.visibility is None and self.join_mode is None:
+        if (
+            self.name is None
+            and self.description is None
+            and self.avatar_url is None
+            and self.visibility is None
+            and self.join_mode is None
+        ):
             raise ValueError("provide at least one field to update")
         return self
 
@@ -34,15 +45,47 @@ class ChannelPermissions(BaseModel):
     can_delete_channel: bool
 
 
-class ChannelResponse(BaseModel):
+class ChannelBasePayload(BaseModel):
     id: UUID
     owner_user_id: UUID
     name: str
+    description: str | None = None
+    avatar_url: str | None = None
     visibility: ChannelVisibility
     join_mode: ChannelJoinMode
     created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+    member_count: int = 0
+    pending_count: int = 0
+    last_message: MessageResponse | None = None
+    last_message_at: datetime | None = None
+    my_last_seen_seq_id: int | None = None
+    unread_count: int = 0
     my_role: MembershipRole | str
     permissions: ChannelPermissions
+
+
+class ChannelListItem(ChannelBasePayload):
+    pass
+
+
+class ChannelResponse(ChannelBasePayload):
+    pass
+
+
+class ChannelListResponse(BaseModel):
+    items: list[ChannelListItem]
+    next_cursor: str | None
+    has_more: bool
+
+
+class ChannelStatsResponse(BaseModel):
+    channel_id: UUID
+    member_count: int
+    pending_count: int
+    message_count: int
+    last_message_at: datetime | None
 
 
 class MembershipActionResponse(BaseModel):
@@ -129,6 +172,8 @@ class ChannelMembershipItem(BaseModel):
     role: MembershipRole
     created_at: datetime
     approved_at: datetime | None
+    updated_at: datetime | None = None
+    invited_by_user_id: UUID | None = None
 
 
 class ChannelMembershipListResponse(BaseModel):

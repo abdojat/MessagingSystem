@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import aio_pika
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 
@@ -14,6 +15,7 @@ from app.core.errors import AppError, default_error_code
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
 from app.mq.topology import ensure_topology
+from app.realtime.protocol import build_error
 from app.realtime.ws_manager import WSManager
 from app.schemas.common import ErrorResponse
 from app.services.auth_service import AuthService
@@ -51,14 +53,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Channels Backend", version="0.1.0", lifespan=lifespan)
+settings = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-app.include_router(auth.router)
-app.include_router(users.router)
-app.include_router(channels.router)
-app.include_router(memberships.router)
-app.include_router(messages.router)
-app.include_router(events.router)
-app.include_router(health.router)
+for route_module in (auth, users, channels, memberships, messages, events, health):
+    app.include_router(route_module.router, prefix=settings.api_v1_prefix)
+for route_module in (auth, users, channels, memberships, messages, events, health):
+    app.include_router(route_module.router, include_in_schema=False)
 
 
 @app.exception_handler(AppError)
@@ -92,26 +99,64 @@ async def handle_validation_error(_: Request, exc: RequestValidationError) -> JS
     return JSONResponse(status_code=422, content=payload)
 
 
+@app.exception_handler(Exception)
+async def handle_unexpected_error(_: Request, exc: Exception) -> JSONResponse:
+    logger.exception("unhandled exception", exc_info=exc)
+    payload = ErrorResponse(code="INTERNAL_ERROR", message="internal server error", details=None).model_dump()
+    return JSONResponse(status_code=500, content=payload)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    await _run_websocket(websocket)
+
+
+@app.websocket("/v1/ws")
+async def websocket_endpoint_v1(websocket: WebSocket):
+    await _run_websocket(websocket)
+
+
+async def _run_websocket(websocket: WebSocket) -> None:
     token = websocket.query_params.get("token")
     if not token:
         auth_header = websocket.headers.get("authorization", "")
         if auth_header.lower().startswith("bearer "):
             token = auth_header.split(" ", 1)[1].strip()
     if not token:
-        await websocket.close(code=4401, reason="missing token")
+        await websocket.accept()
+        try:
+            auth_msg = await websocket.receive_json()
+        except Exception:
+            await websocket.send_json(build_error("missing auth", code="UNAUTHORIZED"))
+            await websocket.close(code=4401, reason="missing token")
+            return
+        if auth_msg.get("type") != "auth":
+            await websocket.send_json(build_error("missing auth", code="UNAUTHORIZED"))
+            await websocket.close(code=4401, reason="missing token")
+            return
+        payload = auth_msg.get("payload") or {}
+        token = payload.get("token")
+        if not token:
+            await websocket.send_json(build_error("missing auth token", code="UNAUTHORIZED"))
+            await websocket.close(code=4401, reason="missing token")
+            return
+        await _run_websocket_with_token(websocket, token, pre_accepted=True)
         return
+    await _run_websocket_with_token(websocket, token, pre_accepted=False)
 
+
+async def _run_websocket_with_token(websocket: WebSocket, token: str, pre_accepted: bool = False) -> None:
     async with SessionLocal() as db:
         try:
             user = await AuthService.get_user_from_access_token(db, token)
         except (AppError, ValueError):
+            if pre_accepted:
+                await websocket.send_json(build_error("invalid token", code="UNAUTHORIZED"))
             await websocket.close(code=4401, reason="invalid token")
             return
 
     manager: WSManager = app.state.ws_manager
-    await manager.connect(websocket, user.id)
+    await manager.connect(websocket, user.id, pre_accepted=pre_accepted)
     try:
         await manager.run_socket(websocket, user.id)
     except WebSocketDisconnect:

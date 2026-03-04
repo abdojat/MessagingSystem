@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     ws_history_batch_limit: int = 100
 
     log_level: str = "INFO"
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    upload_max_size_bytes: int = 25 * 1024 * 1024
+    uploads_base_dir: str = "/data/uploads"
+    api_v1_prefix: str = "/v1"
 
 
 @lru_cache

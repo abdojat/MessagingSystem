@@ -1,11 +1,17 @@
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.api.deps import AMQPDep, CurrentUserDep, DBDep
 from app.core.errors import AppError, to_http_exception
-from app.db.models import MembershipRole
-from app.schemas.channels import ChannelCreateRequest, ChannelPatchRequest, ChannelResponse, MyMembershipResponse
+from app.schemas.channels import (
+    ChannelCreateRequest,
+    ChannelListResponse,
+    ChannelPatchRequest,
+    ChannelResponse,
+    ChannelStatsResponse,
+    MyMembershipResponse,
+)
 from app.services.channel_service import ChannelService
 
 router = APIRouter(prefix="/channels", tags=["channels"])
@@ -14,16 +20,26 @@ router = APIRouter(prefix="/channels", tags=["channels"])
 @router.post("", response_model=ChannelResponse, status_code=201)
 async def create_channel(req: ChannelCreateRequest, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> ChannelResponse:
     try:
-        channel = await ChannelService.create_channel(db, user.id, req, amqp)
+        created = await ChannelService.create_channel(db, user.id, req, amqp)
+        channel = await ChannelService.get_channel_view(db, created.id, user.id)
     except AppError as exc:
         raise to_http_exception(exc) from exc
-    return ChannelResponse.model_validate(ChannelService.build_channel_payload(channel, MembershipRole.owner))
+    return ChannelResponse.model_validate(channel)
 
 
-@router.get("", response_model=list[ChannelResponse])
-async def list_channels(db: DBDep, user: CurrentUserDep) -> list[ChannelResponse]:
-    channels = await ChannelService.list_channels(db, user.id)
-    return [ChannelResponse.model_validate(ch) for ch in channels]
+@router.get("", response_model=ChannelListResponse)
+async def list_channels(
+    db: DBDep,
+    user: CurrentUserDep,
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> ChannelListResponse:
+    channels, next_cursor, has_more = await ChannelService.list_channels(db, user.id, cursor, limit)
+    return ChannelListResponse(
+        items=[ChannelResponse.model_validate(ch) for ch in channels],
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
 
 
 @router.get("/{channel_id}", response_model=ChannelResponse)
@@ -70,3 +86,12 @@ async def my_membership(channel_id: UUID, db: DBDep, user: CurrentUserDep) -> My
         created_at=membership.created_at,
         approved_at=membership.approved_at,
     )
+
+
+@router.get("/{channel_id}/stats", response_model=ChannelStatsResponse)
+async def channel_stats(channel_id: UUID, db: DBDep, user: CurrentUserDep) -> ChannelStatsResponse:
+    try:
+        payload = await ChannelService.get_channel_stats(db, channel_id, user.id)
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
+    return ChannelStatsResponse.model_validate(payload)

@@ -78,6 +78,8 @@ async def list_members(
                 role=m.role,
                 created_at=m.created_at,
                 approved_at=m.approved_at,
+                updated_at=m.updated_at,
+                invited_by_user_id=m.invited_by_user_id,
             )
             for m, u in rows
         ],
@@ -107,6 +109,8 @@ async def list_pending_requests(
                 role=m.role,
                 created_at=m.created_at,
                 approved_at=m.approved_at,
+                updated_at=m.updated_at,
+                invited_by_user_id=m.invited_by_user_id,
             )
             for m, u in rows
         ],

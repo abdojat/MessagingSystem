@@ -31,6 +31,10 @@ def default_error_code(status_code: int) -> str:
         return "CONFLICT"
     if status_code == 422:
         return "VALIDATION_ERROR"
+    if status_code == 429:
+        return "RATE_LIMITED"
+    if status_code >= 500:
+        return "INTERNAL_ERROR"
     return "ERROR"
 
 
