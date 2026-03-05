@@ -7,7 +7,7 @@ down:
 	docker compose down -v
 
 logs:
-	docker compose logs -f backend worker
+	docker compose logs -f backend worker frontend
 
 migrate:
 	docker compose run --rm backend alembic upgrade head

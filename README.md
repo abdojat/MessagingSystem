@@ -1,6 +1,6 @@
-# Channels Backend (FastAPI + Postgres + RabbitMQ + Redis)
+# Channels Stack (FastAPI + Next.js + Postgres + RabbitMQ + Redis)
 
-Telegram-like backend with auth, channels, memberships, messages, invites, events, sync, uploads, and websocket fanout.
+Telegram-like backend with auth, channels, memberships, messages, invites, events, sync, uploads, websocket fanout, and a blank Next.js frontend starter.
 
 ## Run
 ```bash
@@ -12,6 +12,9 @@ API docs:
 - `http://localhost:8000/docs`
 - Versioned API prefix: `/v1`
 - Legacy unversioned routes remain available as temporary aliases.
+
+Frontend:
+- `http://localhost:3000`
 
 ## Migrations
 ```bash
@@ -41,6 +44,7 @@ docker compose run --rm backend sh -lc "pytest -q"
 - `API_V1_PREFIX` (default `/v1`)
 - `OUTBOX_POLL_INTERVAL`
 - `WORKER_ONLINE_SCAN_INTERVAL`
+- Frontend runtime env via compose: `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000/v1`)
 
 ## Key Endpoints (`/v1`)
 
