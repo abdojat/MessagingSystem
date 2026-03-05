@@ -36,3 +36,33 @@ async def test_message_list_supports_after_seq_id(db_session):
     assert next_after == 4
     assert next_before is None
     assert has_more is True
+
+
+@pytest.mark.asyncio
+async def test_message_list_supports_bounded_window_with_before_and_after(db_session):
+    owner = User(username="owner_msgs_window", email="owner_msgs_window@example.com", password_hash="x")
+    db_session.add(owner)
+    await db_session.commit()
+    await db_session.refresh(owner)
+
+    channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="c_msgs_window", visibility="public", join_mode="open"),
+        DummyAMQP(),
+    )
+    for i in range(1, 8):
+        await MessageService.publish_message(
+            db_session,
+            channel.id,
+            owner.id,
+            PublishMessageRequest(content_text=f"m{i}"),
+        )
+
+    items, next_before, next_after, has_more = await MessageService.list_messages(
+        db_session, channel.id, owner.id, before_seq_id=7, after_seq_id=2, limit=3, order="desc"
+    )
+    assert [m.seq_id for m in items] == [6, 5, 4]
+    assert next_before == 4
+    assert next_after is None
+    assert has_more is True

@@ -24,7 +24,7 @@ async def test_invite_preview_revoke_and_accept_behaviors(db_session):
         DummyAMQP(),
     )
 
-    invite = await ChannelService.create_invite(
+    invite, invite_token = await ChannelService.create_invite(
         db_session,
         channel.id,
         owner.id,
@@ -32,28 +32,28 @@ async def test_invite_preview_revoke_and_accept_behaviors(db_session):
     )
     route_created = await create_invite_route(channel.id, InviteRequest(invited_user_id=target.id), db_session, owner)
     assert route_created.token
-    preview = await ChannelService.get_invite_preview(db_session, invite.token)
+    preview = await ChannelService.get_invite_preview(db_session, invite_token)
     assert preview["is_valid"] is True
 
     listed = await list_invites_route(channel.id, db_session, owner)
     assert listed.items
     assert all(not hasattr(item, "token") for item in listed.items)
-    assert listed.items[0].masked_token != invite.token
+    assert listed.items[0].masked_token != invite_token
     assert listed.items[0].masked_token == listed.items[0].token_masked
 
     await ChannelService.revoke_invite(db_session, channel.id, invite.id, owner.id)
-    revoked_preview = await ChannelService.get_invite_preview(db_session, invite.token)
+    revoked_preview = await ChannelService.get_invite_preview(db_session, invite_token)
     assert revoked_preview["is_valid"] is False
     assert revoked_preview["reason"] == "revoked"
 
-    invite2 = await ChannelService.create_invite(
+    invite2, invite2_token = await ChannelService.create_invite(
         db_session,
         channel.id,
         owner.id,
         InviteRequest(invited_user_id=target.id),
     )
-    membership = await ChannelService.accept_invite(db_session, DummyAMQP(), invite2.token, target.id)
+    membership = await ChannelService.accept_invite(db_session, DummyAMQP(), invite2_token, target.id)
     assert membership.role.value == "member"
 
-    second = await ChannelService.accept_invite(db_session, DummyAMQP(), invite2.token, target.id)
+    second = await ChannelService.accept_invite(db_session, DummyAMQP(), invite2_token, target.id)
     assert second.role.value == "member"

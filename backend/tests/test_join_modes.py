@@ -62,14 +62,14 @@ async def test_join_modes_behavior(db_session):
     assert requires_invite_status == "requires_invite"
     assert requires_invite_membership is None
 
-    invite = await ChannelService.create_invite(
+    invite, invite_token = await ChannelService.create_invite(
         db_session,
         invite_channel.id,
         owner.id,
         InviteRequest(invited_user_id=u4.id, expires_in_hours=24),
     )
     status_invite_join, accepted, _ = await ChannelService.join_channel(
-        db_session, amqp, invite_channel.id, u4.id, JoinRequest(invite_token=invite.token)
+        db_session, amqp, invite_channel.id, u4.id, JoinRequest(invite_token=invite_token)
     )
     assert status_invite_join == "joined"
     assert accepted.role == MembershipRole.member

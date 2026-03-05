@@ -41,7 +41,7 @@ class MessageService:
             "content_json": None if is_deleted else message.content_json,
             "reply_to_message_id": str(message.reply_to_message_id) if message.reply_to_message_id else None,
             "reply_to_seq_id": message.reply_to_seq_id,
-            "attachments": message.attachments,
+            "attachments": None if is_deleted else message.attachments,
             "is_pinned": bool(message.is_pinned),
             "client_msg_id": str(message.client_msg_id) if message.client_msg_id else None,
             "created_at": message.created_at.isoformat() if message.created_at else utcnow().isoformat(),
@@ -142,8 +142,6 @@ class MessageService:
         order: str | None = None,
     ) -> tuple[list[Message], int | None, int | None, bool]:
         await MessageService._assert_can_read(db, channel_id, user_id)
-        if before_seq_id is not None and after_seq_id is not None:
-            raise AppError("use either before_seq_id or after_seq_id, not both", 400, code="PAGINATION_INVALID")
         if order is None:
             order = "asc" if after_seq_id is not None else "desc"
         if order not in {"asc", "desc"}:
@@ -153,12 +151,9 @@ class MessageService:
         stmt = stmt.where(Message.deleted_at.is_(None))
         if before_seq_id is not None:
             stmt = stmt.where(Message.seq_id < before_seq_id)
-            stmt = stmt.order_by(Message.seq_id.asc() if order == "asc" else Message.seq_id.desc())
-        elif after_seq_id is not None:
+        if after_seq_id is not None:
             stmt = stmt.where(Message.seq_id > after_seq_id)
-            stmt = stmt.order_by(Message.seq_id.asc() if order == "asc" else Message.seq_id.desc())
-        else:
-            stmt = stmt.order_by(Message.seq_id.asc() if order == "asc" else Message.seq_id.desc())
+        stmt = stmt.order_by(Message.seq_id.asc() if order == "asc" else Message.seq_id.desc())
 
         rows = await db.execute(stmt.limit(limit + 1))
         values = list(rows.scalars().all())

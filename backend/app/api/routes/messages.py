@@ -43,7 +43,7 @@ def _to_message_response(message) -> MessageResponse:
         content_json=None if is_deleted else message.content_json,
         reply_to_message_id=message.reply_to_message_id,
         reply_to_seq_id=message.reply_to_seq_id,
-        attachments=message.attachments,
+        attachments=None if is_deleted else message.attachments,
         is_pinned=message.is_pinned,
         client_msg_id=message.client_msg_id,
         created_at=message.created_at,
@@ -103,6 +103,11 @@ async def publish_message(
     "/channels/{channel_id}/messages",
     response_model=MessageListResponse,
     openapi_extra={
+        "description": (
+            "Seq-based pagination. If both before_seq_id and after_seq_id are supplied, "
+            "the server applies a bounded window (after_seq_id, before_seq_id). "
+            "For order=desc use next_before_seq_id; for order=asc use next_after_seq_id."
+        ),
         "examples": {
             "before_seq": {
                 "summary": "Fetch older messages",

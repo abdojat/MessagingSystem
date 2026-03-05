@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -11,8 +10,9 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.errors import AppError
 from app.core.utils import utcnow
-from app.db.models import ChannelMembership, MembershipRole, Message, UserChannelState
+from app.db.models import ChannelMembership, MembershipRole, Message
 from app.mq.publisher import bind_user_channel
 from app.realtime.protocol import (
     WSResumePayload,
@@ -25,6 +25,8 @@ from app.realtime.protocol import (
     parse_client_envelope,
 )
 from app.realtime.redis_pubsub import mark_user_offline, mark_user_online, user_pubsub_channel
+from app.schemas.messages import SeenRequest
+from app.services.message_service import MessageService
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +125,7 @@ class WSManager:
             "content_json": None if is_deleted else m.content_json,
             "reply_to_message_id": str(m.reply_to_message_id) if m.reply_to_message_id else None,
             "reply_to_seq_id": m.reply_to_seq_id,
-            "attachments": m.attachments,
+            "attachments": None if is_deleted else m.attachments,
             "is_pinned": m.is_pinned,
             "client_msg_id": str(m.client_msg_id) if m.client_msg_id else None,
             "created_at": m.created_at.isoformat(),
@@ -191,8 +193,41 @@ class WSManager:
         except Exception as exc:
             await websocket.send_json(build_error("invalid seen payload", "VALIDATION_ERROR", request_id, {"error": str(exc)}))
             return
-        await self._apply_seen(user_id, req.model_dump(mode="json"))
-        await websocket.send_json(build_envelope("seen", req.model_dump(mode="json"), request_id=request_id))
+        if req.last_seen_seq_id is None:
+            await websocket.send_json(
+                build_error(
+                    "last_seen_seq_id is required",
+                    "VALIDATION_ERROR",
+                    request_id,
+                    {"channel_id": str(req.channel_id)},
+                )
+            )
+            return
+        async with self._session_factory() as db:
+            try:
+                state = await MessageService.mark_seen(
+                    db,
+                    req.channel_id,
+                    user_id,
+                    SeenRequest(last_seen_seq_id=req.last_seen_seq_id, last_seen_at=req.last_seen_at),
+                )
+            except AppError as exc:
+                await websocket.send_json(build_error(exc.message, exc.code, request_id, exc.details))
+                return
+        await websocket.send_json(
+            build_envelope(
+                "seen",
+                {
+                    "channel_id": str(state.channel_id),
+                    "user_id": str(state.user_id),
+                    "last_seen_message_id": str(state.last_seen_message_id) if state.last_seen_message_id else None,
+                    "last_seen_seq_id": state.last_seen_seq_id,
+                    "last_seen_at": state.last_seen_at.isoformat() if state.last_seen_at else None,
+                    "unread_count": state.unread_count,
+                },
+                request_id=request_id,
+            )
+        )
 
     async def _handle_subscribe(self, websocket: WebSocket, user_id: UUID, payload: dict[str, Any], request_id: UUID | None) -> None:
         try:
@@ -236,9 +271,15 @@ class WSManager:
             await websocket.send_json(build_error("invalid resume payload", "VALIDATION_ERROR", request_id, {"error": str(exc)}))
             return
         limit = max(1, min(int(req.limit or 200), 500))
+        allowed = set(await self._member_channel_ids(user_id))
         async with self._session_factory() as db:
             items: list[dict[str, Any]] = []
+            remaining = limit
             for cursor in req.channels:
+                if str(cursor.channel_id) not in allowed:
+                    continue
+                if remaining <= 0:
+                    break
                 stmt = (
                     select(Message)
                     .where(
@@ -247,11 +288,14 @@ class WSManager:
                         Message.seq_id > (cursor.last_seen_seq_id or 0),
                     )
                     .order_by(Message.seq_id.asc())
-                    .limit(limit)
+                    .limit(remaining)
                 )
                 rows = await db.execute(stmt)
                 for message in rows.scalars().all():
                     items.append(self._message_payload(message))
+                    remaining -= 1
+                    if remaining <= 0:
+                        break
             await websocket.send_json(
                 build_envelope(
                     "sync",
@@ -265,26 +309,6 @@ class WSManager:
                     request_id,
                 )
             )
-
-    async def _apply_seen(self, user_id: UUID, payload: dict[str, Any]) -> None:
-        channel_id = UUID(str(payload["channel_id"]))
-        seq_id = payload.get("last_seen_seq_id")
-        async with self._session_factory() as db:
-            state = await db.get(UserChannelState, {"channel_id": channel_id, "user_id": user_id})
-            if not state:
-                state = UserChannelState(channel_id=channel_id, user_id=user_id)
-                db.add(state)
-            if seq_id is not None:
-                state.last_seen_seq_id = int(seq_id)
-            raw_seen_at = payload.get("last_seen_at")
-            if raw_seen_at is not None:
-                try:
-                    state.last_seen_at = datetime.fromisoformat(str(raw_seen_at))
-                except ValueError:
-                    state.last_seen_at = utcnow()
-            else:
-                state.last_seen_at = utcnow()
-            await db.commit()
 
     async def _redis_forward_loop(self, websocket: WebSocket, user_id: UUID) -> None:
         channel_name = user_pubsub_channel(str(user_id))

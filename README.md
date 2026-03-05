@@ -187,8 +187,11 @@ Channels:
 - `GET /channels/{id}/events`: `limit` default `50` max `200`, `cursor`, order `created_at desc, id desc`.
 
 Messages:
-- `GET /channels/{id}/messages`: seq pagination with `before_seq_id` or `after_seq_id` (mutually exclusive), `limit` default `50` max `200`, `order=asc|desc` default `desc`.
-- If both `before_seq_id` and `after_seq_id` are provided, server returns `400 PAGINATION_INVALID`.
+- `GET /channels/{id}/messages`: seq pagination with `before_seq_id` and/or `after_seq_id`, `limit` default `50` max `200`, `order=asc|desc` default `desc`.
+- If both `before_seq_id` and `after_seq_id` are provided, server applies a bounded window `(after_seq_id, before_seq_id)` and still honors `order`.
+- Cursor progression precedence:
+  - `order=desc`: page moves older and uses `next_before_seq_id`.
+  - `order=asc`: page moves newer and uses `next_after_seq_id`.
 - Response includes `{next_before_seq_id,next_after_seq_id,has_more,order}`.
 - `GET /channels/{id}/messages/around`: `seq_id` required, `limit_before`/`limit_after` default `30` max `100`.
 
@@ -196,6 +199,19 @@ Idempotency and ordering:
 - `POST /channels/{id}/messages` is idempotent on `(channel_id,sender_user_id,client_msg_id)`.
 - Duplicate sends with same `client_msg_id` return the original message.
 - `seq_id` is channel-local and strictly increasing; duplicates are prevented by DB constraints + transactional counter update.
+
+Deleted message representation:
+- `DELETE /channels/{id}/messages/{message_id}` returns `MessageResponse` with `deleted_at` set.
+- When `deleted_at` is set, `content_text`, `content_json`, and `attachments` are always `null`.
+
+Seen/unread semantics:
+- `POST /channels/{id}/seen` requires exactly one of `last_seen_message_id` or `last_seen_seq_id`.
+- If `last_seen_message_id` is sent, backend resolves and validates it inside the channel.
+- `unread_count` is defined as: messages where `seq_id > last_seen_seq_id` and `deleted_at IS NULL`.
+
+Invite token safety:
+- Full invite token is only returned by `POST /channels/{channel_id}/invite`.
+- Stored invite tokens are hashed in DB (`token_hash`); list endpoints expose only masked token fragments.
 
 Sync and reconnect:
 - `POST /sync` body supports `channels[{channel_id,last_seen_seq_id}]`, optional `since`, `limit` default `200` max `500`.

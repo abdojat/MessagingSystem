@@ -139,10 +139,10 @@ async def list_pending_requests(
 @router.post("/channels/{channel_id}/invite", response_model=InviteResponse)
 async def create_invite(channel_id: UUID, req: InviteRequest, db: DBDep, user: CurrentUserDep) -> InviteResponse:
     try:
-        invite = await ChannelService.create_invite(db, channel_id, user.id, req)
+        invite, token = await ChannelService.create_invite(db, channel_id, user.id, req)
     except AppError as exc:
         raise to_http_exception(exc) from exc
-    return InviteResponse(id=invite.id, token=invite.token, channel_id=invite.channel_id, expires_at=invite.expires_at)
+    return InviteResponse(id=invite.id, token=token, channel_id=invite.channel_id, expires_at=invite.expires_at)
 
 
 @router.get("/channels/{channel_id}/invites", response_model=InviteListResponse)
@@ -179,8 +179,8 @@ async def list_invites(
                 invited_user_id=i.invited_user_id,
                 invited_email=i.invited_email,
                 is_generic=i.invited_user_id is None and i.invited_email is None,
-                masked_token=ChannelService.mask_token(i.token),
-                token_masked=ChannelService.mask_token(i.token),
+                masked_token=ChannelService.mask_token(i.token_mask_prefix, i.token_mask_suffix),
+                token_masked=ChannelService.mask_token(i.token_mask_prefix, i.token_mask_suffix),
                 created_by_user_id=i.created_by_user_id,
                 created_at=i.created_at,
                 expires_at=i.expires_at,

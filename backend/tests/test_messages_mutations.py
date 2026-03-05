@@ -110,3 +110,32 @@ async def test_message_edit_delete_permissions(db_session):
 
     deleted = await MessageService.delete_message(db_session, channel.id, admin.id, msg.id)
     assert deleted.deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_deleted_message_serialization_hides_attachments(db_session):
+    owner = User(username="owner_del", email="owner_del@example.com", password_hash="x")
+    db_session.add(owner)
+    await db_session.commit()
+    await db_session.refresh(owner)
+
+    channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="del-hide", visibility="public", join_mode="open"),
+        DummyAMQP(),
+    )
+    msg = await MessageService.publish_message(
+        db_session,
+        channel.id,
+        owner.id,
+        PublishMessageRequest(content_text="to-delete"),
+    )
+    msg.attachments = [{"file_id": str(uuid.uuid4())}]
+    await db_session.commit()
+
+    deleted = await MessageService.delete_message(db_session, channel.id, owner.id, msg.id)
+    payload = MessageService._serialize_message(deleted)
+    assert payload["content_text"] is None
+    assert payload["content_json"] is None
+    assert payload["attachments"] is None

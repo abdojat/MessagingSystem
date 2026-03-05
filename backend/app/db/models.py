@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -140,7 +141,10 @@ class ChannelInvite(Base):
     channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("channels.id", ondelete="CASCADE"), index=True)
     invited_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     invited_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    token: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    token_mask_prefix: Mapped[str] = mapped_column(String(8), nullable=False, server_default="****")
+    token_mask_suffix: Mapped[str] = mapped_column(String(8), nullable=False, server_default="****")
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -172,9 +176,16 @@ class Message(Base):
 
     __table_args__ = (
         UniqueConstraint("channel_id", "seq_id", name="uq_messages_channel_seq"),
-        UniqueConstraint("channel_id", "sender_user_id", "client_msg_id", name="uq_messages_client_msg"),
         Index("ix_messages_channel_created_at", "channel_id", "created_at"),
         Index("ix_messages_channel_seq", "channel_id", "seq_id"),
+        Index(
+            "uq_messages_client_msg_not_null",
+            "channel_id",
+            "sender_user_id",
+            "client_msg_id",
+            unique=True,
+            postgresql_where=text("client_msg_id IS NOT NULL"),
+        ),
     )
 
 
@@ -219,6 +230,8 @@ class Upload(Base):
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
     public_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (Index("ix_uploads_created_at", "created_at"),)
 
 
 class UserChannelState(Base):

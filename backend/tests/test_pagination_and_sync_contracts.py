@@ -1,6 +1,5 @@
 import pytest
 
-from app.core.errors import AppError
 from app.db.models import ChannelMembership, MembershipRole, User
 from app.schemas.channels import ChannelCreateRequest
 from app.schemas.messages import PublishMessageRequest, SyncRequest
@@ -39,11 +38,13 @@ async def test_message_seq_pagination_contract(db_session):
     assert next_before_asc is None
     assert next_after_asc == 4
 
-    with pytest.raises(AppError) as exc:
-        await MessageService.list_messages(
-            db_session, channel.id, owner.id, before_seq_id=10, after_seq_id=1, limit=10, order="desc"
-        )
-    assert exc.value.code == "PAGINATION_INVALID"
+    bounded_items, bounded_next_before, bounded_next_after, bounded_has_more = await MessageService.list_messages(
+        db_session, channel.id, owner.id, before_seq_id=6, after_seq_id=2, limit=2, order="desc"
+    )
+    assert [m.seq_id for m in bounded_items] == [5, 4]
+    assert bounded_next_before == 4
+    assert bounded_next_after is None
+    assert bounded_has_more is True
 
 
 @pytest.mark.asyncio

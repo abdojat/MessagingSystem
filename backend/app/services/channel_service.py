@@ -8,7 +8,7 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.core.utils import make_invite_token, utcnow
+from app.core.utils import make_invite_token, sha256_hex, utcnow
 from app.db.models import (
     Channel,
     ChannelCounter,
@@ -530,18 +530,21 @@ class ChannelService:
         channel_id: UUID,
         actor_user_id: UUID,
         req: InviteRequest,
-    ) -> ChannelInvite:
+    ) -> tuple[ChannelInvite, str]:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not can_invite(membership.role if membership else None):
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         token = make_invite_token()
+        token_hash = sha256_hex(token)
         invite = ChannelInvite(
             channel_id=channel_id,
             invited_user_id=req.invited_user_id,
             invited_email=req.invited_email,
-            token=token,
+            token_hash=token_hash,
+            token_mask_prefix=token[:4],
+            token_mask_suffix=token[-4:],
             created_by_user_id=actor_user_id,
             expires_at=utcnow() + timedelta(hours=req.expires_in_hours),
         )
@@ -555,7 +558,7 @@ class ChannelService:
         )
         await db.commit()
         await db.refresh(invite)
-        return invite
+        return invite, token
 
     @staticmethod
     async def list_invites(
@@ -625,10 +628,11 @@ class ChannelService:
 
     @staticmethod
     async def get_invite_preview(db: AsyncSession, token: str) -> dict:
+        token_hash = sha256_hex(token)
         row = await db.execute(
             select(ChannelInvite, Channel)
             .join(Channel, Channel.id == ChannelInvite.channel_id)
-            .where(ChannelInvite.token == token)
+            .where(ChannelInvite.token_hash == token_hash)
         )
         data = row.first()
         if not data:
@@ -658,13 +662,14 @@ class ChannelService:
         token: str,
         user_id: UUID,
     ) -> ChannelMembership:
+        token_hash = sha256_hex(token)
         user = await db.get(User, user_id)
         if not user:
             raise AppError("user not found", 404)
         result = await db.execute(
             select(ChannelInvite, Channel)
             .join(Channel, Channel.id == ChannelInvite.channel_id)
-            .where(ChannelInvite.token == token)
+            .where(ChannelInvite.token_hash == token_hash)
         )
         data = result.first()
         if not data:
@@ -1047,11 +1052,12 @@ class ChannelService:
 
     @staticmethod
     async def _validate_invite(db: AsyncSession, channel_id: UUID, token: str, user_id: UUID) -> ChannelInvite:
+        token_hash = sha256_hex(token)
         user = await db.get(User, user_id)
         if not user:
             raise AppError("invalid invite", 404, code="INVITE_INVALID")
         row = await db.execute(
-            select(ChannelInvite).where(ChannelInvite.channel_id == channel_id, ChannelInvite.token == token)
+            select(ChannelInvite).where(ChannelInvite.channel_id == channel_id, ChannelInvite.token_hash == token_hash)
         )
         invite = row.scalar_one_or_none()
         if not invite:
@@ -1100,10 +1106,10 @@ class ChannelService:
         )
 
     @staticmethod
-    def mask_token(token: str) -> str:
-        if len(token) <= 8:
-            return "*" * len(token)
-        return f"{token[:4]}...{token[-4:]}"
+    def mask_token(prefix: str, suffix: str) -> str:
+        safe_prefix = (prefix or "****")[:4]
+        safe_suffix = (suffix or "****")[-4:]
+        return f"{safe_prefix}...{safe_suffix}"
 
     @staticmethod
     def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
