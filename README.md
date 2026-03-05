@@ -35,7 +35,7 @@ docker compose run --rm backend sh -lc "pytest -q"
 - `JWT_SECRET`
 - `JWT_ACCESS_TTL_MIN`
 - `JWT_REFRESH_TTL_DAYS`
-- `CORS_ORIGINS` (JSON array, e.g. `["http://localhost:3000","http://localhost:5173"]`)
+- `CORS_ORIGINS` (comma-separated or JSON array, e.g. `http://localhost:3000,http://localhost:5173`)
 - `UPLOAD_MAX_SIZE_BYTES` (supports up to `1073741824` bytes / 1GB)
 - `UPLOADS_BASE_DIR` (docker volume path)
 - `API_V1_PREFIX` (default `/v1`)
@@ -172,11 +172,11 @@ Server -> client types:
 - Cursor validation errors return `400` with code `PAGINATION_INVALID`.
 
 Users:
-- `GET /users/search`: `q` (required, trimmed), `limit` default `20` max `50`, `cursor`.
+- `GET /users/search`: `q` (required, trimmed), `limit` default `50` max `200`, `cursor`.
 - Order is deterministic: username asc, then id asc.
 
 Channels:
-- `GET /channels`: `limit` default `20` max `50`, `cursor`, optional `q`, `visibility`, `scope=my|discover` (default `my`).
+- `GET /channels`: `limit` default `50` max `200`, `cursor`, optional `q`, `visibility`, `scope=my|discover` (default `my`).
 - `my` scope lists only channels where caller has membership.
 - `discover` scope lists public channels not yet joined.
 - Stable order: `last_message_at desc nulls last, created_at desc, id desc`.
@@ -198,7 +198,7 @@ Idempotency and ordering:
 - `seq_id` is channel-local and strictly increasing; duplicates are prevented by DB constraints + transactional counter update.
 
 Sync and reconnect:
-- `POST /sync` body supports `channels[{channel_id,last_seen_seq_id}]`, optional `since`, `limit` default `500` max `2000`.
+- `POST /sync` body supports `channels[{channel_id,last_seen_seq_id}]`, optional `since`, `limit` default `200` max `500`.
 - Response shape: `{server_time, channel_updates, membership_updates, messages}`.
 - `messages` are deterministic and sorted by `(channel_id, seq_id)`.
 - WS is realtime-first; clients should use REST `/sync` for backfill.

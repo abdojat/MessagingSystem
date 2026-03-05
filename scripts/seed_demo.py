@@ -6,6 +6,7 @@ import httpx
 
 BASE = os.getenv("BASE_URL", "http://localhost:8000")
 PASSWORD = "password123"
+ENVIRONMENT = os.getenv("ENVIRONMENT", "dev").lower()
 
 
 def _decode_sub(access_token: str) -> str:
@@ -27,6 +28,8 @@ def register_or_login(client: httpx.Client, username: str, email: str) -> dict:
 
 
 def main() -> None:
+    if ENVIRONMENT not in {"dev", "local", "test"}:
+        raise RuntimeError(f"seed script is disabled outside dev/test environments (ENVIRONMENT={ENVIRONMENT})")
     with httpx.Client(timeout=20) as client:
         alice = register_or_login(client, "alice", "alice@example.com")
         bob = register_or_login(client, "bob", "bob@example.com")
