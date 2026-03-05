@@ -47,8 +47,10 @@ async def search_users(
     _: CurrentUserDep,
     q: str = Query(min_length=1, max_length=255),
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=50),
+    limit: int = Query(default=50, ge=1, le=200),
 ) -> UserSearchResponse:
+    if not isinstance(q, str):
+        raise to_http_exception(AppError("q cannot be empty", 400, code="VALIDATION_ERROR"))
     q_raw = q.strip()
     if not q_raw:
         raise to_http_exception(AppError("q cannot be empty", 400, code="VALIDATION_ERROR"))

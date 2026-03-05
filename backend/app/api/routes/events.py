@@ -18,6 +18,8 @@ async def list_channel_events(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> EventListResponse:
+    if not isinstance(cursor, str):
+        cursor = None
     try:
         events, next_cursor, has_more = await ChannelService.get_events(db, channel_id, user.id, cursor, limit)
     except AppError as exc:

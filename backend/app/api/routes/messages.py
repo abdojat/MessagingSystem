@@ -32,14 +32,15 @@ router = APIRouter(tags=["messages"])
 
 
 def _to_message_response(message) -> MessageResponse:
+    is_deleted = message.deleted_at is not None
     return MessageResponse(
         id=message.id,
         channel_id=message.channel_id,
         sender_user_id=message.sender_user_id,
         seq_id=message.seq_id,
         content_type=message.content_type.value,
-        content_text=message.content_text,
-        content_json=message.content_json,
+        content_text=None if is_deleted else message.content_text,
+        content_json=None if is_deleted else message.content_json,
         reply_to_message_id=message.reply_to_message_id,
         reply_to_seq_id=message.reply_to_seq_id,
         attachments=message.attachments,
@@ -123,6 +124,12 @@ async def list_messages(
     limit: int = Query(default=50, ge=1, le=200),
     order: str = Query(default="desc", pattern="^(asc|desc)$"),
 ) -> MessageListResponse:
+    if not isinstance(before_seq_id, int):
+        before_seq_id = None
+    if not isinstance(after_seq_id, int):
+        after_seq_id = None
+    if not isinstance(order, str):
+        order = "desc"
     try:
         messages, next_before, next_after, has_more = await MessageService.list_messages(
             db,
@@ -154,6 +161,10 @@ async def list_messages_around(
     limit_before: int = Query(default=30, ge=0, le=100),
     limit_after: int = Query(default=30, ge=0, le=100),
 ) -> MessageAroundResponse:
+    if not isinstance(limit_before, int):
+        limit_before = 30
+    if not isinstance(limit_after, int):
+        limit_after = 30
     if limit is not None:
         side = max(1, limit // 2)
         limit_before = side
@@ -330,7 +341,7 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
                     "example": {
                         "channels": [{"channel_id": "00000000-0000-0000-0000-000000000001", "last_seen_seq_id": 42}],
                         "since": None,
-                        "limit": 500,
+                        "limit": 200,
                     }
                 }
             }

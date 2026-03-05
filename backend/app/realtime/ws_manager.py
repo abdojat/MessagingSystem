@@ -104,7 +104,7 @@ class WSManager:
                     "sync",
                     {
                         "server_time": utcnow().isoformat(),
-                        "channels": [],
+                        "channel_updates": [],
                         "membership_updates": [],
                         "messages": sync_items,
                     },
@@ -112,14 +112,15 @@ class WSManager:
             )
 
     def _message_payload(self, m: Message) -> dict[str, Any]:
+        is_deleted = m.deleted_at is not None
         return {
             "id": str(m.id),
             "channel_id": str(m.channel_id),
             "sender_user_id": str(m.sender_user_id),
             "seq_id": m.seq_id,
             "content_type": m.content_type.value,
-            "content_text": m.content_text,
-            "content_json": m.content_json,
+            "content_text": None if is_deleted else m.content_text,
+            "content_json": None if is_deleted else m.content_json,
             "reply_to_message_id": str(m.reply_to_message_id) if m.reply_to_message_id else None,
             "reply_to_seq_id": m.reply_to_seq_id,
             "attachments": m.attachments,
@@ -129,6 +130,7 @@ class WSManager:
             "updated_at": m.updated_at.isoformat() if m.updated_at else None,
             "edited_at": m.edited_at.isoformat() if m.edited_at else None,
             "deleted_at": m.deleted_at.isoformat() if m.deleted_at else None,
+            "reactions_summary": {"counts": {}, "my_reaction": []},
         }
 
     async def _inbound_loop(self, websocket: WebSocket, user_id: UUID) -> None:
@@ -219,7 +221,7 @@ class WSManager:
                 "sync",
                 {
                     "server_time": utcnow().isoformat(),
-                    "channels": [],
+                    "channel_updates": [],
                     "membership_updates": [],
                     "messages": [],
                 },
@@ -233,6 +235,7 @@ class WSManager:
         except Exception as exc:
             await websocket.send_json(build_error("invalid resume payload", "VALIDATION_ERROR", request_id, {"error": str(exc)}))
             return
+        limit = max(1, min(int(req.limit or 200), 500))
         async with self._session_factory() as db:
             items: list[dict[str, Any]] = []
             for cursor in req.channels:
@@ -244,7 +247,7 @@ class WSManager:
                         Message.seq_id > (cursor.last_seen_seq_id or 0),
                     )
                     .order_by(Message.seq_id.asc())
-                    .limit(100)
+                    .limit(limit)
                 )
                 rows = await db.execute(stmt)
                 for message in rows.scalars().all():
@@ -255,7 +258,7 @@ class WSManager:
                     {
                         "server_time": utcnow().isoformat(),
                         "since": req.since.isoformat() if req.since else None,
-                        "channels": [],
+                        "channel_updates": [],
                         "membership_updates": [],
                         "messages": items,
                     },

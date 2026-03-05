@@ -97,6 +97,7 @@ class Channel(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seq_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
 
 
 class ChannelCounter(Base):

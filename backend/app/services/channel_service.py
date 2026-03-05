@@ -196,7 +196,11 @@ class ChannelService:
         all_rows = rows.all()
         has_more = len(all_rows) > limit
         page = all_rows[:limit]
-        items = [await ChannelService._enrich_channel_payload(db, channel, user_id, role) for channel, role, _ in page]
+        items = await ChannelService._enrich_channel_payload_batch(
+            db,
+            [(channel, role) for channel, role, _ in page],
+            user_id,
+        )
         next_cursor = None
         if has_more and page:
             last_channel, _, last_message_at = page[-1]
@@ -206,6 +210,111 @@ class ChannelService:
                 last_channel.id,
             )
         return items, next_cursor, has_more
+
+    @staticmethod
+    async def _enrich_channel_payload_batch(
+        db: AsyncSession,
+        channel_rows: list[tuple[Channel, MembershipRole | None]],
+        user_id: UUID,
+    ) -> list[dict]:
+        if not channel_rows:
+            return []
+        channels_by_id = {channel.id: channel for channel, _ in channel_rows}
+        roles_by_id = {channel.id: role for channel, role in channel_rows}
+        channel_ids = list(channels_by_id.keys())
+
+        payloads = {
+            channel_id: ChannelService.build_channel_payload(channels_by_id[channel_id], roles_by_id[channel_id]) for channel_id in channel_ids
+        }
+
+        member_rows = await db.execute(
+            select(ChannelMembership.channel_id, func.count(ChannelMembership.user_id))
+            .where(
+                ChannelMembership.channel_id.in_(channel_ids),
+                ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+            )
+            .group_by(ChannelMembership.channel_id)
+        )
+        for channel_id, count in member_rows.all():
+            payloads[channel_id]["member_count"] = int(count or 0)
+
+        pending_rows = await db.execute(
+            select(ChannelMembership.channel_id, func.count(ChannelMembership.user_id))
+            .where(
+                ChannelMembership.channel_id.in_(channel_ids),
+                ChannelMembership.role == MembershipRole.pending,
+            )
+            .group_by(ChannelMembership.channel_id)
+        )
+        pending_map = {cid: int(count or 0) for cid, count in pending_rows.all()}
+        for channel_id in channel_ids:
+            role = roles_by_id.get(channel_id)
+            payloads[channel_id]["pending_count"] = pending_map.get(channel_id, 0) if role in {MembershipRole.owner, MembershipRole.admin} else 0
+
+        max_seq_sq = (
+            select(Message.channel_id, func.max(Message.seq_id).label("max_seq"))
+            .where(Message.channel_id.in_(channel_ids), Message.deleted_at.is_(None))
+            .group_by(Message.channel_id)
+            .subquery()
+        )
+        last_rows = await db.execute(
+            select(Message)
+            .join(
+                max_seq_sq,
+                and_(Message.channel_id == max_seq_sq.c.channel_id, Message.seq_id == max_seq_sq.c.max_seq),
+            )
+            .order_by(Message.channel_id.asc())
+        )
+        for last_message in last_rows.scalars().all():
+            payloads[last_message.channel_id]["last_message"] = {
+                "id": last_message.id,
+                "channel_id": last_message.channel_id,
+                "sender_user_id": last_message.sender_user_id,
+                "seq_id": last_message.seq_id,
+                "content_type": last_message.content_type.value,
+                "content_text": last_message.content_text,
+                "content_json": last_message.content_json,
+                "reply_to_message_id": last_message.reply_to_message_id,
+                "reply_to_seq_id": last_message.reply_to_seq_id,
+                "attachments": last_message.attachments,
+                "is_pinned": last_message.is_pinned,
+                "client_msg_id": last_message.client_msg_id,
+                "created_at": last_message.created_at,
+                "updated_at": last_message.updated_at,
+                "edited_at": last_message.edited_at,
+                "deleted_at": last_message.deleted_at,
+                "reactions_summary": {"counts": {}, "my_reaction": []},
+            }
+            payloads[last_message.channel_id]["last_message_at"] = last_message.created_at
+
+        state_rows = await db.execute(
+            select(UserChannelState.channel_id, UserChannelState.last_seen_seq_id)
+            .where(UserChannelState.user_id == user_id, UserChannelState.channel_id.in_(channel_ids))
+        )
+        seen_map = {cid: int(seq or 0) for cid, seq in state_rows.all()}
+        for channel_id in channel_ids:
+            payloads[channel_id]["my_last_seen_seq_id"] = seen_map.get(channel_id)
+
+        state_sq = (
+            select(UserChannelState.channel_id, UserChannelState.last_seen_seq_id)
+            .where(UserChannelState.user_id == user_id, UserChannelState.channel_id.in_(channel_ids))
+            .subquery()
+        )
+        unread_rows = await db.execute(
+            select(Message.channel_id, func.count(Message.id))
+            .outerjoin(state_sq, state_sq.c.channel_id == Message.channel_id)
+            .where(
+                Message.channel_id.in_(channel_ids),
+                Message.deleted_at.is_(None),
+                Message.seq_id > func.coalesce(state_sq.c.last_seen_seq_id, 0),
+            )
+            .group_by(Message.channel_id)
+        )
+        unread_map = {cid: int(count or 0) for cid, count in unread_rows.all()}
+        for channel_id in channel_ids:
+            payloads[channel_id]["unread_count"] = unread_map.get(channel_id, 0)
+
+        return [payloads[channel.id] for channel, _ in channel_rows]
 
     @staticmethod
     async def get_channel_or_404(db: AsyncSession, channel_id: UUID) -> Channel:
@@ -1094,11 +1203,16 @@ class ChannelService:
             payload["last_message_at"] = last_message.created_at
 
         state = await db.get(UserChannelState, {"channel_id": channel.id, "user_id": user_id})
-        counter = await db.get(ChannelCounter, {"channel_id": channel.id})
         payload["my_last_seen_seq_id"] = state.last_seen_seq_id if state else None
-        next_seq = int(counter.next_seq) if counter else 0
         seen_seq = int(state.last_seen_seq_id) if state and state.last_seen_seq_id is not None else 0
-        payload["unread_count"] = max(0, next_seq - seen_seq)
+        unread_result = await db.execute(
+            select(func.count(Message.id)).where(
+                Message.channel_id == channel.id,
+                Message.deleted_at.is_(None),
+                Message.seq_id > seen_seq,
+            )
+        )
+        payload["unread_count"] = int(unread_result.scalar_one() or 0)
         return payload
 
     @staticmethod
@@ -1123,7 +1237,10 @@ class ChannelService:
             select(func.count(Message.id)).where(Message.channel_id == channel_id, Message.deleted_at.is_(None))
         )
         last_message_result = await db.execute(
-            select(Message.created_at).where(Message.channel_id == channel_id).order_by(Message.seq_id.desc()).limit(1)
+            select(Message.created_at)
+            .where(Message.channel_id == channel_id, Message.deleted_at.is_(None))
+            .order_by(Message.seq_id.desc())
+            .limit(1)
         )
         return {
             "channel_id": channel_id,

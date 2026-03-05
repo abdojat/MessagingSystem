@@ -2,7 +2,7 @@ from pathlib import Path
 import hashlib
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,6 @@ from app.core.errors import AppError
 from app.core.utils import utcnow
 from app.db.models import (
     Channel,
-    ChannelCounter,
     ChannelMembership,
     ContentType,
     MembershipRole,
@@ -30,8 +29,32 @@ from app.services.rbac import can_publish, can_read
 
 class MessageService:
     @staticmethod
+    def _serialize_message(message: Message) -> dict:
+        is_deleted = message.deleted_at is not None
+        return {
+            "id": str(message.id),
+            "channel_id": str(message.channel_id),
+            "sender_user_id": str(message.sender_user_id),
+            "seq_id": int(message.seq_id),
+            "content_type": message.content_type.value,
+            "content_text": None if is_deleted else message.content_text,
+            "content_json": None if is_deleted else message.content_json,
+            "reply_to_message_id": str(message.reply_to_message_id) if message.reply_to_message_id else None,
+            "reply_to_seq_id": message.reply_to_seq_id,
+            "attachments": message.attachments,
+            "is_pinned": bool(message.is_pinned),
+            "client_msg_id": str(message.client_msg_id) if message.client_msg_id else None,
+            "created_at": message.created_at.isoformat() if message.created_at else utcnow().isoformat(),
+            "updated_at": message.updated_at.isoformat() if message.updated_at else None,
+            "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+            "deleted_at": message.deleted_at.isoformat() if message.deleted_at else None,
+            "reactions_summary": {"counts": {}, "my_reaction": []},
+        }
+
+    @staticmethod
     async def publish_message(db: AsyncSession, channel_id: UUID, sender_id: UUID, req: PublishMessageRequest) -> Message:
-        channel = await db.get(Channel, channel_id)
+        channel_row = await db.execute(select(Channel).where(Channel.id == channel_id).with_for_update())
+        channel = channel_row.scalar_one_or_none()
         if not channel or channel.deleted_at is not None:
             raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": sender_id})
@@ -52,15 +75,9 @@ class MessageService:
                 return existing_message
 
         attachments = await MessageService._normalize_attachments(db, sender_id, req.attachments)
-        seq_result = await db.execute(
-            update(ChannelCounter)
-            .where(ChannelCounter.channel_id == channel_id)
-            .values(next_seq=ChannelCounter.next_seq + 1)
-            .returning(ChannelCounter.next_seq)
-        )
-        seq_id = seq_result.scalar_one_or_none()
-        if seq_id is None:
-            raise AppError("channel counter missing", 500)
+        channel.last_seq_id = int(channel.last_seq_id or 0) + 1
+        seq_id = int(channel.last_seq_id)
+        await db.flush()
 
         content_type = ContentType.text if req.content_text is not None else ContentType.json
         message = Message(
@@ -78,19 +95,7 @@ class MessageService:
         db.add(message)
         await db.flush()
 
-        payload = {
-            "type": "message",
-            "message_id": str(message.id),
-            "channel_id": str(channel_id),
-            "sender_user_id": str(sender_id),
-            "seq_id": seq_id,
-            "content_type": content_type.value,
-            "content_text": message.content_text,
-            "content_json": message.content_json,
-            "attachments": message.attachments,
-            "client_msg_id": str(message.client_msg_id) if message.client_msg_id else None,
-            "created_at": message.created_at.isoformat() if message.created_at else utcnow().isoformat(),
-        }
+        payload = {"type": "message", **MessageService._serialize_message(message)}
         await enqueue_message_outbox(db, message.id, channel_id, payload)
         await log_event(
             db,
@@ -140,7 +145,7 @@ class MessageService:
         if before_seq_id is not None and after_seq_id is not None:
             raise AppError("use either before_seq_id or after_seq_id, not both", 400, code="PAGINATION_INVALID")
         if order is None:
-            order = "desc"
+            order = "asc" if after_seq_id is not None else "desc"
         if order not in {"asc", "desc"}:
             raise AppError("order must be asc or desc", 400, code="VALIDATION_ERROR")
 
@@ -227,10 +232,15 @@ class MessageService:
         else:
             state.last_seen_at = utcnow()
 
-        counter = await db.get(ChannelCounter, {"channel_id": channel_id})
-        max_seq = int(counter.next_seq) if counter else 0
         seen_seq = int(state.last_seen_seq_id or 0)
-        state.unread_count = max(0, max_seq - seen_seq)
+        unread_rows = await db.execute(
+            select(func.count(Message.id)).where(
+                Message.channel_id == channel_id,
+                Message.deleted_at.is_(None),
+                Message.seq_id > seen_seq,
+            )
+        )
+        state.unread_count = int(unread_rows.scalar_one() or 0)
         await enqueue_channel_event_outbox(
             db,
             uuid4(),
@@ -283,23 +293,7 @@ class MessageService:
         message.edited_at = utcnow()
         message.updated_at = utcnow()
         await db.flush()
-        await enqueue_message_outbox(
-            db,
-            message.id,
-            channel_id,
-            {
-                "type": "message_updated",
-                "op": "edit",
-                "message_id": str(message.id),
-                "channel_id": str(channel_id),
-                "seq_id": message.seq_id,
-                "content_type": message.content_type.value,
-                "content_text": message.content_text,
-                "content_json": message.content_json,
-                "edited_at": message.edited_at.isoformat(),
-                "updated_at": message.updated_at.isoformat(),
-            },
-        )
+        await enqueue_message_outbox(db, message.id, channel_id, {"type": "message_updated", **MessageService._serialize_message(message)})
         await db.commit()
         await db.refresh(message)
         return message
@@ -320,21 +314,10 @@ class MessageService:
         if message.deleted_at is None:
             message.deleted_at = utcnow()
             message.updated_at = message.deleted_at
+            message.content_text = None
+            message.content_json = None
             await db.flush()
-            await enqueue_message_outbox(
-                db,
-                message.id,
-                channel_id,
-                {
-                    "type": "message_updated",
-                    "op": "delete",
-                    "message_id": str(message.id),
-                    "channel_id": str(channel_id),
-                    "seq_id": message.seq_id,
-                    "deleted_at": message.deleted_at.isoformat(),
-                    "updated_at": message.updated_at.isoformat(),
-                },
-            )
+            await enqueue_message_outbox(db, message.id, channel_id, {"type": "message_updated", **MessageService._serialize_message(message)})
             await db.commit()
             await db.refresh(message)
         return message
@@ -370,7 +353,8 @@ class MessageService:
                 MessageReaction.emoji == emoji,
             )
         )
-        if existing.scalar_one_or_none() is None:
+        existing_reaction = existing.scalar_one_or_none()
+        if existing_reaction is None:
             db.add(
                 MessageReaction(
                     channel_id=channel_id,
@@ -380,6 +364,8 @@ class MessageService:
                 )
             )
             await db.flush()
+        summary = await MessageService._reaction_summary(db, message_id, actor_user_id)
+        if existing_reaction is None:
             await enqueue_message_outbox(
                 db,
                 message.id,
@@ -388,13 +374,11 @@ class MessageService:
                     "type": "reaction_updated",
                     "channel_id": str(channel_id),
                     "message_id": str(message_id),
-                    "emoji": emoji,
-                    "op": "add",
-                    "user_id": str(actor_user_id),
+                    "reactions_summary": summary,
                 },
             )
             await db.commit()
-        return await MessageService._reaction_summary(db, message_id, actor_user_id)
+        return summary
 
     @staticmethod
     async def remove_reaction(db: AsyncSession, channel_id: UUID, message_id: UUID, actor_user_id: UUID, emoji: str) -> dict:
@@ -409,6 +393,7 @@ class MessageService:
                 MessageReaction.emoji == emoji,
             )
         )
+        summary = await MessageService._reaction_summary(db, message_id, actor_user_id)
         await enqueue_message_outbox(
             db,
             message.id,
@@ -417,13 +402,11 @@ class MessageService:
                 "type": "reaction_updated",
                 "channel_id": str(channel_id),
                 "message_id": str(message_id),
-                "emoji": emoji,
-                "op": "remove",
-                "user_id": str(actor_user_id),
+                "reactions_summary": summary,
             },
         )
         await db.commit()
-        return await MessageService._reaction_summary(db, message_id, actor_user_id)
+        return summary
 
     @staticmethod
     async def pin_message(db: AsyncSession, channel_id: UUID, message_id: UUID, actor_user_id: UUID) -> None:
@@ -442,14 +425,7 @@ class MessageService:
             db,
             message.id,
             channel_id,
-            {
-                "type": "message_updated",
-                "op": "pin",
-                "channel_id": str(channel_id),
-                "message_id": str(message_id),
-                "seq_id": message.seq_id,
-                "is_pinned": True,
-            },
+            {"type": "message_updated", **MessageService._serialize_message(message)},
         )
         await db.commit()
 
@@ -469,14 +445,7 @@ class MessageService:
                 db,
                 message.id,
                 channel_id,
-                {
-                    "type": "message_updated",
-                    "op": "unpin",
-                    "channel_id": str(channel_id),
-                    "message_id": str(message_id),
-                    "seq_id": message.seq_id,
-                    "is_pinned": False,
-                },
+                {"type": "message_updated", **MessageService._serialize_message(message)},
             )
         await db.commit()
 
@@ -535,12 +504,12 @@ class MessageService:
 
         channel_updates: list[dict] = []
         for cid in selected:
-            channel = await ChannelService.get_channel_or_404(db, cid)
+            patch = await ChannelService.get_channel_view(db, cid, actor_user_id)
             channel_updates.append(
                 {
-                    "channel_id": channel.id,
-                    "patch": await ChannelService._enrich_channel_payload(db, channel, actor_user_id, membership_map[cid]),
-                    "updated_at": channel.updated_at,
+                    "channel_id": cid,
+                    "patch": patch,
+                    "updated_at": patch["updated_at"],
                 }
             )
 

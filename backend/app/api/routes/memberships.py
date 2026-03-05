@@ -57,6 +57,10 @@ async def list_members(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> ChannelMembershipListResponse:
+    if not isinstance(q, str):
+        q = None
+    if not isinstance(cursor, str):
+        cursor = None
     try:
         rows, next_cursor, has_more = await ChannelService.list_members(
             db,
@@ -97,6 +101,10 @@ async def list_pending_requests(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> ChannelMembershipListResponse:
+    if not isinstance(q, str):
+        q = None
+    if not isinstance(cursor, str):
+        cursor = None
     try:
         rows, next_cursor, has_more = await ChannelService.list_members(
             db=db,
@@ -146,6 +154,12 @@ async def list_invites(
     limit: int = Query(default=50, ge=1, le=200),
     status: str | None = Query(default=None, pattern="^(active|revoked|accepted|expired)$"),
 ) -> InviteListResponse:
+    if not isinstance(cursor, str):
+        cursor = None
+    if not isinstance(status, str):
+        status = None
+    if not isinstance(limit, int):
+        limit = 50
     try:
         invites, next_cursor, has_more = await ChannelService.list_invites(
             db,

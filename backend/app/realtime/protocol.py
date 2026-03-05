@@ -31,6 +31,7 @@ class WSResumeCursor(BaseModel):
 class WSResumePayload(BaseModel):
     channels: list[WSResumeCursor] = Field(default_factory=list)
     since: datetime | None = None
+    limit: int = Field(default=200, ge=1, le=500)
 
 
 class WSSyncState(BaseModel):

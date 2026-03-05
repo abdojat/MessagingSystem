@@ -150,8 +150,9 @@ async def _run_websocket_with_token(websocket: WebSocket, token: str, pre_accept
         try:
             user = await AuthService.get_user_from_access_token(db, token)
         except (AppError, ValueError):
-            if pre_accepted:
-                await websocket.send_json(build_error("invalid token", code="AUTH_INVALID"))
+            if not pre_accepted:
+                await websocket.accept()
+            await websocket.send_json(build_error("invalid token", code="AUTH_INVALID"))
             await websocket.close(code=1008, reason="invalid token")
             return
 

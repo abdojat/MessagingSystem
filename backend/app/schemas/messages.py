@@ -41,7 +41,7 @@ class MessageResponse(BaseModel):
     updated_at: datetime | None = None
     edited_at: datetime | None = None
     deleted_at: datetime | None = None
-    reactions_summary: dict[str, Any] | None = None
+    reactions_summary: dict[str, Any] = Field(default_factory=lambda: {"counts": {}, "my_reaction": []})
 
 
 class MessagePatchRequest(BaseModel):
@@ -95,7 +95,7 @@ class SyncChannelCursor(BaseModel):
 class SyncRequest(BaseModel):
     channels: list[SyncChannelCursor] = Field(default_factory=list)
     since: datetime | None = None
-    limit: int = Field(default=500, ge=1, le=2000)
+    limit: int = Field(default=200, ge=1, le=500)
 
 
 class SyncMembershipUpdate(BaseModel):

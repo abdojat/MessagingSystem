@@ -34,11 +34,17 @@ async def list_channels(
     db: DBDep,
     user: CurrentUserDep,
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=50),
+    limit: int = Query(default=50, ge=1, le=200),
     q: str | None = Query(default=None, min_length=1, max_length=255),
     visibility: str | None = Query(default=None, pattern="^(public|private)$"),
     scope: str = Query(default="my", pattern="^(my|discover)$"),
 ) -> ChannelListResponse:
+    if not isinstance(q, str):
+        q = None
+    if not isinstance(visibility, str):
+        visibility = None
+    if not isinstance(scope, str):
+        scope = "my"
     if q is not None:
         q = q.strip() or None
     visibility_enum = ChannelVisibility(visibility) if visibility is not None else None
