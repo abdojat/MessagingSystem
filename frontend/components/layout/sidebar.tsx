@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Settings } from "lucide-react";
@@ -99,7 +100,45 @@ function ChannelList({ channels, selectedId }: { channels: ChannelResponse[]; se
   );
 }
 
-export function Sidebar({ selectedChannelId }: { selectedChannelId?: string }) {
+function ChannelAvatar({ channel }: { channel: ChannelResponse }) {
+  const initials = channel.name
+    .split(" ")
+    .map((part) => part.trim()[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  if (channel.avatar_url) {
+    return <Image src={channel.avatar_url} alt={channel.name} width={36} height={36} className="size-9 rounded-full object-cover" />;
+  }
+
+  return (
+    <div className="flex size-9 items-center justify-center rounded-full bg-slate-300 text-xs font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+      {initials || "#"}
+    </div>
+  );
+}
+
+function ChannelAvatarRail({ channels, selectedId }: { channels: ChannelResponse[]; selectedId?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-2">
+      {channels.map((channel) => (
+        <Link
+          key={channel.id}
+          href={`/app/channels/${channel.id}`}
+          title={channel.name}
+          className={`rounded-xl p-1 transition hover:bg-slate-200/70 dark:hover:bg-slate-800/80 ${selectedId === channel.id ? "bg-slate-200 dark:bg-slate-800" : ""}`}
+        >
+          <ChannelAvatar channel={channel} />
+        </Link>
+      ))}
+      {channels.length === 0 ? <p className="px-1 text-center text-xs text-slate-500">No channels</p> : null}
+    </div>
+  );
+}
+
+export function Sidebar({ selectedChannelId, isCollapsed = false }: { selectedChannelId?: string; isCollapsed?: boolean }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
   const searchQuery = search.trim() || undefined;
@@ -112,6 +151,7 @@ export function Sidebar({ selectedChannelId }: { selectedChannelId?: string }) {
   const discoverChannelsQuery = useQuery({
     queryKey: queryKeys.channels(`sidebar:discover:${searchQuery ?? ""}`),
     queryFn: () => api.listChannels({ scope: "discover", q: searchQuery }),
+    enabled: !isCollapsed,
   });
 
   const myChannels = useMemo(() => myChannelsQuery.data?.items ?? [], [myChannelsQuery.data?.items]);
@@ -119,42 +159,48 @@ export function Sidebar({ selectedChannelId }: { selectedChannelId?: string }) {
 
   return (
     <aside className="h-full border-r border-slate-200 bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
-      <div className="space-y-3 p-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold">Channels</h1>
-          <div className="flex gap-1">
-            <Button size="sm" variant="ghost" onClick={() => setDialogOpen(true)}>
-              <Plus className="size-4" />
-            </Button>
-            <Link href="/settings/sessions">
-              <Button size="sm" variant="ghost">
-                <Settings className="size-4" />
-              </Button>
-            </Link>
-          </div>
-        </div>
+      <div className={isCollapsed ? "p-2" : "space-y-3 p-3"}>
+        {isCollapsed ? (
+          <ChannelAvatarRail channels={myChannels} selectedId={selectedChannelId} />
+        ) : (
+          <>
+            <div className="flex items-center justify-between">
+              <h1 className="text-lg font-semibold">Channels</h1>
+              <div className="flex gap-1">
+                <Button size="sm" variant="ghost" onClick={() => setDialogOpen(true)}>
+                  <Plus className="size-4" />
+                </Button>
+                <Link href="/settings/sessions">
+                  <Button size="sm" variant="ghost">
+                    <Settings className="size-4" />
+                  </Button>
+                </Link>
+              </div>
+            </div>
 
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-2.5 size-4 text-slate-400" />
-          <Input className="pl-8" placeholder="Search channels..." value={search} onChange={(event) => setSearch(event.target.value)} />
-        </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-2.5 size-4 text-slate-400" />
+              <Input className="pl-8" placeholder="Search channels..." value={search} onChange={(event) => setSearch(event.target.value)} />
+            </div>
 
-        <AppTabs defaultValue="mine">
-          <AppTabsList className="w-full">
-            <AppTabsTrigger value="mine" className="flex-1">
-              My channels
-            </AppTabsTrigger>
-            <AppTabsTrigger value="discover" className="flex-1">
-              Discover
-            </AppTabsTrigger>
-          </AppTabsList>
-          <AppTabsContent value="mine" className="mt-2">
-            <ChannelList channels={myChannels} selectedId={selectedChannelId} />
-          </AppTabsContent>
-          <AppTabsContent value="discover" className="mt-2">
-            <ChannelList channels={discoverChannels} selectedId={selectedChannelId} />
-          </AppTabsContent>
-        </AppTabs>
+            <AppTabs defaultValue="mine">
+              <AppTabsList className="w-full">
+                <AppTabsTrigger value="mine" className="flex-1">
+                  My channels
+                </AppTabsTrigger>
+                <AppTabsTrigger value="discover" className="flex-1">
+                  Discover
+                </AppTabsTrigger>
+              </AppTabsList>
+              <AppTabsContent value="mine" className="mt-2">
+                <ChannelList channels={myChannels} selectedId={selectedChannelId} />
+              </AppTabsContent>
+              <AppTabsContent value="discover" className="mt-2">
+                <ChannelList channels={discoverChannels} selectedId={selectedChannelId} />
+              </AppTabsContent>
+            </AppTabs>
+          </>
+        )}
       </div>
 
       <ChannelCreateDialog open={dialogOpen} onOpenChange={setDialogOpen} />

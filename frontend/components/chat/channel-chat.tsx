@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pin, Reply, Send, SmilePlus, Trash2 } from "lucide-react";
+import { PanelRightClose, PanelRightOpen, Pin, Reply, Send, SmilePlus, Trash2 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api-client";
@@ -10,6 +10,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { cn, formatDateTime } from "@/lib/utils";
 import { useAppUiStore } from "@/store/app-ui-store";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -526,6 +527,14 @@ export function ChannelChat({ channelId }: { channelId: string }) {
   const seenAnchorRef = useRef<number>(0);
   const setCurrentChannel = useAppUiStore((s) => s.setCurrentChannel);
   const setReplyTarget = useAppUiStore((s) => s.setReplyTarget);
+  const { width: detailsWidth, isCollapsed: isDetailsCollapsed, beginResize, open: openDetails, close: closeDetails } = useResizablePanel({
+    initialWidth: 320,
+    minWidth: 0,
+    maxWidth: 560,
+    minRemainingWidth: 460,
+    collapseThreshold: 220,
+    storageKey: "layout:channel-details-width",
+  });
 
   const channelQuery = useQuery({
     queryKey: queryKeys.channel(channelId),
@@ -586,13 +595,25 @@ export function ChannelChat({ channelId }: { channelId: string }) {
   const channel = channelQuery.data;
 
   return (
-    <div className="grid h-full grid-cols-[1fr_320px] overflow-hidden">
+    <div className="grid h-full overflow-hidden" style={{ gridTemplateColumns: `minmax(0, 1fr) ${isDetailsCollapsed ? 0 : 8}px ${detailsWidth}px` }}>
       <section className="flex min-h-0 flex-col">
         <header className="border-b border-slate-200 bg-white/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/80">
-          <h2 className="text-lg font-semibold">{channel.name}</h2>
-          <p className="text-xs text-slate-500">
-            {channel.member_count} members • {channel.pending_count} pending • {channel.unread_count} unread
-          </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">{channel.name}</h2>
+              <p className="text-xs text-slate-500">
+                {channel.member_count} members • {channel.pending_count} pending • {channel.unread_count} unread
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={isDetailsCollapsed ? openDetails : closeDetails}
+              aria-label={isDetailsCollapsed ? "Show channel details sidebar" : "Hide channel details sidebar"}
+            >
+              {isDetailsCollapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
+            </Button>
+          </div>
         </header>
 
         {channel.my_role === "none" ? (
@@ -644,8 +665,21 @@ export function ChannelChat({ channelId }: { channelId: string }) {
         )}
       </section>
 
+      {!isDetailsCollapsed ? (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize channel details sidebar"
+          className="group relative cursor-col-resize"
+          onMouseDown={(event) => beginResize(event, "growOppositePointer")}
+        >
+          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-200 transition-colors group-hover:bg-slate-400 dark:bg-slate-800 dark:group-hover:bg-slate-500" />
+        </div>
+      ) : (
+        <div />
+      )}
+
       <ChannelDetailsPanel channelId={channelId} channel={channel} />
     </div>
   );
 }
-
