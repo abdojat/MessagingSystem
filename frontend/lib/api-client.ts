@@ -139,8 +139,24 @@ export const api = {
   logoutAll: () => apiRequest<{ status: string; revoked_count: number }>("/auth/logout_all", { method: "POST" }),
   revokeSession: (sessionId: string) => apiRequest<{ status: "ok" }>(`/auth/sessions/${sessionId}`, { method: "DELETE" }),
 
-  listChannels: (cursor?: string, q?: string) =>
-    apiRequest<ChannelListResponse>(`/channels${cursor || q ? `?${new URLSearchParams({ ...(cursor ? { cursor } : {}), ...(q ? { q } : {}) })}` : ""}`),
+  listChannels: (params?: {
+    cursor?: string;
+    q?: string;
+    scope?: "my" | "discover";
+    visibility?: "public" | "private";
+    limit?: number;
+  }) => {
+    const query = new URLSearchParams(
+      Object.entries({
+        ...(params?.cursor ? { cursor: params.cursor } : {}),
+        ...(params?.q ? { q: params.q } : {}),
+        ...(params?.scope ? { scope: params.scope } : {}),
+        ...(params?.visibility ? { visibility: params.visibility } : {}),
+        ...(params?.limit ? { limit: String(params.limit) } : {}),
+      }),
+    );
+    return apiRequest<ChannelListResponse>(`/channels${query.size > 0 ? `?${query.toString()}` : ""}`);
+  },
   createChannel: (payload: Partial<ChannelResponse> & { name: string; visibility: "public" | "private"; join_mode: "open" | "invite_only" | "approval_required" }) =>
     apiRequest<ChannelResponse>("/channels", { method: "POST", body: payload }),
   getChannel: (channelId: string) => apiRequest<ChannelResponse>(`/channels/${channelId}`),

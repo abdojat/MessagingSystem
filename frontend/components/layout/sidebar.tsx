@@ -102,15 +102,20 @@ function ChannelList({ channels, selectedId }: { channels: ChannelResponse[]; se
 export function Sidebar({ selectedChannelId }: { selectedChannelId?: string }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const searchQuery = search.trim() || undefined;
 
-  const channelsQuery = useQuery({
-    queryKey: queryKeys.channels("root"),
-    queryFn: () => api.listChannels(undefined, search || undefined),
+  const myChannelsQuery = useQuery({
+    queryKey: queryKeys.channels(`sidebar:my:${searchQuery ?? ""}`),
+    queryFn: () => api.listChannels({ scope: "my", q: searchQuery }),
   });
 
-  const channels = useMemo(() => channelsQuery.data?.items ?? [], [channelsQuery.data?.items]);
-  const myChannels = useMemo(() => channels.filter((channel) => channel.my_role !== "none"), [channels]);
-  const discoverChannels = useMemo(() => channels.filter((channel) => channel.my_role === "none"), [channels]);
+  const discoverChannelsQuery = useQuery({
+    queryKey: queryKeys.channels(`sidebar:discover:${searchQuery ?? ""}`),
+    queryFn: () => api.listChannels({ scope: "discover", q: searchQuery }),
+  });
+
+  const myChannels = useMemo(() => myChannelsQuery.data?.items ?? [], [myChannelsQuery.data?.items]);
+  const discoverChannels = useMemo(() => discoverChannelsQuery.data?.items ?? [], [discoverChannelsQuery.data?.items]);
 
   return (
     <aside className="h-full border-r border-slate-200 bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
