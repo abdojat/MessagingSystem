@@ -180,11 +180,9 @@ function MessageRow({
 
 function Composer({ channel }: { channel: ChannelResponse }) {
   const queryClient = useQueryClient();
-  const { replyToMessageId, replyToSeqId, setReplyTarget } = useAppUiStore((s) => ({
-    replyToMessageId: s.replyToMessageId,
-    replyToSeqId: s.replyToSeqId,
-    setReplyTarget: s.setReplyTarget,
-  }));
+  const replyToMessageId = useAppUiStore((s) => s.replyToMessageId);
+  const replyToSeqId = useAppUiStore((s) => s.replyToSeqId);
+  const setReplyTarget = useAppUiStore((s) => s.setReplyTarget);
 
   const [text, setText] = useState("");
   const [advanced, setAdvanced] = useState(false);

@@ -12,12 +12,10 @@ const PUBLIC_ROUTES = ["/login", "/register"];
 export function useAuthBootstrap() {
   const router = useRouter();
   const pathname = usePathname();
-  const { status, refreshToken, setStatus, clearAuth } = useAuthStore((s) => ({
-    status: s.status,
-    refreshToken: s.refreshToken,
-    setStatus: s.setStatus,
-    clearAuth: s.clearAuth,
-  }));
+  const status = useAuthStore((s) => s.status);
+  const refreshToken = useAuthStore((s) => s.refreshToken);
+  const setStatus = useAuthStore((s) => s.setStatus);
+  const clearAuth = useAuthStore((s) => s.clearAuth);
 
   const meQuery = useQuery({
     queryKey: queryKeys.me,

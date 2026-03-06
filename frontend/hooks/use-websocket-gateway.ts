@@ -30,7 +30,13 @@ export function useWebSocketGateway() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
+  const activeChannelRef = useRef<string | null>(activeChannel);
   const wsUrl = useMemo(() => toWebSocketUrl(API_BASE_URL), []);
+  const triggerSync = syncMutation.mutate;
+
+  useEffect(() => {
+    activeChannelRef.current = activeChannel;
+  }, [activeChannel]);
 
   useEffect(() => {
     if (status !== "authenticated") {
@@ -51,13 +57,13 @@ export function useWebSocketGateway() {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
-      ws.onopen = () => {
-        reconnectAttempt.current = 0;
-        setWsStatus("connected");
-        const token = getAccessToken();
-        ws.send(JSON.stringify({ type: "auth", payload: { token } }));
-        syncMutation.mutate();
-      };
+        ws.onopen = () => {
+          reconnectAttempt.current = 0;
+          setWsStatus("connected");
+          const token = getAccessToken();
+          ws.send(JSON.stringify({ type: "auth", payload: { token } }));
+          triggerSync();
+        };
 
       ws.onclose = () => {
         if (isUnmounted) return;
@@ -102,7 +108,7 @@ export function useWebSocketGateway() {
                   ...current,
                   items: current.items.map((channel) => {
                     if (channel.id !== envelope.channel_id) return channel;
-                    const isOpen = activeChannel === channel.id;
+                    const isOpen = activeChannelRef.current === channel.id;
                     return {
                       ...channel,
                       last_message: envelope.message,
@@ -153,7 +159,7 @@ export function useWebSocketGateway() {
 
     const onVisible = () => {
       if (document.visibilityState === "visible") {
-        syncMutation.mutate();
+        triggerSync();
       }
     };
 
@@ -169,6 +175,6 @@ export function useWebSocketGateway() {
         wsRef.current.close();
       }
     };
-  }, [status, wsUrl, setWsStatus, syncMutation, queryClient, activeChannel]);
+  }, [status, wsUrl, setWsStatus, triggerSync, queryClient]);
 }
 
