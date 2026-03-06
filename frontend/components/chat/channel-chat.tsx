@@ -251,6 +251,10 @@ function Composer({ channel }: { channel: ChannelResponse }) {
     },
   });
 
+  if (!channel.permissions.can_publish) {
+    return null;
+  }
+
   return (
     <div className="border-t border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
       {replyToSeqId ? (
@@ -267,12 +271,10 @@ function Composer({ channel }: { channel: ChannelResponse }) {
         )}
         onDragEnter={(event) => {
           event.preventDefault();
-          if (!channel.permissions.can_publish) return;
           setIsDragging(true);
         }}
         onDragOver={(event) => {
           event.preventDefault();
-          if (!channel.permissions.can_publish) return;
           setIsDragging(true);
         }}
         onDragLeave={(event) => {
@@ -283,13 +285,12 @@ function Composer({ channel }: { channel: ChannelResponse }) {
         onDrop={(event) => {
           event.preventDefault();
           setIsDragging(false);
-          if (!channel.permissions.can_publish) return;
           addFiles(Array.from(event.dataTransfer.files ?? []));
         }}
       >
         <div className="flex items-center justify-between gap-2">
           <span>{isDragging ? "Drop files to attach" : "Drag and drop files here, or click to browse"}</span>
-          <Button size="sm" variant="ghost" onClick={() => fileInputRef.current?.click()} disabled={!channel.permissions.can_publish}>
+          <Button size="sm" variant="ghost" onClick={() => fileInputRef.current?.click()}>
             Choose files
           </Button>
         </div>
@@ -300,15 +301,13 @@ function Composer({ channel }: { channel: ChannelResponse }) {
           multiple
           className="hidden"
           onChange={(event) => addFiles(Array.from(event.target.files ?? []))}
-          disabled={!channel.permissions.can_publish}
         />
       </div>
 
       <Textarea
         value={text}
         onChange={(event) => setText(event.target.value)}
-        placeholder={channel.permissions.can_publish ? "Write a message" : "You do not have publish permission"}
-        disabled={!channel.permissions.can_publish}
+        placeholder="Write a message"
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
@@ -320,10 +319,7 @@ function Composer({ channel }: { channel: ChannelResponse }) {
       />
 
       <div className="mt-2 flex justify-end">
-        <Button
-          onClick={() => sendMutation.mutate()}
-          disabled={sendMutation.isPending || (!text.trim() && files.length === 0) || !channel.permissions.can_publish}
-        >
+        <Button onClick={() => sendMutation.mutate()} disabled={sendMutation.isPending || (!text.trim() && files.length === 0)}>
           <Send className="mr-2 size-4" />
           Send
         </Button>
