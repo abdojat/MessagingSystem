@@ -183,11 +183,16 @@ function Composer({ channel }: { channel: ChannelResponse }) {
   const replyToMessageId = useAppUiStore((s) => s.replyToMessageId);
   const replyToSeqId = useAppUiStore((s) => s.replyToSeqId);
   const setReplyTarget = useAppUiStore((s) => s.setReplyTarget);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [text, setText] = useState("");
-  const [advanced, setAdvanced] = useState(false);
-  const [rawJson, setRawJson] = useState("{\n  \"kind\": \"example\"\n}");
   const [files, setFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const addFiles = (incoming: File[]) => {
+    if (!incoming.length) return;
+    setFiles((current) => [...current, ...incoming]);
+  };
 
   const sendMutation = useMutation({
     mutationFn: async () => {
@@ -222,9 +227,7 @@ function Composer({ channel }: { channel: ChannelResponse }) {
         attachments,
       };
 
-      if (advanced) {
-        payload.content_json = JSON.parse(rawJson);
-      } else {
+      if (text.trim()) {
         payload.content_text = text;
       }
 
@@ -244,10 +247,6 @@ function Composer({ channel }: { channel: ChannelResponse }) {
         toast.error(error.message);
         return;
       }
-      if (error instanceof SyntaxError) {
-        toast.error("Invalid JSON payload");
-        return;
-      }
       toast.error("Failed to send message");
     },
   });
@@ -261,37 +260,69 @@ function Composer({ channel }: { channel: ChannelResponse }) {
         </div>
       ) : null}
 
-      <div className="mb-2 flex items-center gap-2">
-        <label className="text-xs text-slate-500">
-          <input type="checkbox" className="mr-1" checked={advanced} onChange={(event) => setAdvanced(event.target.checked)} />
-          Advanced JSON mode
-        </label>
-        <input type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
+      <div
+        className={cn(
+          "mb-2 rounded-md border border-dashed px-3 py-2 text-xs text-slate-500 transition-colors",
+          isDragging ? "border-slate-900 bg-slate-100 dark:border-slate-100 dark:bg-slate-800" : "border-slate-300 dark:border-slate-700",
+        )}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          if (!channel.permissions.can_publish) return;
+          setIsDragging(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          if (!channel.permissions.can_publish) return;
+          setIsDragging(true);
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+          setIsDragging(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragging(false);
+          if (!channel.permissions.can_publish) return;
+          addFiles(Array.from(event.dataTransfer.files ?? []));
+        }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span>{isDragging ? "Drop files to attach" : "Drag and drop files here, or click to browse"}</span>
+          <Button size="sm" variant="ghost" onClick={() => fileInputRef.current?.click()} disabled={!channel.permissions.can_publish}>
+            Choose files
+          </Button>
+        </div>
+        {!!files.length ? <p className="mt-1 truncate">{files.map((file) => file.name).join(", ")}</p> : null}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(event) => addFiles(Array.from(event.target.files ?? []))}
+          disabled={!channel.permissions.can_publish}
+        />
       </div>
 
-      {advanced ? (
-        <Textarea value={rawJson} onChange={(event) => setRawJson(event.target.value)} className="min-h-[120px]" />
-      ) : (
-        <Textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder={channel.permissions.can_publish ? "Write a message" : "You do not have publish permission"}
-          disabled={!channel.permissions.can_publish}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              if (!sendMutation.isPending && text.trim()) {
-                sendMutation.mutate();
-              }
+      <Textarea
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        placeholder={channel.permissions.can_publish ? "Write a message" : "You do not have publish permission"}
+        disabled={!channel.permissions.can_publish}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            if (!sendMutation.isPending && (text.trim() || files.length > 0)) {
+              sendMutation.mutate();
             }
-          }}
-        />
-      )}
+          }
+        }}
+      />
 
       <div className="mt-2 flex justify-end">
         <Button
           onClick={() => sendMutation.mutate()}
-          disabled={sendMutation.isPending || (!advanced && !text.trim()) || !channel.permissions.can_publish}
+          disabled={sendMutation.isPending || (!text.trim() && files.length === 0) || !channel.permissions.can_publish}
         >
           <Send className="mr-2 size-4" />
           Send

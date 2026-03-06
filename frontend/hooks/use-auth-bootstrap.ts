@@ -13,6 +13,7 @@ export function useAuthBootstrap() {
   const router = useRouter();
   const pathname = usePathname();
   const status = useAuthStore((s) => s.status);
+  const hydrated = useAuthStore((s) => s.hydrated);
   const refreshToken = useAuthStore((s) => s.refreshToken);
   const setStatus = useAuthStore((s) => s.setStatus);
   const clearAuth = useAuthStore((s) => s.clearAuth);
@@ -26,6 +27,7 @@ export function useAuthBootstrap() {
 
   useEffect(() => {
     let cancelled = false;
+    if (!hydrated) return;
     if (status !== "unknown") return;
 
     const bootstrap = async () => {
@@ -47,10 +49,12 @@ export function useAuthBootstrap() {
     return () => {
       cancelled = true;
     };
-  }, [status, refreshToken, setStatus, clearAuth]);
+  }, [hydrated, status, refreshToken, setStatus, clearAuth]);
 
   useEffect(() => {
     const isPublic = PUBLIC_ROUTES.some((route) => pathname.startsWith(route)) || pathname.startsWith("/invites/");
+
+    if (!hydrated) return;
 
     if (status === "unauthenticated" && !isPublic) {
       router.replace("/login");
@@ -64,12 +68,12 @@ export function useAuthBootstrap() {
       clearAuth();
       router.replace("/login");
     }
-  }, [status, pathname, router, meQuery.isSuccess, meQuery.error, clearAuth]);
+  }, [hydrated, status, pathname, router, meQuery.isSuccess, meQuery.error, clearAuth]);
 
   return {
     status,
     me: meQuery.data,
-    isLoading: status === "unknown" || (status === "authenticated" && meQuery.isLoading),
+    isLoading: !hydrated || status === "unknown" || (status === "authenticated" && meQuery.isLoading),
   };
 }
 

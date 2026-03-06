@@ -8,6 +8,7 @@ type AuthState = {
   refreshToken: string | null;
   tokenType: string;
   status: "unknown" | "authenticated" | "unauthenticated";
+  hydrated: boolean;
   setTokens: (input: { accessToken: string; refreshToken: string; tokenType?: string }) => void;
   clearAuth: () => void;
   setStatus: (status: AuthState["status"]) => void;
@@ -20,6 +21,7 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       tokenType: "bearer",
       status: "unknown",
+      hydrated: false,
       setTokens: ({ accessToken, refreshToken, tokenType = "bearer" }) =>
         set({ accessToken, refreshToken, tokenType, status: "authenticated" }),
       clearAuth: () =>
@@ -34,6 +36,7 @@ export const useAuthStore = create<AuthState>()(
         if (!state) return;
         state.accessToken = null;
         state.status = "unknown";
+        state.hydrated = true;
       },
     },
   ),
