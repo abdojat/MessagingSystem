@@ -529,7 +529,7 @@ export function ChannelChat({ channelId }: { channelId: string }) {
   const setReplyTarget = useAppUiStore((s) => s.setReplyTarget);
   const { width: detailsWidth, isCollapsed: isDetailsCollapsed, beginResize, open: openDetails, close: closeDetails } = useResizablePanel({
     initialWidth: 320,
-    minWidth: 0,
+    minWidth: 320,
     maxWidth: 560,
     minRemainingWidth: 460,
     collapseThreshold: 220,
@@ -595,7 +595,12 @@ export function ChannelChat({ channelId }: { channelId: string }) {
   const channel = channelQuery.data;
 
   return (
-    <div className="grid h-full overflow-hidden" style={{ gridTemplateColumns: `minmax(0, 1fr) ${isDetailsCollapsed ? 0 : 8}px ${detailsWidth}px` }}>
+    <div
+      className="grid h-full overflow-hidden"
+      style={{
+        gridTemplateColumns: `minmax(0, 1fr) ${isDetailsCollapsed ? 0 : 8}px ${isDetailsCollapsed ? 0 : Math.max(320, detailsWidth)}px`,
+      }}
+    >
       <section className="flex min-h-0 flex-col">
         <header className="border-b border-slate-200 bg-white/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/80">
           <div className="flex items-start justify-between gap-3">
