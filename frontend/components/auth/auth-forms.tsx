@@ -7,7 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api-client";
-import { setTokenPair } from "@/store/auth-store";
+import { setTokenPair, useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -28,12 +28,14 @@ type RegisterValues = z.infer<typeof registerSchema>;
 
 export function LoginForm() {
   const router = useRouter();
+  const rememberMe = useAuthStore((s) => s.rememberMe);
+  const setRememberMe = useAuthStore((s) => s.setRememberMe);
   const form = useForm<LoginValues>({ resolver: zodResolver(loginSchema), defaultValues: { username_or_email: "", password: "" } });
 
   const loginMutation = useMutation({
     mutationFn: api.login,
     onSuccess: async (tokenPair) => {
-      setTokenPair(tokenPair);
+      setTokenPair(tokenPair, { rememberMe });
       await api.me();
       router.replace("/app");
     },
@@ -61,6 +63,15 @@ export function LoginForm() {
             <Input placeholder="Password" type="password" {...form.register("password")} />
             {form.formState.errors.password ? <p className="mt-1 text-xs text-red-500">{form.formState.errors.password.message}</p> : null}
           </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="h-4 w-4"
+            />
+            Keep me logged in
+          </label>
           <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
             {loginMutation.isPending ? "Signing in..." : "Login"}
           </Button>
