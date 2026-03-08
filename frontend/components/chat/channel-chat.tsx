@@ -38,21 +38,15 @@ function MessageRow({
   message,
   channel,
   onReply,
-  onRendered,
 }: {
   message: MessageResponse;
   channel: ChannelResponse;
   onReply: (message: MessageResponse) => void;
-  onRendered: (seqId: number) => void;
 }) {
   const { data: me } = useCurrentUser();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(message.content_text ?? "");
-
-  useEffect(() => {
-    onRendered(message.seq_id);
-  }, [message.seq_id, onRendered]);
 
   const editMutation = useMutation({
     mutationFn: () => api.editMessage(channel.id, message.id, { content_text: editText }),
@@ -526,6 +520,9 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
 export function ChannelChat({ channelId }: { channelId: string }) {
   const queryClient = useQueryClient();
   const listRef = useRef<HTMLDivElement | null>(null);
+  const visibilityObserverRef = useRef<IntersectionObserver | null>(null);
+  const latestMessageItemsRef = useRef<MessageResponse[]>([]);
+  const initialScrollDoneRef = useRef(false);
   const renderedSeenSeqRef = useRef<number>(0);
   const sentSeenSeqRef = useRef<number>(0);
   const queuedSeenSeqRef = useRef<number>(0);
@@ -553,6 +550,7 @@ export function ChannelChat({ channelId }: { channelId: string }) {
     getNextPageParam: (lastPage) => lastPage.next_before_seq_id ?? undefined,
     enabled: channelQuery.isSuccess && channelQuery.data.my_role !== "none",
   });
+  const channel = channelQuery.data;
 
   const markSeenMutation = useMutation({
     mutationFn: (seqId: number) => api.markSeen(channelId, seqId),
@@ -606,6 +604,24 @@ export function ChannelChat({ channelId }: { channelId: string }) {
     [markSeenMutation],
   );
 
+  const markSeenForFullyVisibleMessages = useCallback(() => {
+    const listElement = listRef.current;
+    if (!listElement) return;
+
+    const containerRect = listElement.getBoundingClientRect();
+    const fullyVisibleSeqIds = latestMessageItemsRef.current
+      .filter((message) => {
+        const element = listElement.querySelector<HTMLElement>(`[data-seq-id="${message.seq_id}"]`);
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.top >= containerRect.top && rect.bottom <= containerRect.bottom;
+      })
+      .map((message) => message.seq_id);
+
+    if (!fullyVisibleSeqIds.length) return;
+    markSeenForRenderedSeq(Math.max(...fullyVisibleSeqIds));
+  }, [markSeenForRenderedSeq]);
+
   useEffect(() => {
     setCurrentChannel(channelId);
     return () => {
@@ -621,10 +637,21 @@ export function ChannelChat({ channelId }: { channelId: string }) {
   }, [messagesQuery.data]);
 
   useEffect(() => {
-    const initialSeen = channelQuery.data?.my_last_seen_seq_id ?? 0;
-    sentSeenSeqRef.current = initialSeen;
-    renderedSeenSeqRef.current = Math.max(renderedSeenSeqRef.current, initialSeen);
+    latestMessageItemsRef.current = messageItems;
+  }, [messageItems]);
+
+  useEffect(() => {
+    sentSeenSeqRef.current = 0;
+    renderedSeenSeqRef.current = 0;
     queuedSeenSeqRef.current = 0;
+    initialScrollDoneRef.current = false;
+    lastRenderedSeqRef.current = null;
+  }, [channelId]);
+
+  useEffect(() => {
+    const serverSeen = channelQuery.data?.my_last_seen_seq_id ?? 0;
+    sentSeenSeqRef.current = Math.max(sentSeenSeqRef.current, serverSeen);
+    renderedSeenSeqRef.current = Math.max(renderedSeenSeqRef.current, serverSeen);
   }, [channelId, channelQuery.data?.my_last_seen_seq_id]);
 
   useEffect(() => {
@@ -638,6 +665,56 @@ export function ChannelChat({ channelId }: { channelId: string }) {
     lastRenderedSeqRef.current = lastSeq;
   }, [messageItems]);
 
+  useEffect(() => {
+    const listElement = listRef.current;
+    if (!listElement || channel?.my_role === "none") return;
+
+    if (visibilityObserverRef.current) {
+      visibilityObserverRef.current.disconnect();
+    }
+
+    visibilityObserverRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 1)) {
+          markSeenForFullyVisibleMessages();
+        }
+      },
+      {
+        root: listElement,
+        threshold: [1],
+      },
+    );
+
+    listElement.querySelectorAll<HTMLElement>("[data-seq-id]").forEach((element) => {
+      visibilityObserverRef.current?.observe(element);
+    });
+
+    markSeenForFullyVisibleMessages();
+
+    return () => {
+      visibilityObserverRef.current?.disconnect();
+      visibilityObserverRef.current = null;
+    };
+  }, [channel?.my_role, messageItems, markSeenForFullyVisibleMessages]);
+
+  useEffect(() => {
+    if (initialScrollDoneRef.current) return;
+    const listElement = listRef.current;
+    if (!listElement || !messageItems.length || channel?.my_role === "none") return;
+
+    const firstUnreadSeq =
+      messageItems.find((message) => message.seq_id > (channel?.my_last_seen_seq_id ?? 0))?.seq_id ?? null;
+
+    if (firstUnreadSeq !== null) {
+      const unreadElement = listElement.querySelector<HTMLElement>(`[data-seq-id="${firstUnreadSeq}"]`);
+      unreadElement?.scrollIntoView({ block: "start", behavior: "auto" });
+    } else {
+      listElement.scrollTo({ top: listElement.scrollHeight, behavior: "auto" });
+    }
+
+    initialScrollDoneRef.current = true;
+  }, [channel?.my_last_seen_seq_id, channel?.my_role, messageItems]);
+
   if (channelQuery.isLoading) {
     return <div className="p-6">Loading channel...</div>;
   }
@@ -646,7 +723,7 @@ export function ChannelChat({ channelId }: { channelId: string }) {
     return <div className="p-6">Failed to load channel</div>;
   }
 
-  const channel = channelQuery.data;
+  const resolvedChannel = channelQuery.data;
 
   return (
     <div
@@ -659,9 +736,9 @@ export function ChannelChat({ channelId }: { channelId: string }) {
         <header className="border-b border-slate-200 bg-white/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/80">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold">{channel.name}</h2>
+              <h2 className="text-lg font-semibold">{resolvedChannel.name}</h2>
               <p className="text-xs text-slate-500">
-                {channel.member_count} members • {channel.pending_count} pending • {channel.unread_count} unread
+                {resolvedChannel.member_count} members • {resolvedChannel.pending_count} pending • {resolvedChannel.unread_count} unread
               </p>
             </div>
             <Button
@@ -675,7 +752,7 @@ export function ChannelChat({ channelId }: { channelId: string }) {
           </div>
         </header>
 
-        {channel.my_role === "none" ? (
+        {resolvedChannel.my_role === "none" ? (
           <div className="p-4">
             <EmptyState title="You are not a member" description="Join from the details panel to start messaging." />
           </div>
@@ -694,16 +771,15 @@ export function ChannelChat({ channelId }: { channelId: string }) {
                 <MessageRow
                   key={message.id}
                   message={message}
-                  channel={channel}
+                  channel={resolvedChannel}
                   onReply={(target) => setReplyTarget({ messageId: target.id, seqId: target.seq_id })}
-                  onRendered={markSeenForRenderedSeq}
                 />
               ))}
 
               <div className="h-4" />
             </div>
 
-            <Composer channel={channel} />
+            <Composer channel={resolvedChannel} />
           </>
         )}
       </section>
@@ -722,7 +798,7 @@ export function ChannelChat({ channelId }: { channelId: string }) {
         <div />
       )}
 
-      <ChannelDetailsPanel channelId={channelId} channel={channel} />
+      <ChannelDetailsPanel channelId={channelId} channel={resolvedChannel} />
     </div>
   );
 }
