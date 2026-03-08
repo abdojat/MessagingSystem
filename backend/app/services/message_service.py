@@ -203,6 +203,10 @@ class MessageService:
 
     @staticmethod
     async def mark_seen(db: AsyncSession, channel_id: UUID, user_id: UUID, req: SeenRequest) -> UserChannelState:
+        channel = await db.get(Channel, channel_id)
+        if not channel or channel.deleted_at is not None:
+            raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
+
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
         role = membership.role if membership else None
         if role not in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member, MembershipRole.pending}:
@@ -213,15 +217,29 @@ class MessageService:
             state = UserChannelState(channel_id=channel_id, user_id=user_id)
             db.add(state)
 
+        requested_seq: int | None = None
+        requested_message_id: UUID | None = None
+        clear_message_id = False
         if req.last_seen_message_id is not None:
             message = await db.get(Message, req.last_seen_message_id)
             if not message or message.channel_id != channel_id:
                 raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
-            state.last_seen_message_id = message.id
-            state.last_seen_seq_id = message.seq_id
+            requested_seq = int(message.seq_id)
+            requested_message_id = message.id
         if req.last_seen_seq_id is not None:
-            state.last_seen_seq_id = req.last_seen_seq_id
-            state.last_seen_message_id = None
+            requested_seq = int(req.last_seen_seq_id)
+            clear_message_id = True
+
+        if requested_seq is not None and requested_seq > int(channel.last_seq_id or 0):
+            raise AppError("last_seen_seq_id out of range", 400, code="VALIDATION_ERROR")
+
+        current_seen_seq = int(state.last_seen_seq_id or 0)
+        if requested_seq is not None and requested_seq >= current_seen_seq:
+            state.last_seen_seq_id = requested_seq
+            if clear_message_id:
+                state.last_seen_message_id = None
+            else:
+                state.last_seen_message_id = requested_message_id
         if req.last_seen_at is not None:
             state.last_seen_at = req.last_seen_at
         else:

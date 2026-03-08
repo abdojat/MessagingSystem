@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from app.db.models import User
 from app.schemas.channels import ChannelCreateRequest
 from app.schemas.messages import PublishMessageRequest, SeenRequest
+from app.core.errors import AppError
 from app.services.channel_service import ChannelService
 from app.services.message_service import MessageService
 from tests.test_utils import DummyAMQP
@@ -41,6 +42,53 @@ async def test_mark_seen_with_message_id_sets_seq_and_unread(db_session):
     state = await MessageService.mark_seen(db_session, channel.id, owner.id, SeenRequest(last_seen_message_id=msg1.id))
     assert state.last_seen_seq_id == msg1.seq_id
     assert state.unread_count == 1
+
+
+@pytest.mark.asyncio
+async def test_mark_seen_does_not_regress_to_older_seq(db_session):
+    owner = User(username="owner_seen_regress", email="owner_seen_regress@example.com", password_hash="x")
+    db_session.add(owner)
+    await db_session.commit()
+    await db_session.refresh(owner)
+
+    channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="seen-regress", visibility="public", join_mode="open"),
+        DummyAMQP(),
+    )
+
+    for content in ("one", "two", "three"):
+        await MessageService.publish_message(db_session, channel.id, owner.id, PublishMessageRequest(content_text=content))
+
+    latest_state = await MessageService.mark_seen(db_session, channel.id, owner.id, SeenRequest(last_seen_seq_id=3))
+    assert latest_state.last_seen_seq_id == 3
+    assert latest_state.unread_count == 0
+
+    regressed_state = await MessageService.mark_seen(db_session, channel.id, owner.id, SeenRequest(last_seen_seq_id=1))
+    assert regressed_state.last_seen_seq_id == 3
+    assert regressed_state.unread_count == 0
+
+
+@pytest.mark.asyncio
+async def test_mark_seen_rejects_future_seq(db_session):
+    owner = User(username="owner_seen_range", email="owner_seen_range@example.com", password_hash="x")
+    db_session.add(owner)
+    await db_session.commit()
+    await db_session.refresh(owner)
+
+    channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="seen-range", visibility="public", join_mode="open"),
+        DummyAMQP(),
+    )
+
+    await MessageService.publish_message(db_session, channel.id, owner.id, PublishMessageRequest(content_text="one"))
+
+    with pytest.raises(AppError) as exc:
+        await MessageService.mark_seen(db_session, channel.id, owner.id, SeenRequest(last_seen_seq_id=99))
+    assert exc.value.code == "VALIDATION_ERROR"
 
 
 @pytest.mark.asyncio

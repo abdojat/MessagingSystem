@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PanelRightClose, PanelRightOpen, Pin, Reply, Send, SmilePlus, Trash2 } from "lucide-react";
 import Image from "next/image";
@@ -38,17 +38,21 @@ function MessageRow({
   message,
   channel,
   onReply,
-  onSeenAnchor,
+  onRendered,
 }: {
   message: MessageResponse;
   channel: ChannelResponse;
   onReply: (message: MessageResponse) => void;
-  onSeenAnchor: (seqId: number) => void;
+  onRendered: (seqId: number) => void;
 }) {
   const { data: me } = useCurrentUser();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(message.content_text ?? "");
+
+  useEffect(() => {
+    onRendered(message.seq_id);
+  }, [message.seq_id, onRendered]);
 
   const editMutation = useMutation({
     mutationFn: () => api.editMessage(channel.id, message.id, { content_text: editText }),
@@ -87,9 +91,7 @@ function MessageRow({
     <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900" data-seq-id={message.seq_id}>
       <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
         <span>seq #{message.seq_id}</span>
-        <button className="hover:underline" onMouseEnter={() => onSeenAnchor(message.seq_id)}>
-          {formatDateTime(message.created_at)}
-        </button>
+        <span>{formatDateTime(message.created_at)}</span>
       </div>
 
       {editing ? (
@@ -524,7 +526,10 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
 export function ChannelChat({ channelId }: { channelId: string }) {
   const queryClient = useQueryClient();
   const listRef = useRef<HTMLDivElement | null>(null);
-  const seenAnchorRef = useRef<number>(0);
+  const renderedSeenSeqRef = useRef<number>(0);
+  const sentSeenSeqRef = useRef<number>(0);
+  const queuedSeenSeqRef = useRef<number>(0);
+  const lastRenderedSeqRef = useRef<number | null>(null);
   const setCurrentChannel = useAppUiStore((s) => s.setCurrentChannel);
   const setReplyTarget = useAppUiStore((s) => s.setReplyTarget);
   const { width: detailsWidth, isCollapsed: isDetailsCollapsed, beginResize, open: openDetails, close: closeDetails } = useResizablePanel({
@@ -551,7 +556,17 @@ export function ChannelChat({ channelId }: { channelId: string }) {
 
   const markSeenMutation = useMutation({
     mutationFn: (seqId: number) => api.markSeen(channelId, seqId),
-    onSuccess: (result) => {
+    onSuccess: (result, requestedSeq) => {
+      sentSeenSeqRef.current = Math.max(sentSeenSeqRef.current, requestedSeq, result.last_seen_seq_id ?? 0);
+      queryClient.setQueryData<ChannelResponse>(queryKeys.channel(channelId), (current) =>
+        current
+          ? {
+              ...current,
+              my_last_seen_seq_id: result.last_seen_seq_id,
+              unread_count: result.unread_count ?? 0,
+            }
+          : current,
+      );
       queryClient.setQueriesData<{ items: ChannelResponse[] }>({ queryKey: ["channels"] }, (current) => {
         if (!current) return current;
         return {
@@ -568,7 +583,28 @@ export function ChannelChat({ channelId }: { channelId: string }) {
         };
       });
     },
+    onSettled: () => {
+      const queued = queuedSeenSeqRef.current;
+      if (queued > sentSeenSeqRef.current) {
+        queuedSeenSeqRef.current = 0;
+        markSeenMutation.mutate(queued);
+      }
+    },
   });
+
+  const markSeenForRenderedSeq = useCallback(
+    (seqId: number) => {
+      renderedSeenSeqRef.current = Math.max(renderedSeenSeqRef.current, seqId);
+      const targetSeq = renderedSeenSeqRef.current;
+      if (targetSeq <= sentSeenSeqRef.current) return;
+      if (markSeenMutation.isPending) {
+        queuedSeenSeqRef.current = Math.max(queuedSeenSeqRef.current, targetSeq);
+        return;
+      }
+      markSeenMutation.mutate(targetSeq);
+    },
+    [markSeenMutation],
+  );
 
   useEffect(() => {
     setCurrentChannel(channelId);
@@ -583,6 +619,24 @@ export function ChannelChat({ channelId }: { channelId: string }) {
     const merged = pages.flatMap((page) => page.items);
     return [...merged].sort((a, b) => a.seq_id - b.seq_id);
   }, [messagesQuery.data]);
+
+  useEffect(() => {
+    const initialSeen = channelQuery.data?.my_last_seen_seq_id ?? 0;
+    sentSeenSeqRef.current = initialSeen;
+    renderedSeenSeqRef.current = Math.max(renderedSeenSeqRef.current, initialSeen);
+    queuedSeenSeqRef.current = 0;
+  }, [channelId, channelQuery.data?.my_last_seen_seq_id]);
+
+  useEffect(() => {
+    const lastSeq = messageItems.length ? messageItems[messageItems.length - 1].seq_id : null;
+    const prevSeq = lastRenderedSeqRef.current;
+
+    if (lastSeq !== null && prevSeq !== null && lastSeq > prevSeq && listRef.current) {
+      listRef.current.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+    }
+
+    lastRenderedSeqRef.current = lastSeq;
+  }, [messageItems]);
 
   if (channelQuery.isLoading) {
     return <div className="p-6">Loading channel...</div>;
@@ -642,27 +696,11 @@ export function ChannelChat({ channelId }: { channelId: string }) {
                   message={message}
                   channel={channel}
                   onReply={(target) => setReplyTarget({ messageId: target.id, seqId: target.seq_id })}
-                  onSeenAnchor={(seqId) => {
-                    seenAnchorRef.current = Math.max(seenAnchorRef.current, seqId);
-                  }}
+                  onRendered={markSeenForRenderedSeq}
                 />
               ))}
 
               <div className="h-4" />
-            </div>
-
-            <div className="px-3 pb-2 text-right">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  if (seenAnchorRef.current > 0) {
-                    markSeenMutation.mutate(seenAnchorRef.current);
-                  }
-                }}
-              >
-                Mark seen
-              </Button>
             </div>
 
             <Composer channel={channel} />

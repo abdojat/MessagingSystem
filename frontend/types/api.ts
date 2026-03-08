@@ -239,17 +239,37 @@ export type SyncResponse = {
   messages: MessageResponse[];
 };
 
+type WsBaseEnvelope = {
+  type: string;
+  request_id?: string | null;
+  ts?: string;
+};
+
 export type WsEnvelope =
-  | { type: "hello"; user_id: string; server_time: string }
-  | { type: "history"; channel_id: string; items: MessageResponse[]; is_truncated: boolean }
-  | { type: "message"; channel_id: string; message: MessageResponse }
-  | { type: "membership_update"; channel_id: string; user_id: string; new_role: ChannelRole; reason: string }
-  | {
+  | (WsBaseEnvelope & { type: "hello"; payload: { user_id: string; server_time?: string; session_id?: string | null } })
+  | (WsBaseEnvelope & { type: "history"; payload: { channel_id: string; items: MessageResponse[]; is_truncated: boolean } })
+  | (WsBaseEnvelope & { type: "message"; payload: { channel_id: string; message: MessageResponse } })
+  | (WsBaseEnvelope & { type: "message_updated"; payload: { channel_id: string; id: string } & MessageResponse })
+  | (WsBaseEnvelope & { type: "reaction_updated"; payload: { channel_id: string; message_id: string; reactions_summary: ReactionSummaryResponse } })
+  | (WsBaseEnvelope & { type: "membership_update"; payload: { channel_id: string; user_id: string; new_role: ChannelRole; reason: string } })
+  | (WsBaseEnvelope & {
       type: "channel_updated";
-      channel_id: string;
-      patch: { name?: string; visibility?: "public" | "private"; join_mode?: "open" | "invite_only" | "approval_required" };
-    }
-  | { type: "sync"; states: Array<{ channel_id: string; last_seen_seq_id: number | null; last_seen_at: string | null }> }
-  | { type: "seen"; channel_id: string; last_seen_seq_id: number; last_seen_at?: string | null }
-  | { type: "error"; code?: string; message?: string; details?: Record<string, unknown> };
+      payload: { channel_id: string; patch: { name?: string; visibility?: "public" | "private"; join_mode?: "open" | "invite_only" | "approval_required" } };
+    })
+  | (WsBaseEnvelope & {
+      type: "sync";
+      payload: { states?: Array<{ channel_id: string; last_seen_seq_id: number | null; last_seen_at: string | null }>; messages?: MessageResponse[] };
+    })
+  | (WsBaseEnvelope & {
+      type: "seen";
+      payload: {
+        channel_id: string;
+        user_id?: string;
+        last_seen_seq_id: number | null;
+        last_seen_message_id?: string | null;
+        unread_count?: number | null;
+        last_seen_at?: string | null;
+      };
+    })
+  | (WsBaseEnvelope & { type: "error"; payload: { code?: string; message?: string; details?: Record<string, unknown> } });
 

@@ -20,6 +20,12 @@ function upsertMessage(items: MessageResponse[], incoming: MessageResponse) {
   return [incoming, ...items].sort((a, b) => b.seq_id - a.seq_id);
 }
 
+function isMessageResponse(value: unknown): value is MessageResponse {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<MessageResponse>;
+  return typeof item.id === "string" && typeof item.channel_id === "string" && typeof item.created_at === "string" && typeof item.seq_id === "number";
+}
+
 export function useWebSocketGateway() {
   const status = useAuthStore((s) => s.status);
   const setWsStatus = useAppUiStore((s) => s.setWsStatus);
@@ -31,6 +37,7 @@ export function useWebSocketGateway() {
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
   const activeChannelRef = useRef<string | null>(activeChannel);
+  const wsUserIdRef = useRef<string | null>(null);
   const wsUrl = useMemo(() => toWebSocketUrl(API_BASE_URL), []);
   const triggerSync = syncMutation.mutate;
 
@@ -59,6 +66,7 @@ export function useWebSocketGateway() {
 
         ws.onopen = () => {
           reconnectAttempt.current = 0;
+          wsUserIdRef.current = null;
           setWsStatus("connected");
           const token = getAccessToken();
           ws.send(JSON.stringify({ type: "auth", payload: { token } }));
@@ -80,9 +88,24 @@ export function useWebSocketGateway() {
       ws.onmessage = (event) => {
         try {
           const envelope = JSON.parse(event.data) as WsEnvelope;
-          if (envelope.type === "message") {
+          if (envelope.type === "hello") {
+            wsUserIdRef.current = envelope.payload.user_id;
+            return;
+          }
+          if (envelope.type === "message" || envelope.type === "message_updated") {
+            const payload = envelope.payload as unknown;
+            const rawIncoming =
+              envelope.type === "message" &&
+              payload &&
+              typeof payload === "object" &&
+              "message" in payload
+                ? (payload as { message?: unknown }).message
+                : payload;
+            if (!isMessageResponse(rawIncoming)) return;
+            const incoming = rawIncoming;
+            const channelId = incoming.channel_id;
             queryClient.setQueryData(
-              queryKeys.messages(envelope.channel_id),
+              queryKeys.messages(channelId),
               (current:
                 | {
                     pages: MessageListResponse[];
@@ -94,7 +117,7 @@ export function useWebSocketGateway() {
                 if (!first) return current;
                 const updatedFirst: MessageListResponse = {
                   ...first,
-                  items: upsertMessage(first.items, envelope.message),
+                  items: upsertMessage(first.items, incoming),
                 };
                 return { ...current, pages: [updatedFirst, ...current.pages.slice(1)] };
               },
@@ -107,37 +130,65 @@ export function useWebSocketGateway() {
                 return {
                   ...current,
                   items: current.items.map((channel) => {
-                    if (channel.id !== envelope.channel_id) return channel;
+                    if (channel.id !== channelId) return channel;
                     const isOpen = activeChannelRef.current === channel.id;
                     return {
                       ...channel,
-                      last_message: envelope.message,
-                      last_message_at: envelope.message.created_at,
+                      last_message: incoming,
+                      last_message_at: incoming.created_at,
                       unread_count: isOpen ? channel.unread_count : channel.unread_count + 1,
                     };
                   }),
                 };
               },
             );
+            queryClient.setQueryData<ChannelResponse>(queryKeys.channel(channelId), (current) => {
+              if (!current) return current;
+              const isOpen = activeChannelRef.current === channelId;
+              return {
+                ...current,
+                last_message: incoming,
+                last_message_at: incoming.created_at,
+                unread_count: isOpen ? current.unread_count : current.unread_count + 1,
+              };
+            });
+            return;
+          }
+
+          if (envelope.type === "reaction_updated") {
+            queryClient.invalidateQueries({ queryKey: queryKeys.messages(envelope.payload.channel_id) });
             return;
           }
 
           if (envelope.type === "seen") {
+            const payload = envelope.payload;
+            if (payload.user_id && wsUserIdRef.current && payload.user_id !== wsUserIdRef.current) {
+              return;
+            }
             queryClient.setQueriesData<{ items: ChannelResponse[] }>({ queryKey: ["channels"] }, (current) => {
               if (!current) return current;
               return {
                 ...current,
                 items: current.items.map((channel) =>
-                  channel.id === envelope.channel_id
+                  channel.id === payload.channel_id
                     ? {
                         ...channel,
-                        my_last_seen_seq_id: envelope.last_seen_seq_id,
-                        unread_count: 0,
+                        my_last_seen_seq_id: Math.max(channel.my_last_seen_seq_id ?? 0, payload.last_seen_seq_id ?? 0) || null,
+                        unread_count: payload.unread_count ?? channel.unread_count,
                       }
                     : channel,
                 ),
               };
             });
+            queryClient.setQueryData<ChannelResponse>(queryKeys.channel(payload.channel_id), (current) =>
+              current
+                ? {
+                    ...current,
+                    my_last_seen_seq_id: Math.max(current.my_last_seen_seq_id ?? 0, payload.last_seen_seq_id ?? 0) || null,
+                    unread_count: payload.unread_count ?? current.unread_count,
+                  }
+                : current,
+            );
             return;
           }
 
@@ -147,7 +198,7 @@ export function useWebSocketGateway() {
           }
 
           if (envelope.type === "error") {
-            toast.error(envelope.message ?? "Realtime error");
+            toast.error(envelope.payload.message ?? "Realtime error");
           }
         } catch {
           toast.error("Failed to process realtime message");
