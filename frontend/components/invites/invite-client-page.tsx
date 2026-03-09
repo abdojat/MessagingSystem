@@ -55,11 +55,14 @@ export function InviteClientPage({ token }: { token: string }) {
           ) : null}
 
           <div className="flex gap-2">
-            <Button onClick={() => acceptMutation.mutate()} disabled={!data?.is_valid || acceptMutation.isPending}>
-              Accept invite
+            <Button onClick={() => acceptMutation.mutate()} disabled={!data?.is_valid || acceptMutation.isPending || status !== "authenticated"}>
+              {acceptMutation.isPending ? "Joining..." : "Accept invite"}
+            </Button>
+            <Button variant="secondary" onClick={() => router.push("/")}>
+              Reject invite
             </Button>
             <Link href="/app">
-              <Button variant="secondary">Go to app</Button>
+              <Button variant="ghost">Go to app</Button>
             </Link>
           </div>
         </CardContent>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PanelRightClose, PanelRightOpen, Pencil, Pin, Reply, Send, SmilePlus, Trash2 } from "lucide-react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api-client";
 import { resolveApiUrl } from "@/lib/env";
@@ -315,7 +316,9 @@ function Composer({ channel }: { channel: ChannelResponse }) {
 
 function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channel: ChannelResponse }) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [inviteToken, setInviteToken] = useState("");
+  const [latestInviteLink, setLatestInviteLink] = useState<string | null>(null);
   const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [editName, setEditName] = useState(channel.name);
   const [editDescription, setEditDescription] = useState(channel.description ?? "");
@@ -357,11 +360,24 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Join failed"),
   });
+  const leaveMutation = useMutation({
+    mutationFn: () => api.leaveChannel(channelId),
+    onSuccess: () => {
+      toast.success("You left the channel");
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.channel(channelId) });
+      router.replace("/app");
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : "Leave failed"),
+  });
 
   const createInvite = useMutation({
     mutationFn: () => api.createInvite(channelId, { is_generic: true, expires_in_hours: 72 }),
     onSuccess: (result) => {
-      toast.success(`Invite token: ${result.token}`);
+      const inviteLink =
+        typeof window === "undefined" ? `/invites/${result.token}` : `${window.location.origin}/invites/${result.token}`;
+      setLatestInviteLink(inviteLink);
+      toast.success("Invite link created");
       queryClient.invalidateQueries({ queryKey: queryKeys.channelInvites(channelId, "") });
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Failed to create invite"),
@@ -471,6 +487,21 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
             <Button size="sm" onClick={() => joinMutation.mutate()}>
               Join channel
             </Button>
+          </div>
+        ) : null}
+        {channel.my_role !== "none" ? (
+          <div className="space-y-2 rounded-lg border border-slate-200 p-2 dark:border-slate-800">
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => leaveMutation.mutate()}
+              disabled={leaveMutation.isPending || channel.my_role === "owner"}
+            >
+              {leaveMutation.isPending ? "Leaving..." : "Leave channel"}
+            </Button>
+            {channel.my_role === "owner" ? (
+              <p className="text-xs text-slate-500">Owners cannot leave the channel until ownership is transferred.</p>
+            ) : null}
           </div>
         ) : null}
 
@@ -648,9 +679,40 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
 
         <AppTabsContent value="invites" className="mt-2 space-y-2">
           {channel.permissions.can_invite ? (
-            <Button size="sm" onClick={() => createInvite.mutate()}>
-              Create generic invite
-            </Button>
+            <div className="space-y-2">
+              <Button size="sm" onClick={() => createInvite.mutate()} disabled={createInvite.isPending}>
+                {createInvite.isPending ? "Creating..." : "Create invite link"}
+              </Button>
+              {latestInviteLink ? (
+                <div className="rounded-md border border-slate-200 p-2 text-xs dark:border-slate-800">
+                  <p className="mb-1 text-slate-500">Latest invite link</p>
+                  <Input readOnly value={latestInviteLink} />
+                  <div className="mt-2 flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(latestInviteLink);
+                          toast.success("Invite link copied");
+                        } catch {
+                          toast.error("Could not copy link");
+                        }
+                      }}
+                    >
+                      Copy link
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => window.open(latestInviteLink, "_blank", "noopener,noreferrer")}
+                    >
+                      Open link
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {(invitesQuery.data?.items ?? []).map((invite: InviteListItem) => (
             <div key={invite.id} className="rounded-md border border-slate-200 p-2 text-xs dark:border-slate-800">
