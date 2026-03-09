@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { PanelRightClose, PanelRightOpen, Pin, Reply, Send, SmilePlus, Trash2 } from "lucide-react";
+import { PanelRightClose, PanelRightOpen, Pencil, Pin, Reply, Send, SmilePlus, Trash2 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api-client";
+import { resolveApiUrl } from "@/lib/env";
 import { queryKeys } from "@/lib/query-keys";
 import { cn, formatDateTime } from "@/lib/utils";
 import { useAppUiStore } from "@/store/app-ui-store";
@@ -110,7 +111,7 @@ function MessageRow({
           {message.attachments?.length ? (
             <div className="mt-2 space-y-1">
               {message.attachments.map((attachment, index) => {
-                const publicUrl = String(attachment.public_url ?? attachment.url ?? "");
+                const publicUrl = resolveApiUrl(String(attachment.public_url ?? attachment.url ?? ""));
                 const contentType = String(attachment.content_type ?? "");
                 if (!publicUrl) return null;
                 if (contentType.startsWith("image/")) {
@@ -195,26 +196,13 @@ function Composer({ channel }: { channel: ChannelResponse }) {
     mutationFn: async () => {
       const attachments: Array<Record<string, unknown>> = [];
       for (const file of files) {
-        const create = await api.createUpload({ filename: file.name, content_type: file.type || "application/octet-stream", size_bytes: file.size });
-
-        const uploadResponse = await fetch(create.upload_url, {
-          method: create.method,
-          headers: create.headers,
-          body: file,
-        });
-
-        let publicUrl = create.public_url;
-
-        if (!uploadResponse.ok) {
-          const completion = await api.completeUpload(create.file_id, file);
-          publicUrl = completion.public_url;
-        }
+        const upload = await api.uploadFile(file);
 
         attachments.push({
-          file_id: create.file_id,
+          file_id: upload.file_id,
           filename: file.name,
           content_type: file.type || "application/octet-stream",
-          public_url: publicUrl,
+          public_url: upload.public_url,
           size_bytes: file.size,
         });
       }
@@ -328,6 +316,13 @@ function Composer({ channel }: { channel: ChannelResponse }) {
 function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channel: ChannelResponse }) {
   const queryClient = useQueryClient();
   const [inviteToken, setInviteToken] = useState("");
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editName, setEditName] = useState(channel.name);
+  const [editDescription, setEditDescription] = useState(channel.description ?? "");
+  const [editAvatarUrl, setEditAvatarUrl] = useState(channel.avatar_url ?? "");
+  const [editVisibility, setEditVisibility] = useState<ChannelResponse["visibility"]>(channel.visibility);
+  const [editJoinMode, setEditJoinMode] = useState<ChannelResponse["join_mode"]>(channel.join_mode);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const membersQuery = useQuery({
     queryKey: queryKeys.channelMembers(channelId, ""),
@@ -397,7 +392,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
   });
 
   const patchMutation = useMutation({
-    mutationFn: (patch: Partial<Pick<ChannelResponse, "name" | "description" | "visibility" | "join_mode">>) => api.patchChannel(channelId, patch),
+    mutationFn: (patch: Partial<Pick<ChannelResponse, "name" | "description" | "avatar_url" | "visibility" | "join_mode">>) => api.patchChannel(channelId, patch),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channels"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.channel(channelId) });
@@ -405,15 +400,70 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Update failed"),
   });
 
+  const avatarUploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const upload = await api.uploadFile(file);
+      return upload.public_url ?? `/v1/uploads/${upload.file_id}/content`;
+    },
+    onSuccess: (avatarUrl) => {
+      setEditAvatarUrl(avatarUrl);
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : "Avatar upload failed"),
+  });
+
+  const resetEditForm = useCallback(() => {
+    setEditName(channel.name);
+    setEditDescription(channel.description ?? "");
+    setEditAvatarUrl(channel.avatar_url ?? "");
+    setEditVisibility(channel.visibility);
+    setEditJoinMode(channel.join_mode);
+  }, [channel.avatar_url, channel.description, channel.join_mode, channel.name, channel.visibility]);
+
+  const avatarSrc = resolveApiUrl(channel.avatar_url);
+  const initials = channel.name
+    .split(" ")
+    .map((part) => part.trim()[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
   return (
     <Card className="h-full overflow-auto p-3">
       <div className="space-y-2">
-        <h3 className="font-semibold">Details</h3>
-        <p className="text-sm text-slate-600 dark:text-slate-300">{channel.description || "No description"}</p>
-        <p className="text-xs text-slate-500">
-          {channel.visibility} / {channel.join_mode}
-        </p>
-        <p className="text-xs text-slate-500">My role: {channel.my_role}</p>
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="font-semibold">Details</h3>
+          {channel.permissions.can_edit_channel && !isEditingDetails ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                resetEditForm();
+                setIsEditingDetails(true);
+              }}
+            >
+              <Pencil className="mr-2 size-4" />
+              Edit
+            </Button>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border border-slate-200 p-2 dark:border-slate-800">
+          {avatarSrc ? (
+            <Image src={avatarSrc} alt={channel.name} width={56} height={56} unoptimized className="size-14 rounded-full object-cover" />
+          ) : (
+            <div className="flex size-14 items-center justify-center rounded-full bg-slate-300 text-sm font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+              {initials || "#"}
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{channel.name}</p>
+            <p className="text-xs text-slate-500">
+              {channel.visibility} / {channel.join_mode}
+            </p>
+            <p className="text-xs text-slate-500">My role: {channel.my_role}</p>
+          </div>
+        </div>
+        {!isEditingDetails ? <p className="text-sm text-slate-600 dark:text-slate-300">{channel.description || "No description"}</p> : null}
 
         {channel.my_role === "none" ? (
           <div className="space-y-2 rounded-lg border border-slate-200 p-2 dark:border-slate-800">
@@ -424,14 +474,116 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
           </div>
         ) : null}
 
-        {channel.permissions.can_edit_channel ? (
+        {channel.permissions.can_edit_channel && isEditingDetails ? (
           <div className="space-y-2 rounded-lg border border-slate-200 p-2 dark:border-slate-800">
-            <h4 className="text-sm font-medium">Quick edit</h4>
-            <Input defaultValue={channel.name} onBlur={(event) => event.target.value !== channel.name && patchMutation.mutate({ name: event.target.value })} />
+            <h4 className="text-sm font-medium">Edit channel</h4>
+            <Input value={editName} onChange={(event) => setEditName(event.target.value)} />
             <Input
-              defaultValue={channel.description ?? ""}
-              onBlur={(event) => event.target.value !== (channel.description ?? "") && patchMutation.mutate({ description: event.target.value })}
+              value={editDescription}
+              onChange={(event) => setEditDescription(event.target.value)}
+              placeholder="Description"
             />
+            <Input
+              value={editAvatarUrl}
+              placeholder="Avatar URL"
+              onChange={(event) => setEditAvatarUrl(event.target.value)}
+            />
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <label className="space-y-1">
+                <span className="text-slate-500">Visibility</span>
+                <select
+                  className="h-9 w-full rounded-md border border-slate-300 px-2 dark:border-slate-700 dark:bg-slate-900"
+                  value={editVisibility}
+                  onChange={(event) => setEditVisibility(event.target.value as ChannelResponse["visibility"])}
+                >
+                  <option value="public">Public</option>
+                  <option value="private">Private</option>
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="text-slate-500">Join mode</span>
+                <select
+                  className="h-9 w-full rounded-md border border-slate-300 px-2 dark:border-slate-700 dark:bg-slate-900"
+                  value={editJoinMode}
+                  onChange={(event) => setEditJoinMode(event.target.value as ChannelResponse["join_mode"])}
+                >
+                  <option value="open">Open</option>
+                  <option value="invite_only">Invite only</option>
+                  <option value="approval_required">Approval required</option>
+                </select>
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploadMutation.isPending || patchMutation.isPending}>
+                {avatarUploadMutation.isPending ? "Uploading..." : "Upload avatar image"}
+              </Button>
+              {editAvatarUrl.trim() ? (
+                <Button size="sm" variant="ghost" onClick={() => setEditAvatarUrl("")} disabled={patchMutation.isPending}>
+                  Remove avatar
+                </Button>
+              ) : null}
+            </div>
+            {editAvatarUrl.trim() ? (
+              <Image
+                src={resolveApiUrl(editAvatarUrl) ?? editAvatarUrl}
+                alt="Avatar preview"
+                width={64}
+                height={64}
+                unoptimized
+                className="size-16 rounded-full object-cover"
+              />
+            ) : null}
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                avatarUploadMutation.mutate(file);
+                event.target.value = "";
+              }}
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  const patch: Partial<Pick<ChannelResponse, "name" | "description" | "avatar_url" | "visibility" | "join_mode">> = {};
+                  const nextName = editName.trim();
+                  const nextDescription = editDescription.trim();
+                  const nextAvatar = editAvatarUrl.trim();
+                  if (nextName && nextName !== channel.name) patch.name = nextName;
+                  if (nextDescription !== (channel.description ?? "").trim()) patch.description = nextDescription || null;
+                  if (nextAvatar !== (channel.avatar_url ?? "").trim()) patch.avatar_url = nextAvatar || null;
+                  if (editVisibility !== channel.visibility) patch.visibility = editVisibility;
+                  if (editJoinMode !== channel.join_mode) patch.join_mode = editJoinMode;
+                  if (!Object.keys(patch).length) {
+                    setIsEditingDetails(false);
+                    return;
+                  }
+                  patchMutation.mutate(patch, {
+                    onSuccess: () => {
+                      setIsEditingDetails(false);
+                    },
+                  });
+                }}
+                disabled={!editName.trim() || patchMutation.isPending}
+              >
+                {patchMutation.isPending ? "Saving..." : "Save"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  resetEditForm();
+                  setIsEditingDetails(false);
+                }}
+                disabled={patchMutation.isPending}
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         ) : null}
       </div>

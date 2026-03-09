@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api-client";
+import { resolveApiUrl } from "@/lib/env";
 import { queryKeys } from "@/lib/query-keys";
 import { formatRelative } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,23 +20,45 @@ function ChannelCreateDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [visibility, setVisibility] = useState<"public" | "private">("public");
   const [joinMode, setJoinMode] = useState<"open" | "invite_only" | "approval_required">("open");
 
+  const avatarUploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const result = await api.uploadFile(file);
+      return result.public_url ?? `/v1/uploads/${result.file_id}/content`;
+    },
+    onSuccess: (url) => {
+      setAvatarUrl(url);
+      toast.success("Avatar uploaded");
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : "Failed to upload avatar");
+    },
+  });
+
   const createMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: () => {
+      const trimmedAvatar = avatarUrl.trim();
+      return (
       api.createChannel({
         name,
         description,
+        avatar_url: trimmedAvatar || null,
         visibility,
         join_mode: joinMode,
-      }),
+      })
+      );
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channels"] });
       toast.success("Channel created");
       onOpenChange(false);
       setName("");
       setDescription("");
+      setAvatarUrl("");
       setVisibility("public");
       setJoinMode("open");
     },
@@ -49,6 +72,32 @@ function ChannelCreateDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       <div className="space-y-3">
         <Input placeholder="Channel name" value={name} onChange={(event) => setName(event.target.value)} />
         <Input placeholder="Description" value={description} onChange={(event) => setDescription(event.target.value)} />
+        <Input placeholder="Avatar URL (optional)" value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} />
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploadMutation.isPending}>
+              {avatarUploadMutation.isPending ? "Uploading..." : "Upload avatar image"}
+            </Button>
+            {avatarUrl ? (
+              <Button size="sm" variant="ghost" onClick={() => setAvatarUrl("")}>
+                Clear
+              </Button>
+            ) : null}
+          </div>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              avatarUploadMutation.mutate(file);
+              event.target.value = "";
+            }}
+          />
+          {avatarUrl ? <Image src={resolveApiUrl(avatarUrl) ?? avatarUrl} alt="Avatar preview" width={64} height={64} unoptimized className="size-16 rounded-full object-cover" /> : null}
+        </div>
         <div className="grid grid-cols-2 gap-2 text-sm">
           <label className="space-y-1">
             <span className="text-slate-500">Visibility</span>
@@ -87,12 +136,17 @@ function ChannelList({ channels, selectedId }: { channels: ChannelResponse[]; se
           href={`/app/channels/${channel.id}`}
           className={`block rounded-lg px-3 py-2 transition hover:bg-slate-200/70 dark:hover:bg-slate-800/80 ${selectedId === channel.id ? "bg-slate-200 dark:bg-slate-800" : ""}`}
         >
-          <div className="flex items-center justify-between gap-2">
-            <p className="truncate text-sm font-medium">{channel.name}</p>
-            {channel.unread_count > 0 ? <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs text-white dark:bg-slate-100 dark:text-slate-900">{channel.unread_count}</span> : null}
+          <div className="flex items-start gap-3">
+            <ChannelAvatar channel={channel} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm font-medium">{channel.name}</p>
+                {channel.unread_count > 0 ? <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs text-white dark:bg-slate-100 dark:text-slate-900">{channel.unread_count}</span> : null}
+              </div>
+              <p className="truncate text-xs text-slate-500">{channel.last_message?.content_text ?? "No messages yet"}</p>
+              <p className="mt-1 text-[11px] text-slate-400">{channel.last_message_at ? formatRelative(channel.last_message_at) : ""}</p>
+            </div>
           </div>
-          <p className="truncate text-xs text-slate-500">{channel.last_message?.content_text ?? "No messages yet"}</p>
-          <p className="mt-1 text-[11px] text-slate-400">{channel.last_message_at ? formatRelative(channel.last_message_at) : ""}</p>
         </Link>
       ))}
       {channels.length === 0 ? <p className="px-3 py-6 text-sm text-slate-500">No channels found.</p> : null}
@@ -109,8 +163,9 @@ function ChannelAvatar({ channel }: { channel: ChannelResponse }) {
     .join("")
     .toUpperCase();
 
-  if (channel.avatar_url) {
-    return <Image src={channel.avatar_url} alt={channel.name} width={36} height={36} className="size-9 rounded-full object-cover" />;
+  const avatarSrc = resolveApiUrl(channel.avatar_url);
+  if (avatarSrc) {
+    return <Image src={avatarSrc} alt={channel.name} width={36} height={36} unoptimized className="size-9 rounded-full object-cover" />;
   }
 
   return (

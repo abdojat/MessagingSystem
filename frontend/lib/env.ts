@@ -3,6 +3,22 @@
 export const API_BASE_URL = (rawApiBase || "http://localhost:8000").replace(/\/+$/, "");
 export const API_V1_BASE_URL = `${API_BASE_URL}/v1`;
 
+export function resolveApiUrl(pathOrUrl: string | null | undefined): string | null {
+  if (!pathOrUrl) return null;
+  const value = pathOrUrl.trim();
+  if (!value) return null;
+
+  if (/^(https?:|data:|blob:)/i.test(value)) {
+    return value;
+  }
+
+  try {
+    return new URL(value, API_BASE_URL).toString();
+  } catch {
+    return value;
+  }
+}
+
 export function toWebSocketUrl(httpBase: string) {
   const normalized = httpBase.replace(/\/+$/, "");
   if (normalized.startsWith("https://")) {

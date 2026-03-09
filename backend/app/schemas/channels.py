@@ -25,13 +25,7 @@ class ChannelPatchRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_non_empty(self) -> "ChannelPatchRequest":
-        if (
-            self.name is None
-            and self.description is None
-            and self.avatar_url is None
-            and self.visibility is None
-            and self.join_mode is None
-        ):
+        if len(self.model_fields_set) == 0:
             raise ValueError("provide at least one field to update")
         return self
 

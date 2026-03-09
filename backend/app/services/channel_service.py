@@ -361,11 +361,12 @@ class ChannelService:
         if not membership or membership.role != MembershipRole.owner:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
+        provided_fields = req.model_fields_set
         if req.name is not None:
             channel.name = req.name
-        if req.description is not None:
+        if "description" in provided_fields:
             channel.description = req.description
-        if req.avatar_url is not None:
+        if "avatar_url" in provided_fields:
             channel.avatar_url = req.avatar_url
         if req.visibility is not None:
             channel.visibility = req.visibility

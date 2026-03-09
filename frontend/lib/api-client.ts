@@ -211,6 +211,41 @@ export const api = {
 
   createUpload: (payload: { filename: string; content_type: string; size_bytes: number; checksum?: string }) =>
     apiRequest<UploadCreateResponse>("/uploads", { method: "POST", body: payload }),
+  uploadFile: async (file: File) => {
+    const create = await api.createUpload({
+      filename: file.name,
+      content_type: file.type || "application/octet-stream",
+      size_bytes: file.size,
+    });
+    const token = getAccessToken();
+    const uploadUrl = new URL(create.upload_url, API_V1_BASE_URL).toString();
+    const headers: Record<string, string> = {
+      ...(create.headers ?? {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+
+    try {
+      const response = await fetch(uploadUrl, {
+        method: create.method,
+        headers,
+        body: file,
+      });
+      if (!response.ok) {
+        throw await parseApiError(response);
+      }
+      const completion = (await response.json()) as { file_id: string; public_url: string | null };
+      return {
+        file_id: completion.file_id || create.file_id,
+        public_url: completion.public_url ?? create.public_url,
+      };
+    } catch {
+      const completion = await api.completeUpload(create.file_id, file);
+      return {
+        file_id: completion.file_id,
+        public_url: completion.public_url ?? create.public_url,
+      };
+    }
+  },
   completeUpload: (fileId: string, content: Blob) =>
     fetch(`${API_V1_BASE_URL}/uploads/${fileId}/content`, {
       method: "PUT",

@@ -254,7 +254,16 @@ export type WsEnvelope =
   | (WsBaseEnvelope & { type: "membership_update"; payload: { channel_id: string; user_id: string; new_role: ChannelRole; reason: string } })
   | (WsBaseEnvelope & {
       type: "channel_updated";
-      payload: { channel_id: string; patch: { name?: string; visibility?: "public" | "private"; join_mode?: "open" | "invite_only" | "approval_required" } };
+      payload: {
+        channel_id: string;
+        patch: {
+          name?: string;
+          description?: string | null;
+          avatar_url?: string | null;
+          visibility?: "public" | "private";
+          join_mode?: "open" | "invite_only" | "approval_required";
+        };
+      };
     })
   | (WsBaseEnvelope & {
       type: "sync";

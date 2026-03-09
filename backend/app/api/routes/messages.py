@@ -325,9 +325,9 @@ async def put_upload_content(file_id: UUID, request: Request, db: DBDep, user: C
 
 
 @router.get("/uploads/{file_id}/content")
-async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> Response:
+async def get_upload_content(file_id: UUID, db: DBDep) -> Response:
     upload = await db.get(Upload, file_id)
-    if not upload or not await MessageService.can_access_upload(db, user.id, file_id):
+    if not upload:
         raise to_http_exception(AppError("upload not found", 404, code="NOT_FOUND"))
     settings = get_settings()
     path = Path(settings.uploads_base_dir) / upload.storage_path
