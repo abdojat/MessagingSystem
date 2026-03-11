@@ -37,8 +37,8 @@ export default function SessionsPage() {
   });
 
   return (
-    <main className="mx-auto min-h-screen max-w-3xl p-6">
-      <div className="mb-4 flex items-center justify-between">
+    <main className="mx-auto min-h-screen max-w-3xl p-4 sm:p-6">
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold">Sessions</h1>
         <Link href="/app" className="text-sm underline">
           Back to app
@@ -46,22 +46,22 @@ export default function SessionsPage() {
       </div>
 
       <Card>
-        <CardHeader className="flex items-center justify-between">
+        <CardHeader className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           <span>Active sessions</span>
-          <Button variant="danger" size="sm" onClick={() => logoutAllMutation.mutate()}>
+          <Button className="w-full sm:w-auto" variant="danger" size="sm" onClick={() => logoutAllMutation.mutate()}>
             Logout all
           </Button>
         </CardHeader>
         <CardContent className="space-y-2">
           {(sessionsQuery.data?.items ?? []).map((session) => (
-            <div key={session.id} className="flex items-center justify-between rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
-              <div>
+            <div key={session.id} className="flex flex-col gap-3 rounded-md border border-slate-200 p-3 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
+              <div className="min-w-0">
                 <p>{session.user_agent || "Unknown agent"}</p>
                 <p className="text-xs text-slate-500">
                   {session.ip || "No IP"} • expires {formatDateTime(session.expires_at)}
                 </p>
               </div>
-              <Button size="sm" variant="ghost" onClick={() => revokeMutation.mutate(session.id)}>
+              <Button className="w-full sm:w-auto" size="sm" variant="ghost" onClick={() => revokeMutation.mutate(session.id)}>
                 Revoke
               </Button>
             </div>

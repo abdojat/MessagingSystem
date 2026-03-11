@@ -27,8 +27,7 @@ export default function AppHomePage() {
 
   return (
     <AppShell>
-      <div className="grid h-full place-items-center">Select a channel from the sidebar.</div>
+      <div className="grid h-full place-items-center p-4 text-center">Select a channel from the sidebar.</div>
     </AppShell>
   );
 }
-

@@ -1,10 +1,10 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import Image from "next/image";
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Settings } from "lucide-react";
+import { Plus, Search, Settings, User } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api-client";
 import { resolveApiUrl } from "@/lib/env";
@@ -42,15 +42,13 @@ function ChannelCreateDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const createMutation = useMutation({
     mutationFn: () => {
       const trimmedAvatar = avatarUrl.trim();
-      return (
-      api.createChannel({
+      return api.createChannel({
         name,
         description,
         avatar_url: trimmedAvatar || null,
         visibility,
         join_mode: joinMode,
-      })
-      );
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channels"] });
@@ -74,7 +72,7 @@ function ChannelCreateDialog({ open, onOpenChange }: { open: boolean; onOpenChan
         <Input placeholder="Description" value={description} onChange={(event) => setDescription(event.target.value)} />
         <Input placeholder="Avatar URL (optional)" value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} />
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploadMutation.isPending}>
               {avatarUploadMutation.isPending ? "Uploading..." : "Upload avatar image"}
             </Button>
@@ -98,7 +96,7 @@ function ChannelCreateDialog({ open, onOpenChange }: { open: boolean; onOpenChan
           />
           {avatarUrl ? <Image src={resolveApiUrl(avatarUrl) ?? avatarUrl} alt="Avatar preview" width={64} height={64} unoptimized className="size-16 rounded-full object-cover" /> : null}
         </div>
-        <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
           <label className="space-y-1">
             <span className="text-slate-500">Visibility</span>
             <select className="h-9 w-full rounded-md border border-slate-300 px-2 dark:border-slate-700 dark:bg-slate-900" value={visibility} onChange={(event) => setVisibility(event.target.value as "public" | "private")}>
@@ -119,7 +117,7 @@ function ChannelCreateDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             </select>
           </label>
         </div>
-        <Button disabled={!name.trim() || createMutation.isPending} onClick={() => createMutation.mutate()}>
+        <Button className="w-full" disabled={!name.trim() || createMutation.isPending} onClick={() => createMutation.mutate()}>
           {createMutation.isPending ? "Creating..." : "Create"}
         </Button>
       </div>
@@ -127,13 +125,14 @@ function ChannelCreateDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   );
 }
 
-function ChannelList({ channels, selectedId }: { channels: ChannelResponse[]; selectedId?: string }) {
+function ChannelList({ channels, selectedId, onNavigate }: { channels: ChannelResponse[]; selectedId?: string; onNavigate?: () => void }) {
   return (
     <div className="space-y-1">
       {channels.map((channel) => (
         <Link
           key={channel.id}
           href={`/app/channels/${channel.id}`}
+          onClick={onNavigate}
           className={`block rounded-lg px-3 py-2 transition hover:bg-slate-200/70 dark:hover:bg-slate-800/80 ${selectedId === channel.id ? "bg-slate-200 dark:bg-slate-800" : ""}`}
         >
           <div className="flex items-start gap-3">
@@ -175,7 +174,7 @@ function ChannelAvatar({ channel }: { channel: ChannelResponse }) {
   );
 }
 
-function ChannelAvatarRail({ channels, selectedId }: { channels: ChannelResponse[]; selectedId?: string }) {
+function ChannelAvatarRail({ channels, selectedId, onNavigate }: { channels: ChannelResponse[]; selectedId?: string; onNavigate?: () => void }) {
   return (
     <div className="flex flex-col items-center gap-2">
       {channels.map((channel) => (
@@ -183,6 +182,7 @@ function ChannelAvatarRail({ channels, selectedId }: { channels: ChannelResponse
           key={channel.id}
           href={`/app/channels/${channel.id}`}
           title={channel.name}
+          onClick={onNavigate}
           className={`rounded-xl p-1 transition hover:bg-slate-200/70 dark:hover:bg-slate-800/80 ${selectedId === channel.id ? "bg-slate-200 dark:bg-slate-800" : ""}`}
         >
           <ChannelAvatar channel={channel} />
@@ -193,7 +193,7 @@ function ChannelAvatarRail({ channels, selectedId }: { channels: ChannelResponse
   );
 }
 
-export function Sidebar({ selectedChannelId, isCollapsed = false }: { selectedChannelId?: string; isCollapsed?: boolean }) {
+export function Sidebar({ selectedChannelId, isCollapsed = false, onNavigate }: { selectedChannelId?: string; isCollapsed?: boolean; onNavigate?: () => void }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
   const searchQuery = search.trim() || undefined;
@@ -213,10 +213,10 @@ export function Sidebar({ selectedChannelId, isCollapsed = false }: { selectedCh
   const discoverChannels = useMemo(() => discoverChannelsQuery.data?.items ?? [], [discoverChannelsQuery.data?.items]);
 
   return (
-    <aside className="h-full border-r border-slate-200 bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
+    <aside className="h-full overflow-y-auto border-r border-slate-200 bg-white/70 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
       <div className={isCollapsed ? "p-2" : "space-y-3 p-3"}>
         {isCollapsed ? (
-          <ChannelAvatarRail channels={myChannels} selectedId={selectedChannelId} />
+          <ChannelAvatarRail channels={myChannels} selectedId={selectedChannelId} onNavigate={onNavigate} />
         ) : (
           <>
             <div className="flex items-center justify-between">
@@ -225,12 +225,26 @@ export function Sidebar({ selectedChannelId, isCollapsed = false }: { selectedCh
                 <Button size="sm" variant="ghost" onClick={() => setDialogOpen(true)}>
                   <Plus className="size-4" />
                 </Button>
-                <Link href="/settings/sessions">
+                <Link href="/app/profile" onClick={onNavigate}>
+                  <Button size="sm" variant="ghost">
+                    <User className="size-4" />
+                  </Button>
+                </Link>
+                <Link href="/settings/sessions" onClick={onNavigate}>
                   <Button size="sm" variant="ghost">
                     <Settings className="size-4" />
                   </Button>
                 </Link>
               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <Link href="/app/profile" onClick={onNavigate} className="rounded-md border border-slate-200 px-2 py-1.5 text-center text-xs text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900">
+                Profile
+              </Link>
+              <Link href="/settings/sessions" onClick={onNavigate} className="rounded-md border border-slate-200 px-2 py-1.5 text-center text-xs text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900">
+                Sessions
+              </Link>
             </div>
 
             <div className="relative">
@@ -239,19 +253,19 @@ export function Sidebar({ selectedChannelId, isCollapsed = false }: { selectedCh
             </div>
 
             <AppTabs defaultValue="mine">
-              <AppTabsList className="w-full">
-                <AppTabsTrigger value="mine" className="flex-1">
+              <AppTabsList className="grid w-full grid-cols-2">
+                <AppTabsTrigger value="mine" className="min-w-0">
                   My channels
                 </AppTabsTrigger>
-                <AppTabsTrigger value="discover" className="flex-1">
+                <AppTabsTrigger value="discover" className="min-w-0">
                   Discover
                 </AppTabsTrigger>
               </AppTabsList>
               <AppTabsContent value="mine" className="mt-2">
-                <ChannelList channels={myChannels} selectedId={selectedChannelId} />
+                <ChannelList channels={myChannels} selectedId={selectedChannelId} onNavigate={onNavigate} />
               </AppTabsContent>
               <AppTabsContent value="discover" className="mt-2">
-                <ChannelList channels={discoverChannels} selectedId={selectedChannelId} />
+                <ChannelList channels={discoverChannels} selectedId={selectedChannelId} onNavigate={onNavigate} />
               </AppTabsContent>
             </AppTabs>
           </>
@@ -262,5 +276,3 @@ export function Sidebar({ selectedChannelId, isCollapsed = false }: { selectedCh
     </aside>
   );
 }
-
-

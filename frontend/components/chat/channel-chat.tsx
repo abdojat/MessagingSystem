@@ -12,6 +12,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { cn, formatDateTime } from "@/lib/utils";
 import { useAppUiStore } from "@/store/app-ui-store";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -85,7 +86,7 @@ function MessageRow({
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900" data-seq-id={message.seq_id}>
-      <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
         <span>seq #{message.seq_id}</span>
         <span>{formatDateTime(message.created_at)}</span>
       </div>
@@ -105,7 +106,7 @@ function MessageRow({
       ) : (
         <>
           {message.deleted_at ? <p className="italic text-slate-400">Message deleted</p> : null}
-          {message.content_type === "text" && message.content_text ? <p className="whitespace-pre-wrap text-sm">{message.content_text}</p> : null}
+          {message.content_type === "text" && message.content_text ? <p className="whitespace-pre-wrap break-words text-sm">{message.content_text}</p> : null}
           {message.content_type === "json" && message.content_json ? (
             <pre className="overflow-x-auto rounded bg-slate-100 p-2 text-xs dark:bg-slate-800">{JSON.stringify(message.content_json, null, 2)}</pre>
           ) : null}
@@ -123,7 +124,7 @@ function MessageRow({
                       alt="attachment"
                       width={480}
                       height={320}
-                      className="max-h-64 w-auto rounded object-contain"
+                      className="max-h-64 max-w-full rounded object-contain"
                     />
                   );
                 }
@@ -244,7 +245,7 @@ function Composer({ channel }: { channel: ChannelResponse }) {
   return (
     <div className="border-t border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
       {replyToSeqId ? (
-        <div className="mb-2 flex items-center justify-between rounded-md bg-slate-100 px-3 py-2 text-xs dark:bg-slate-800">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-100 px-3 py-2 text-xs dark:bg-slate-800">
           <span>Replying to seq #{replyToSeqId}</span>
           <button onClick={() => setReplyTarget(null)}>Clear</button>
         </div>
@@ -274,7 +275,7 @@ function Composer({ channel }: { channel: ChannelResponse }) {
           addFiles(Array.from(event.dataTransfer.files ?? []));
         }}
       >
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center">
           <span>{isDragging ? "Drop files to attach" : "Drag and drop files here, or click to browse"}</span>
           <Button size="sm" variant="ghost" onClick={() => fileInputRef.current?.click()}>
             Choose files
@@ -305,7 +306,7 @@ function Composer({ channel }: { channel: ChannelResponse }) {
       />
 
       <div className="mt-2 flex justify-end">
-        <Button onClick={() => sendMutation.mutate()} disabled={sendMutation.isPending || (!text.trim() && files.length === 0)}>
+        <Button className="w-full sm:w-auto" onClick={() => sendMutation.mutate()} disabled={sendMutation.isPending || (!text.trim() && files.length === 0)}>
           <Send className="mr-2 size-4" />
           Send
         </Button>
@@ -314,7 +315,7 @@ function Composer({ channel }: { channel: ChannelResponse }) {
   );
 }
 
-function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channel: ChannelResponse }) {
+function ChannelDetailsPanel({ channelId, channel, className }: { channelId: string; channel: ChannelResponse; className?: string }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const [inviteToken, setInviteToken] = useState("");
@@ -445,7 +446,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
     .toUpperCase();
 
   return (
-    <Card className="h-full overflow-auto p-3">
+    <Card className={cn("h-full overflow-auto p-3", className)}>
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-2">
           <h3 className="font-semibold">Details</h3>
@@ -519,7 +520,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
               placeholder="Avatar URL"
               onChange={(event) => setEditAvatarUrl(event.target.value)}
             />
-            <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
               <label className="space-y-1">
                 <span className="text-slate-500">Visibility</span>
                 <select
@@ -544,7 +545,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
                 </select>
               </label>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="secondary" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploadMutation.isPending || patchMutation.isPending}>
                 {avatarUploadMutation.isPending ? "Uploading..." : "Upload avatar image"}
               </Button>
@@ -576,7 +577,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
                 event.target.value = "";
               }}
             />
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
                 onClick={() => {
@@ -620,7 +621,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
       </div>
 
       <AppTabs defaultValue="pins" className="mt-4">
-        <AppTabsList className="w-full">
+        <AppTabsList className="grid w-full grid-cols-3">
           <AppTabsTrigger value="pins" className="flex-1">
             Pins
           </AppTabsTrigger>
@@ -648,7 +649,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
                 {member.username} ({member.role})
               </p>
               {channel.my_role === "owner" || (channel.my_role === "admin" && member.role === "member") ? (
-                <div className="mt-1 flex gap-1">
+                <div className="mt-1 flex flex-wrap gap-1">
                   {(channel.my_role === "owner" || member.role === "member") && (
                     <Button size="sm" variant="ghost" onClick={() => promoteMutation.mutate(member)}>
                       {member.role === "admin" ? "Demote" : "Promote"}
@@ -666,7 +667,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
             <div className="space-y-1">
               <p className="text-xs font-medium">Pending requests</p>
               {(requestsQuery.data?.items ?? []).map((req) => (
-                <div key={req.user_id} className="flex items-center justify-between rounded-md border border-slate-200 p-2 text-xs dark:border-slate-800">
+                <div key={req.user_id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 p-2 text-xs dark:border-slate-800">
                   <span>{req.username}</span>
                   <Button size="sm" onClick={() => approveMutation.mutate(req.user_id)}>
                     Approve
@@ -687,7 +688,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
                 <div className="rounded-md border border-slate-200 p-2 text-xs dark:border-slate-800">
                   <p className="mb-1 text-slate-500">Latest invite link</p>
                   <Input readOnly value={latestInviteLink} />
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <Button
                       size="sm"
                       variant="secondary"
@@ -732,6 +733,7 @@ function ChannelDetailsPanel({ channelId, channel }: { channelId: string; channe
 }
 
 export function ChannelChat({ channelId }: { channelId: string }) {
+  const isMobile = useMediaQuery("(max-width: 1023px)");
   const queryClient = useQueryClient();
   const listRef = useRef<HTMLDivElement | null>(null);
   const visibilityObserverRef = useRef<IntersectionObserver | null>(null);
@@ -743,6 +745,7 @@ export function ChannelChat({ channelId }: { channelId: string }) {
   const lastRenderedSeqRef = useRef<number | null>(null);
   const setCurrentChannel = useAppUiStore((s) => s.setCurrentChannel);
   const setReplyTarget = useAppUiStore((s) => s.setReplyTarget);
+  const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
   const { width: detailsWidth, isCollapsed: isDetailsCollapsed, beginResize, open: openDetails, close: closeDetails } = useResizablePanel({
     initialWidth: 320,
     minWidth: 320,
@@ -938,30 +941,41 @@ export function ChannelChat({ channelId }: { channelId: string }) {
   }
 
   const resolvedChannel = channelQuery.data;
+  const showDetailsPanel = isMobile ? mobileDetailsOpen : !isDetailsCollapsed;
 
   return (
     <div
-      className="grid h-full overflow-hidden"
+      className={cn("h-full overflow-hidden", isMobile ? "flex" : "grid")}
       style={{
-        gridTemplateColumns: `minmax(0, 1fr) ${isDetailsCollapsed ? 0 : 8}px ${isDetailsCollapsed ? 0 : Math.max(320, detailsWidth)}px`,
+        gridTemplateColumns: isMobile ? undefined : `minmax(0, 1fr) ${isDetailsCollapsed ? 0 : 8}px ${isDetailsCollapsed ? 0 : Math.max(320, detailsWidth)}px`,
       }}
     >
-      <section className="flex min-h-0 flex-col">
-        <header className="border-b border-slate-200 bg-white/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/80">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="border-b border-slate-200 bg-white/80 px-3 py-3 sm:px-4 dark:border-slate-800 dark:bg-slate-950/80">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">{resolvedChannel.name}</h2>
-              <p className="text-xs text-slate-500">
+            <div className="min-w-0">
+              <h2 className="truncate text-lg font-semibold">{resolvedChannel.name}</h2>
+              <p className="text-xs text-slate-500 sm:text-sm">
                 {resolvedChannel.member_count} members • {resolvedChannel.pending_count} pending • {resolvedChannel.unread_count} unread
               </p>
             </div>
             <Button
               size="sm"
               variant="ghost"
-              onClick={isDetailsCollapsed ? openDetails : closeDetails}
-              aria-label={isDetailsCollapsed ? "Show channel details sidebar" : "Hide channel details sidebar"}
+              onClick={() => {
+                if (isMobile) {
+                  setMobileDetailsOpen((current) => !current);
+                  return;
+                }
+                if (isDetailsCollapsed) {
+                  openDetails();
+                  return;
+                }
+                closeDetails();
+              }}
+              aria-label={showDetailsPanel ? "Hide channel details sidebar" : "Show channel details sidebar"}
             >
-              {isDetailsCollapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
+              {showDetailsPanel ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
             </Button>
           </div>
         </header>
@@ -972,7 +986,7 @@ export function ChannelChat({ channelId }: { channelId: string }) {
           </div>
         ) : (
           <>
-            <div ref={listRef} className="flex-1 space-y-2 overflow-auto bg-slate-50 p-3 dark:bg-slate-950">
+            <div ref={listRef} className="min-w-0 flex-1 space-y-2 overflow-auto bg-slate-50 p-2 sm:p-3 dark:bg-slate-950">
               {messagesQuery.hasNextPage ? (
                 <div className="flex justify-center">
                   <Button size="sm" variant="secondary" onClick={() => messagesQuery.fetchNextPage()} disabled={messagesQuery.isFetchingNextPage}>
@@ -998,7 +1012,7 @@ export function ChannelChat({ channelId }: { channelId: string }) {
         )}
       </section>
 
-      {!isDetailsCollapsed ? (
+      {!isMobile && !isDetailsCollapsed ? (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -1008,11 +1022,18 @@ export function ChannelChat({ channelId }: { channelId: string }) {
         >
           <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-slate-200 transition-colors group-hover:bg-slate-400 dark:bg-slate-800 dark:group-hover:bg-slate-500" />
         </div>
-      ) : (
-        <div />
-      )}
+      ) : null}
 
-      <ChannelDetailsPanel channelId={channelId} channel={resolvedChannel} />
+      {!isMobile ? <ChannelDetailsPanel channelId={channelId} channel={resolvedChannel} /> : null}
+
+      {isMobile && mobileDetailsOpen ? (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button className="absolute inset-0 bg-black/40" onClick={() => setMobileDetailsOpen(false)} aria-label="Close channel details" />
+          <div className="relative ml-auto h-full w-[min(92vw,420px)] p-2 sm:p-3">
+            <ChannelDetailsPanel channelId={channelId} channel={resolvedChannel} className="h-full" />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
