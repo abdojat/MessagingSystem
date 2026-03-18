@@ -1,9 +1,8 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useAuthBootstrap } from "@/hooks/use-auth-bootstrap";
 import { api, ApiError } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
 import { formatDateTime } from "@/lib/utils";
@@ -13,8 +12,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 export default function SessionsPage() {
   const queryClient = useQueryClient();
-  useAuthBootstrap();
-  const clearAuth = useAuthStore((s) => s.clearAuth);
+  const clearSession = useAuthStore((s) => s.clearSession);
 
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions,
@@ -30,7 +28,7 @@ export default function SessionsPage() {
   const logoutAllMutation = useMutation({
     mutationFn: api.logoutAll,
     onSuccess: () => {
-      clearAuth();
+      clearSession();
       toast.success("All sessions logged out");
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Failed to logout all"),
@@ -55,12 +53,12 @@ export default function SessionsPage() {
         <CardContent className="space-y-2">
           {(sessionsQuery.data?.items ?? []).map((session) => (
             <div key={session.id} className="flex flex-col gap-3 rounded-md border border-slate-200 p-3 text-sm sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
-              <div className="min-w-0">
-                <p>{session.user_agent || "Unknown agent"}</p>
-                <p className="text-xs text-slate-500">
-                  {session.ip || "No IP"} • expires {formatDateTime(session.expires_at)}
-                </p>
-              </div>
+                <div className="min-w-0">
+                  <p>{session.user_agent || "Unknown agent"}</p>
+                  <p className="text-xs text-slate-500">
+                    {session.ip || "No IP"} | expires {formatDateTime(session.expires_at)}
+                  </p>
+                </div>
               <Button className="w-full sm:w-auto" size="sm" variant="ghost" onClick={() => revokeMutation.mutate(session.id)}>
                 Revoke
               </Button>
@@ -72,4 +70,3 @@ export default function SessionsPage() {
     </main>
   );
 }
-

@@ -1,5 +1,5 @@
 ﻿import { API_V1_BASE_URL } from "@/lib/env";
-import { getAccessToken, getRefreshToken, setTokenPair, useAuthStore } from "@/store/auth-store";
+import { clearAuthenticatedSession, getAccessToken, getRefreshToken, setAuthenticatedSession } from "@/store/auth-store";
 import type {
   ApiErrorResponse,
   ChannelListResponse,
@@ -81,7 +81,7 @@ async function refreshAccessToken() {
   refreshPromise = (async () => {
     const refreshToken = getRefreshToken();
     if (!refreshToken) {
-      useAuthStore.getState().clearAuth();
+      clearAuthenticatedSession();
       return null;
     }
 
@@ -89,15 +89,16 @@ async function refreshAccessToken() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: refreshToken }),
+      credentials: "include",
     });
 
     if (!response.ok) {
-      useAuthStore.getState().clearAuth();
+      clearAuthenticatedSession();
       return null;
     }
 
     const tokenPair = (await response.json()) as TokenPair;
-    setTokenPair(tokenPair);
+    setAuthenticatedSession(tokenPair);
     return tokenPair.access_token;
   })().finally(() => {
     refreshPromise = null;
@@ -148,6 +149,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}, 
     body: options.body ? JSON.stringify(options.body) : undefined,
     signal: options.signal,
     cache: "no-store",
+    credentials: "include",
   });
 
   if (response.status === 401 && options.authenticated !== false && !retried) {
@@ -172,7 +174,7 @@ export const api = {
   register: (payload: RegisterRequest) => apiRequest<{ id: string; username: string; email: string | null }>("/auth/register", { method: "POST", body: payload, authenticated: false }),
   login: (payload: LoginRequest) => apiRequest<TokenPair>("/auth/login", { method: "POST", body: payload, authenticated: false }),
   refresh: (refreshToken: string) => apiRequest<TokenPair>("/auth/refresh", { method: "POST", body: { refresh_token: refreshToken }, authenticated: false }),
-  logout: (refreshToken: string) => apiRequest<{ status: "ok" }>("/auth/logout", { method: "POST", body: { refresh_token: refreshToken } }),
+  logout: (refreshToken: string) => apiRequest<{ status: "ok" }>("/auth/logout", { method: "POST", body: { refresh_token: refreshToken }, authenticated: false }),
   me: () => apiRequest<MeResponse>("/me"),
   sessions: () => apiRequest<{ items: SessionResponse[] }>("/auth/sessions"),
   logoutAll: () => apiRequest<{ status: string; revoked_count: number }>("/auth/logout_all", { method: "POST" }),

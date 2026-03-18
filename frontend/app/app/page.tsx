@@ -4,18 +4,15 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/app-shell";
-import { useAuthBootstrap } from "@/hooks/use-auth-bootstrap";
 import { api } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
 
 export default function AppHomePage() {
   const router = useRouter();
-  const { status } = useAuthBootstrap();
 
   const channelsQuery = useQuery({
     queryKey: queryKeys.channels("root"),
     queryFn: () => api.listChannels(),
-    enabled: status === "authenticated",
   });
 
   useEffect(() => {

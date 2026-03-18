@@ -4,10 +4,11 @@ import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { sanitizeNextPath } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api-client";
-import { setTokenPair, useAuthStore } from "@/store/auth-store";
+import { setAuthenticatedSession, useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -28,16 +29,16 @@ type RegisterValues = z.infer<typeof registerSchema>;
 
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const rememberMe = useAuthStore((s) => s.rememberMe);
   const setRememberMe = useAuthStore((s) => s.setRememberMe);
   const form = useForm<LoginValues>({ resolver: zodResolver(loginSchema), defaultValues: { username_or_email: "", password: "" } });
 
   const loginMutation = useMutation({
     mutationFn: api.login,
-    onSuccess: async (tokenPair) => {
-      setTokenPair(tokenPair, { rememberMe });
-      await api.me();
-      router.replace("/app");
+    onSuccess: (tokenPair) => {
+      setAuthenticatedSession(tokenPair, { rememberMe });
+      router.replace(sanitizeNextPath(searchParams.get("next")) ?? "/app");
     },
     onError: (error) => {
       if (error instanceof ApiError) {

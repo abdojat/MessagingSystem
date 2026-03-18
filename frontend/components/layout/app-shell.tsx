@@ -26,7 +26,7 @@ export function AppShell({ selectedChannelId, children }: { selectedChannelId?: 
   const wsStatus = useAppUiStore((s) => s.wsStatus);
   const { data: me } = useCurrentUser();
   const refreshToken = useAuthStore((s) => s.refreshToken);
-  const clearAuth = useAuthStore((s) => s.clearAuth);
+  const clearSession = useAuthStore((s) => s.clearSession);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const { width: sidebarWidth, isCollapsed: isSidebarCollapsed, beginResize, open: openSidebar, close: closeSidebar } = useResizablePanel({
     initialWidth: 360,
@@ -45,7 +45,7 @@ export function AppShell({ selectedChannelId, children }: { selectedChannelId?: 
   const logoutMutation = useMutation({
     mutationFn: () => (refreshToken ? api.logout(refreshToken) : Promise.resolve({ status: "ok" as const })),
     onSettled: () => {
-      clearAuth();
+      clearSession();
       router.replace("/login");
       toast.success("Logged out");
     },

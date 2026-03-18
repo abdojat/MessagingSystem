@@ -44,8 +44,10 @@ class AuthService:
 
     @staticmethod
     async def login(db: AsyncSession, req: LoginRequest, user_agent: str | None, ip: str | None, refresh_ttl_days: int) -> TokenPair:
+        identity = req.username_or_email.strip()
+        normalized_identity = identity.lower()
         result = await db.execute(
-            select(User).where(or_(User.username == req.username_or_email, User.email == req.username_or_email))
+            select(User).where(or_(User.username == identity, func.lower(User.email) == normalized_identity))
         )
         user = result.scalar_one_or_none()
         if not user or not verify_password(req.password, user.password_hash):
@@ -70,21 +72,7 @@ class AuthService:
 
     @staticmethod
     async def refresh(db: AsyncSession, refresh_token: str, user_agent: str | None, ip: str | None, refresh_ttl_days: int) -> TokenPair:
-        payload = decode_token(refresh_token)
-        if payload.get("type") != "refresh":
-            raise AppError("invalid token type", 401, code="AUTH_EXPIRED")
-        sid = payload.get("sid")
-        sub = payload.get("sub")
-        if not sid or not sub:
-            raise AppError("invalid token payload", 401, code="AUTH_EXPIRED")
-
-        session = await db.get(UserSession, UUID(sid))
-        if not session or session.user_id != UUID(sub):
-            raise AppError("invalid session", 401, code="AUTH_INVALID")
-        if session.revoked_at is not None or session.expires_at < utcnow():
-            raise AppError("session expired or revoked", 401, code="AUTH_EXPIRED")
-        if session.refresh_token_hash != sha256_hex(refresh_token):
-            raise AppError("refresh token mismatch", 401, code="AUTH_INVALID")
+        session = await AuthService._get_valid_refresh_session(db, refresh_token)
 
         now = utcnow()
         session.last_used_at = now
@@ -99,12 +87,8 @@ class AuthService:
 
     @staticmethod
     async def logout(db: AsyncSession, refresh_token: str) -> None:
-        payload = decode_token(refresh_token)
-        sid = payload.get("sid")
-        if not sid:
-            raise AppError("invalid token payload", 401, code="AUTH_INVALID")
-        session = await db.get(UserSession, UUID(sid))
-        if session and session.revoked_at is None:
+        session = await AuthService._get_valid_refresh_session(db, refresh_token)
+        if session.revoked_at is None:
             session.revoked_at = utcnow()
             await db.commit()
 
@@ -156,3 +140,23 @@ class AuthService:
         )
         await db.commit()
         return int(result.rowcount or 0)
+
+    @staticmethod
+    async def _get_valid_refresh_session(db: AsyncSession, refresh_token: str) -> UserSession:
+        payload = decode_token(refresh_token)
+        if payload.get("type") != "refresh":
+            raise AppError("invalid token type", 401, code="AUTH_EXPIRED")
+
+        sid = payload.get("sid")
+        sub = payload.get("sub")
+        if not sid or not sub:
+            raise AppError("invalid token payload", 401, code="AUTH_EXPIRED")
+
+        session = await db.get(UserSession, UUID(sid))
+        if not session or session.user_id != UUID(sub):
+            raise AppError("invalid session", 401, code="AUTH_INVALID")
+        if session.revoked_at is not None or session.expires_at < utcnow():
+            raise AppError("session expired or revoked", 401, code="AUTH_EXPIRED")
+        if session.refresh_token_hash != sha256_hex(refresh_token):
+            raise AppError("refresh token mismatch", 401, code="AUTH_INVALID")
+        return session

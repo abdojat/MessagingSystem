@@ -2,6 +2,6 @@
 
 import { ProtectedRouteBoundary } from "@/components/auth/auth-guard";
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   return <ProtectedRouteBoundary>{children}</ProtectedRouteBoundary>;
 }

@@ -1,19 +1,21 @@
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import type { TokenPair } from "@/types/api";
 
 type AuthState = {
   accessToken: string | null;
   refreshToken: string | null;
   tokenType: string;
   rememberMe: boolean;
-  status: "unknown" | "authenticated" | "unauthenticated";
+  status: "loading" | "authenticated" | "unauthenticated";
   hydrated: boolean;
+  initialized: boolean;
   setRememberMe: (rememberMe: boolean) => void;
-  setTokens: (input: { accessToken: string; refreshToken: string; tokenType?: string }) => void;
-  clearAuth: () => void;
-  setStatus: (status: AuthState["status"]) => void;
+  establishSession: (tokens: TokenPair, options?: { rememberMe?: boolean }) => void;
+  markUnauthenticated: () => void;
+  clearSession: () => void;
 };
 
 type PersistedAuthState = Partial<Pick<AuthState, "refreshToken" | "tokenType" | "rememberMe">>;
@@ -83,24 +85,48 @@ const noopStorage: StorageLike = {
   removeItem: () => undefined,
 };
 
-function createInitialState(set: (partial: Partial<AuthState>) => void): AuthState {
+function createInitialState(set: (partial: Partial<AuthState> | ((state: AuthState) => Partial<AuthState>)) => void): AuthState {
   return {
     accessToken: null,
     refreshToken: null,
     tokenType: "bearer",
     rememberMe: true,
-    status: "unknown",
+    status: "loading",
     hydrated: false,
+    initialized: false,
     setRememberMe: (rememberMe) => {
       rememberMePreference = rememberMe;
       set({ rememberMe });
       migrateAuthStorage(rememberMe);
     },
-    setTokens: ({ accessToken, refreshToken, tokenType = "bearer" }) =>
-      set({ accessToken, refreshToken, tokenType, status: "authenticated" }),
-    clearAuth: () =>
-      set({ accessToken: null, refreshToken: null, tokenType: "bearer", status: "unauthenticated" }),
-    setStatus: (status) => set({ status }),
+    establishSession: (tokens, options) => {
+      if (options?.rememberMe !== undefined) {
+        rememberMePreference = options.rememberMe;
+        migrateAuthStorage(options.rememberMe);
+      }
+      set((state) => ({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        tokenType: tokens.token_type ?? "bearer",
+        rememberMe: options?.rememberMe ?? state.rememberMe,
+        status: "authenticated",
+        initialized: true,
+      }));
+    },
+    markUnauthenticated: () =>
+      set({
+        accessToken: null,
+        status: "unauthenticated",
+        initialized: true,
+      }),
+    clearSession: () =>
+      set({
+        accessToken: null,
+        refreshToken: null,
+        tokenType: "bearer",
+        status: "unauthenticated",
+        initialized: true,
+      }),
   };
 }
 
@@ -127,16 +153,33 @@ export const useAuthStore = create<AuthState>()(
           refreshToken: isString(persisted.refreshToken) ? persisted.refreshToken : null,
           tokenType: isString(persisted.tokenType) ? persisted.tokenType : currentState.tokenType,
           rememberMe,
-          status: "unknown",
+          status: "loading",
           hydrated: false,
+          initialized: false,
         };
       },
       onRehydrateStorage: () => {
         return (_state, error) => {
           if (error) {
             rememberMePreference = true;
+            useAuthStore.setState({
+              accessToken: null,
+              refreshToken: null,
+              tokenType: "bearer",
+              rememberMe: true,
+              status: "unauthenticated",
+              hydrated: true,
+              initialized: true,
+            });
+            return;
           }
-          useAuthStore.setState({ hydrated: true });
+
+          const state = useAuthStore.getState();
+          useAuthStore.setState({
+            hydrated: true,
+            initialized: state.initialized || !state.refreshToken,
+            status: state.refreshToken ? state.status : "unauthenticated",
+          });
         };
       },
     },
@@ -151,16 +194,10 @@ export function getRefreshToken() {
   return useAuthStore.getState().refreshToken;
 }
 
-export function setTokenPair(tokens: { access_token: string; refresh_token: string; token_type?: string }, options?: { rememberMe?: boolean }) {
-  const state = useAuthStore.getState();
+export function setAuthenticatedSession(tokens: TokenPair, options?: { rememberMe?: boolean }) {
+  useAuthStore.getState().establishSession(tokens, options);
+}
 
-  if (options?.rememberMe !== undefined) {
-    state.setRememberMe(options.rememberMe);
-  }
-
-  state.setTokens({
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-    tokenType: tokens.token_type ?? "bearer",
-  });
+export function clearAuthenticatedSession() {
+  useAuthStore.getState().clearSession();
 }

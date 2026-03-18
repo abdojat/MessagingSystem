@@ -1,19 +1,19 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useAuthSession } from "@/components/auth/auth-provider";
 import { api, ApiError } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
-import { useAuthBootstrap } from "@/hooks/use-auth-bootstrap";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 export function InviteClientPage({ token }: { token: string }) {
   const router = useRouter();
-  const { status } = useAuthBootstrap();
+  const { isReady, isAuthenticated } = useAuthSession();
 
   const previewQuery = useQuery({
     queryKey: queryKeys.invite(token),
@@ -30,11 +30,11 @@ export function InviteClientPage({ token }: { token: string }) {
   });
 
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (isReady && !isAuthenticated) {
       toast.error("Please login first");
       router.replace(`/login?next=${encodeURIComponent(`/invites/${token}`)}`);
     }
-  }, [status, router, token]);
+  }, [isReady, isAuthenticated, router, token]);
 
   const data = previewQuery.data;
 
@@ -55,7 +55,7 @@ export function InviteClientPage({ token }: { token: string }) {
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <Button className="w-full sm:w-auto" onClick={() => acceptMutation.mutate()} disabled={!data?.is_valid || acceptMutation.isPending || status !== "authenticated"}>
+            <Button className="w-full sm:w-auto" onClick={() => acceptMutation.mutate()} disabled={!data?.is_valid || acceptMutation.isPending || !isAuthenticated}>
               {acceptMutation.isPending ? "Joining..." : "Accept invite"}
             </Button>
             <Button className="w-full sm:w-auto" variant="secondary" onClick={() => router.push("/")}>
