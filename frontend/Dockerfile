@@ -1,35 +1,29 @@
-FROM node:22-alpine AS deps
+FROM node:22-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm config set registry https://registry.npmjs.org/ \
- && npm config set fetch-retries 5 \
- && npm config set fetch-retry-mintimeout 5000 \
- && npm config set fetch-retry-maxtimeout 120000 \
- && npm config set fetch-timeout 300000 \
- && for i in 1 2 3; do \
-      if [ -f package-lock.json ]; then npm ci --no-audit --no-fund && break; else npm install --no-audit --no-fund && break; fi; \
-      if [ "$i" -eq 3 ]; then exit 1; fi; \
-      echo "npm install failed (attempt $i), retrying..."; \
-      sleep 5; \
-    done
 
-FROM node:22-alpine AS builder
-WORKDIR /app
-ENV NEXT_TELEMETRY_DISABLED=1
-COPY --from=deps /app/node_modules ./node_modules
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.base.json .npmrc ./
+COPY artifacts/chat-app/package.json artifacts/chat-app/vite.config.ts artifacts/chat-app/tsconfig.json artifacts/chat-app/index.html ./artifacts/chat-app/
+COPY lib/api-client-react/package.json lib/api-client-react/tsconfig.json ./lib/api-client-react/
+COPY lib/api-zod/package.json lib/api-zod/tsconfig.json ./lib/api-zod/
+COPY lib/api-spec/package.json lib/api-spec/orval.config.ts lib/api-spec/openapi.yaml ./lib/api-spec/
+
+RUN pnpm install --frozen-lockfile
+
 COPY . .
-RUN npm run build
 
-FROM node:22-alpine AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
+ARG VITE_API_BASE_URL=/v1
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV PORT=3000
-ENV HOSTNAME=0.0.0.0
-RUN addgroup -S nextjs && adduser -S nextjs -G nextjs
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-USER nextjs
+ENV BASE_PATH=/
+
+RUN pnpm build
+
+FROM nginx:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/artifacts/chat-app/dist/public /usr/share/nginx/html
+
 EXPOSE 3000
-CMD ["node", "server.js"]
+
+CMD ["nginx", "-g", "daemon off;"]

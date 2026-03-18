@@ -1,0 +1,1792 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: Chat API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication
+  - name: users
+    description: User operations
+  - name: channels
+    description: Channel operations
+  - name: messages
+    description: Message operations
+  - name: reactions
+    description: Reaction operations
+  - name: pins
+    description: Pin operations
+  - name: uploads
+    description: Upload operations
+  - name: sync
+    description: Sync operations
+  - name: invites
+    description: Invite operations
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /v1/auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "200":
+          description: Registration successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPublic"
+
+  /v1/auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+
+  /v1/auth/refresh:
+    post:
+      operationId: refreshToken
+      tags: [auth]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutRequest"
+      responses:
+        "200":
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+
+  /v1/auth/sessions:
+    get:
+      operationId: getSessions
+      tags: [auth]
+      summary: Get all sessions
+      responses:
+        "200":
+          description: Sessions list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionListResponse"
+
+  /v1/auth/logout_all:
+    post:
+      operationId: logoutAll
+      tags: [auth]
+      summary: Logout all sessions
+      responses:
+        "200":
+          description: Logged out of all sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutAllResponse"
+
+  /v1/auth/sessions/{session_id}:
+    delete:
+      operationId: deleteSession
+      tags: [auth]
+      summary: Delete a session
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+
+  /v1/me:
+    get:
+      operationId: getMe
+      tags: [users]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+
+  /v1/users/search:
+    get:
+      operationId: searchUsers
+      tags: [users]
+      summary: Search users
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSearchResponse"
+
+  /v1/users/{user_id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get user by ID
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserPublicProfile"
+
+  /v1/channels:
+    post:
+      operationId: createChannel
+      tags: [channels]
+      summary: Create a channel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelRequest"
+      responses:
+        "200":
+          description: Channel created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelResponse"
+    get:
+      operationId: listChannels
+      tags: [channels]
+      summary: List channels
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Channels list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelListResponse"
+
+  /v1/channels/{channel_id}:
+    get:
+      operationId: getChannel
+      tags: [channels]
+      summary: Get channel
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelResponse"
+    patch:
+      operationId: updateChannel
+      tags: [channels]
+      summary: Update channel
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChannelRequest"
+      responses:
+        "200":
+          description: Channel updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelResponse"
+    delete:
+      operationId: deleteChannel
+      tags: [channels]
+      summary: Delete channel
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Channel deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+
+  /v1/channels/{channel_id}/my-membership:
+    get:
+      operationId: getMyMembership
+      tags: [channels]
+      summary: Get my membership in a channel
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Membership
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipResponse"
+
+  /v1/channels/{channel_id}/stats:
+    get:
+      operationId: getChannelStats
+      tags: [channels]
+      summary: Get channel stats
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelStatsResponse"
+
+  /v1/channels/{channel_id}/join:
+    post:
+      operationId: joinChannel
+      tags: [channels]
+      summary: Join a channel
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinRequest"
+      responses:
+        "200":
+          description: Join outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinOutcomeResponse"
+
+  /v1/channels/{channel_id}/leave:
+    post:
+      operationId: leaveChannel
+      tags: [channels]
+      summary: Leave a channel
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Left channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+
+  /v1/channels/{channel_id}/members:
+    get:
+      operationId: listMembers
+      tags: [channels]
+      summary: List channel members
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Members list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberListResponse"
+
+  /v1/channels/{channel_id}/requests:
+    get:
+      operationId: listJoinRequests
+      tags: [channels]
+      summary: List pending join requests
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Join requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberListResponse"
+
+  /v1/channels/{channel_id}/invite:
+    post:
+      operationId: createInvite
+      tags: [invites]
+      summary: Create an invite
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteRequest"
+      responses:
+        "200":
+          description: Invite created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteResponse"
+
+  /v1/channels/{channel_id}/invites:
+    get:
+      operationId: listInvites
+      tags: [invites]
+      summary: List invites for a channel
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invites list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteListResponse"
+
+  /v1/channels/{channel_id}/invites/{invite_id}/revoke:
+    post:
+      operationId: revokeInvite
+      tags: [invites]
+      summary: Revoke an invite
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: invite_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invite revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+
+  /v1/invites/{token}:
+    get:
+      operationId: getInvite
+      tags: [invites]
+      summary: Get invite by token
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invite details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteDetailsResponse"
+
+  /v1/invites/{token}/accept:
+    post:
+      operationId: acceptInvite
+      tags: [invites]
+      summary: Accept an invite
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invite accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipActionResponse"
+
+  /v1/channels/{channel_id}/members/{user_id}/approve:
+    post:
+      operationId: approveMember
+      tags: [channels]
+      summary: Approve a join request
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Member approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipActionResponse"
+
+  /v1/channels/{channel_id}/members/{user_id}/add:
+    post:
+      operationId: addMember
+      tags: [channels]
+      summary: Add a member
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Member added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipActionResponse"
+
+  /v1/channels/{channel_id}/members/{user_id}/promote:
+    post:
+      operationId: promoteMember
+      tags: [channels]
+      summary: Promote a member to admin
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Member promoted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipActionResponse"
+
+  /v1/channels/{channel_id}/members/{user_id}/demote:
+    post:
+      operationId: demoteMember
+      tags: [channels]
+      summary: Demote an admin to member
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Member demoted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipActionResponse"
+
+  /v1/channels/{channel_id}/members/{user_id}:
+    delete:
+      operationId: removeMember
+      tags: [channels]
+      summary: Remove a member
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+
+  /v1/channels/{channel_id}/messages:
+    post:
+      operationId: sendMessage
+      tags: [messages]
+      summary: Send a message
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishMessageRequest"
+      responses:
+        "200":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+    get:
+      operationId: listMessages
+      tags: [messages]
+      summary: List messages
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: before_seq_id
+          in: query
+          required: false
+          schema:
+            type: number
+        - name: after_seq_id
+          in: query
+          required: false
+          schema:
+            type: number
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: number
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+      responses:
+        "200":
+          description: Messages list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageListResponse"
+
+  /v1/channels/{channel_id}/messages/around:
+    get:
+      operationId: getMessagesAround
+      tags: [messages]
+      summary: Get messages around a seq_id
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: seq_id
+          in: query
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Messages around seq_id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagesAroundResponse"
+
+  /v1/channels/{channel_id}/messages/{message_id}:
+    get:
+      operationId: getMessage
+      tags: [messages]
+      summary: Get a message
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+    patch:
+      operationId: editMessage
+      tags: [messages]
+      summary: Edit a message
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessagePatchRequest"
+      responses:
+        "200":
+          description: Message edited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+    delete:
+      operationId: deleteMessage
+      tags: [messages]
+      summary: Delete a message
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Message deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /v1/channels/{channel_id}/seen:
+    post:
+      operationId: markSeen
+      tags: [messages]
+      summary: Mark messages as seen
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SeenRequest"
+      responses:
+        "200":
+          description: Seen updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeenResponse"
+
+  /v1/channels/{channel_id}/messages/{message_id}/reactions:
+    post:
+      operationId: addReaction
+      tags: [reactions]
+      summary: Add a reaction
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReactionRequest"
+      responses:
+        "200":
+          description: Reaction added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactionSummaryResponse"
+
+  /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}:
+    delete:
+      operationId: removeReaction
+      tags: [reactions]
+      summary: Remove a reaction
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: emoji
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reaction removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactionSummaryResponse"
+
+  /v1/channels/{channel_id}/pins/{message_id}:
+    post:
+      operationId: pinMessage
+      tags: [pins]
+      summary: Pin a message
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Message pinned
+
+    delete:
+      operationId: unpinMessage
+      tags: [pins]
+      summary: Unpin a message
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: message_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Message unpinned
+
+  /v1/channels/{channel_id}/pins:
+    get:
+      operationId: listPins
+      tags: [pins]
+      summary: List pinned messages
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pinned messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PinnedMessagesResponse"
+
+  /v1/uploads:
+    post:
+      operationId: createUpload
+      tags: [uploads]
+      summary: Create an upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadCreateRequest"
+      responses:
+        "200":
+          description: Upload created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadCreateResponse"
+
+  /v1/uploads/{file_id}/content:
+    put:
+      operationId: uploadContent
+      tags: [uploads]
+      summary: Upload file content
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Upload complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadContentResponse"
+
+  /v1/sync:
+    post:
+      operationId: sync
+      tags: [sync]
+      summary: Sync state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncRequest"
+      responses:
+        "200":
+          description: Sync response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncResponse"
+
+  /v1/channels/{channel_id}/events:
+    get:
+      operationId: listEvents
+      tags: [channels]
+      summary: List channel events
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Events list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventListResponse"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    RegisterRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+      required:
+        - username
+        - email
+        - password
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required:
+        - username
+        - password
+
+    RefreshRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+      required:
+        - refresh_token
+
+    LogoutRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+      required:
+        - refresh_token
+
+    TokenPair:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+      required:
+        - access_token
+        - refresh_token
+        - token_type
+
+    StatusOk:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    LogoutAllResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        count:
+          type: number
+      required:
+        - status
+
+    SessionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        created_at:
+          type: string
+        last_used_at:
+          type: string
+        user_agent:
+          type: string
+        ip:
+          type: string
+        is_current:
+          type: boolean
+      required:
+        - id
+        - user_id
+        - created_at
+
+    SessionListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionResponse"
+      required:
+        - items
+
+    UserPublic:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+      required:
+        - id
+        - username
+
+    MeResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+        created_at:
+          type: string
+      required:
+        - id
+        - username
+
+    UserPublicProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+      required:
+        - id
+        - username
+
+    UserSearchResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserPublicProfile"
+        next_cursor:
+          type: string
+        has_more:
+          type: boolean
+      required:
+        - items
+
+    ChannelPermissions:
+      type: object
+      properties:
+        can_publish:
+          type: boolean
+        can_manage:
+          type: boolean
+        can_invite:
+          type: boolean
+        can_read:
+          type: boolean
+      required:
+        - can_publish
+        - can_manage
+        - can_invite
+        - can_read
+
+    ChannelResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        avatar_url:
+          type: string
+        visibility:
+          type: string
+          enum: [public, private]
+        join_mode:
+          type: string
+          enum: [open, approval_required, invite_only]
+        member_count:
+          type: number
+        unread_count:
+          type: number
+        my_last_seen_seq_id:
+          type: number
+        last_message_preview:
+          type: string
+        last_message_at:
+          type: string
+        my_role:
+          type: string
+          enum: [owner, admin, member, pending, none]
+        permissions:
+          $ref: "#/components/schemas/ChannelPermissions"
+        created_at:
+          type: string
+      required:
+        - id
+        - name
+
+    ChannelListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChannelResponse"
+        next_cursor:
+          type: string
+        has_more:
+          type: boolean
+      required:
+        - items
+
+    CreateChannelRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        visibility:
+          type: string
+          enum: [public, private]
+        join_mode:
+          type: string
+          enum: [open, approval_required, invite_only]
+      required:
+        - name
+
+    UpdateChannelRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        avatar_url:
+          type: string
+        visibility:
+          type: string
+          enum: [public, private]
+        join_mode:
+          type: string
+          enum: [open, approval_required, invite_only]
+
+    MembershipResponse:
+      type: object
+      properties:
+        channel_id:
+          type: string
+        user_id:
+          type: string
+        role:
+          type: string
+        joined_at:
+          type: string
+        permissions:
+          $ref: "#/components/schemas/ChannelPermissions"
+      required:
+        - channel_id
+        - user_id
+        - role
+
+    ChannelStatsResponse:
+      type: object
+      properties:
+        channel_id:
+          type: string
+        member_count:
+          type: number
+        pending_count:
+          type: number
+        message_count:
+          type: number
+        last_message_at:
+          type: string
+      required:
+        - channel_id
+
+    JoinRequest:
+      type: object
+      properties:
+        invite_token:
+          type: string
+
+    JoinOutcomeResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        membership:
+          $ref: "#/components/schemas/MembershipResponse"
+      required:
+        - status
+
+    MemberItem:
+      type: object
+      properties:
+        user_id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+        role:
+          type: string
+        joined_at:
+          type: string
+      required:
+        - user_id
+        - role
+
+    MemberListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberItem"
+        next_cursor:
+          type: string
+        has_more:
+          type: boolean
+      required:
+        - items
+
+    InviteRequest:
+      type: object
+      properties:
+        expires_in_hours:
+          type: number
+        target_user_id:
+          type: string
+        max_uses:
+          type: number
+
+    InviteResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        token:
+          type: string
+        channel_id:
+          type: string
+        expires_at:
+          type: string
+        created_by:
+          type: string
+        uses:
+          type: number
+        max_uses:
+          type: number
+      required:
+        - id
+        - token
+        - channel_id
+
+    InviteListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InviteResponse"
+        next_cursor:
+          type: string
+        has_more:
+          type: boolean
+      required:
+        - items
+
+    InviteDetailsResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        token:
+          type: string
+        channel:
+          $ref: "#/components/schemas/ChannelResponse"
+        expires_at:
+          type: string
+      required:
+        - valid
+        - token
+
+    MembershipActionResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        membership:
+          $ref: "#/components/schemas/MembershipResponse"
+      required:
+        - status
+
+    AttachmentItem:
+      type: object
+      properties:
+        file_id:
+          type: string
+        filename:
+          type: string
+        content_type:
+          type: string
+        public_url:
+          type: string
+        size:
+          type: number
+      required:
+        - file_id
+        - public_url
+
+    ReactionItem:
+      type: object
+      properties:
+        emoji:
+          type: string
+        count:
+          type: number
+        reacted_by_me:
+          type: boolean
+      required:
+        - emoji
+        - count
+
+    MessageResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        channel_id:
+          type: string
+        seq_id:
+          type: number
+        sender_id:
+          type: string
+        sender_username:
+          type: string
+        sender_display_name:
+          type: string
+        sender_avatar_url:
+          type: string
+        content_text:
+          type: string
+        content_json:
+          type: object
+        reply_to_message_id:
+          type: string
+        reply_to_seq_id:
+          type: number
+        reply_preview:
+          type: string
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachmentItem"
+        reactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReactionItem"
+        is_pinned:
+          type: boolean
+        is_edited:
+          type: boolean
+        client_msg_id:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required:
+        - id
+        - channel_id
+        - sender_id
+        - created_at
+
+    MessageListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageResponse"
+        next_before_seq_id:
+          type: number
+        next_after_seq_id:
+          type: number
+        has_more:
+          type: boolean
+        order:
+          type: string
+      required:
+        - items
+
+    MessagesAroundResponse:
+      type: object
+      properties:
+        seq_id:
+          type: number
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageResponse"
+      required:
+        - seq_id
+        - items
+
+    PublishMessageRequest:
+      type: object
+      properties:
+        content_text:
+          type: string
+        content_json:
+          type: object
+        reply_to_message_id:
+          type: string
+        reply_to_seq_id:
+          type: number
+        client_msg_id:
+          type: string
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachmentItem"
+
+    MessagePatchRequest:
+      type: object
+      properties:
+        content_text:
+          type: string
+        content_json:
+          type: object
+
+    SeenRequest:
+      type: object
+      properties:
+        last_seen_seq_id:
+          type: number
+      required:
+        - last_seen_seq_id
+
+    SeenResponse:
+      type: object
+      properties:
+        channel_id:
+          type: string
+        last_seen_seq_id:
+          type: number
+        unread_count:
+          type: number
+      required:
+        - channel_id
+        - last_seen_seq_id
+
+    ReactionRequest:
+      type: object
+      properties:
+        emoji:
+          type: string
+      required:
+        - emoji
+
+    ReactionSummaryResponse:
+      type: object
+      properties:
+        message_id:
+          type: string
+        reactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReactionItem"
+      required:
+        - message_id
+        - reactions
+
+    PinnedMessagesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageResponse"
+      required:
+        - items
+
+    UploadCreateRequest:
+      type: object
+      properties:
+        filename:
+          type: string
+        content_type:
+          type: string
+        size:
+          type: number
+      required:
+        - filename
+        - content_type
+
+    UploadCreateResponse:
+      type: object
+      properties:
+        file_id:
+          type: string
+        upload_url:
+          type: string
+        method:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        public_url:
+          type: string
+      required:
+        - file_id
+        - upload_url
+        - method
+        - public_url
+
+    UploadContentResponse:
+      type: object
+      properties:
+        file_id:
+          type: string
+        public_url:
+          type: string
+      required:
+        - file_id
+        - public_url
+
+    SyncChannelUpdate:
+      type: object
+      properties:
+        channel_id:
+          type: string
+        last_message_at:
+          type: string
+        unread_count:
+          type: number
+        my_last_seen_seq_id:
+          type: number
+      required:
+        - channel_id
+
+    SyncRequest:
+      type: object
+      properties:
+        channels:
+          type: array
+          items:
+            type: object
+            properties:
+              channel_id:
+                type: string
+              last_seen_seq_id:
+                type: number
+            required:
+              - channel_id
+
+    SyncResponse:
+      type: object
+      properties:
+        server_time:
+          type: string
+        channel_updates:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncChannelUpdate"
+        membership_updates:
+          type: array
+          items:
+            type: object
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageResponse"
+      required:
+        - server_time
+
+    EventListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+      required:
+        - items
