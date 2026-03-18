@@ -1,7 +1,7 @@
 from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -14,12 +14,29 @@ from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
 class AuthService:
     @staticmethod
     async def register(db: AsyncSession, req: RegisterRequest) -> User:
-        existing = await db.execute(
-            select(User).where(or_(User.username == req.username, User.email == req.email))
-        )
-        if existing.scalar_one_or_none():
-            raise AppError("username or email already exists", 409, code="CONFLICT")
-        user = User(username=req.username, email=req.email, password_hash=hash_password(req.password))
+        username = req.username.strip()
+        email = req.email.strip().lower() if req.email is not None else None
+
+        existing_username = await db.execute(select(User.id).where(User.username == username))
+        if existing_username.scalar_one_or_none() is not None:
+            raise AppError(
+                "username already exists",
+                409,
+                code="CONFLICT",
+                details={"field": "username"},
+            )
+
+        if email is not None:
+            existing_email = await db.execute(select(User.id).where(func.lower(User.email) == email))
+            if existing_email.scalar_one_or_none() is not None:
+                raise AppError(
+                    "email already exists",
+                    409,
+                    code="CONFLICT",
+                    details={"field": "email"},
+                )
+
+        user = User(username=username, email=email, password_hash=hash_password(req.password))
         db.add(user)
         await db.commit()
         await db.refresh(user)
@@ -69,22 +86,13 @@ class AuthService:
         if session.refresh_token_hash != sha256_hex(refresh_token):
             raise AppError("refresh token mismatch", 401, code="AUTH_INVALID")
 
-        session.revoked_at = utcnow()
-        await db.flush()
-
-        new_session = UserSession(
-            user_id=session.user_id,
-            refresh_token_hash="",
-            user_agent=user_agent,
-            ip=ip,
-            last_used_at=utcnow(),
-            expires_at=utcnow() + timedelta(days=refresh_ttl_days),
-        )
-        db.add(new_session)
-        await db.flush()
-        session.last_used_at = utcnow()
-        new_refresh = create_refresh_token(session.user_id, new_session.id)
-        new_session.refresh_token_hash = sha256_hex(new_refresh)
+        now = utcnow()
+        session.last_used_at = now
+        session.expires_at = now + timedelta(days=refresh_ttl_days)
+        session.user_agent = user_agent
+        session.ip = ip
+        new_refresh = create_refresh_token(session.user_id, session.id)
+        session.refresh_token_hash = sha256_hex(new_refresh)
         new_access = create_access_token(session.user_id)
         await db.commit()
         return TokenPair(access_token=new_access, refresh_token=new_refresh)
@@ -116,7 +124,13 @@ class AuthService:
     @staticmethod
     async def list_sessions(db: AsyncSession, user_id: UUID) -> list[UserSession]:
         rows = await db.execute(
-            select(UserSession).where(UserSession.user_id == user_id).order_by(UserSession.created_at.desc())
+            select(UserSession)
+            .where(
+                UserSession.user_id == user_id,
+                UserSession.revoked_at.is_(None),
+                UserSession.expires_at > utcnow(),
+            )
+            .order_by(UserSession.created_at.desc())
         )
         return list(rows.scalars().all())
 

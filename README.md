@@ -21,16 +21,6 @@ Frontend:
 docker compose run --rm backend sh -lc "alembic upgrade head"
 ```
 
-## Seed Demo Data
-```bash
-python scripts/seed_demo.py
-```
-
-## Tests
-```bash
-docker compose run --rm backend sh -lc "pytest -q"
-```
-
 ## Environment Variables
 - `DATABASE_URL`
 - `RABBITMQ_URL`

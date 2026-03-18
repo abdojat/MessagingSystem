@@ -7,7 +7,7 @@ import { api, ApiError } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
 import { setTokenPair, useAuthStore } from "@/store/auth-store";
 
-const PUBLIC_ROUTES = ["/login", "/register"];
+const PUBLIC_ROUTES = ["/", "/login", "/register"];
 
 export function useAuthBootstrap() {
   const router = useRouter();

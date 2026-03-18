@@ -40,7 +40,40 @@ export class ApiError extends Error {
   }
 }
 
+const REQUEST_TIMEOUT_MS = 8000;
+
 let refreshPromise: Promise<string | null> | null = null;
+
+function createTimeoutSignal(timeoutMs: number, signal?: AbortSignal) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  const cleanup = () => {
+    clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", abortFromCaller);
+  };
+
+  const abortFromCaller = () => controller.abort();
+  signal?.addEventListener("abort", abortFromCaller, { once: true });
+
+  return {
+    signal: controller.signal,
+    cleanup,
+  };
+}
+
+async function fetchWithTimeout(input: string | URL, init: RequestInit = {}) {
+  const { signal, cleanup } = createTimeoutSignal(REQUEST_TIMEOUT_MS, init.signal ?? undefined);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal,
+    });
+  } finally {
+    cleanup();
+  }
+}
 
 async function refreshAccessToken() {
   if (refreshPromise) return refreshPromise;
@@ -52,7 +85,7 @@ async function refreshAccessToken() {
       return null;
     }
 
-    const response = await fetch(`${API_V1_BASE_URL}/auth/refresh`, {
+    const response = await fetchWithTimeout(`${API_V1_BASE_URL}/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: refreshToken }),
@@ -82,9 +115,15 @@ type RequestOptions = {
 };
 
 async function parseApiError(response: Response): Promise<ApiError> {
-  let payload: ApiErrorResponse | undefined;
+  let payload: Partial<ApiErrorResponse> | undefined;
   try {
-    payload = (await response.json()) as ApiErrorResponse;
+    const raw = (await response.json()) as unknown;
+    if (raw && typeof raw === "object" && "detail" in raw) {
+      const detail = (raw as { detail?: ApiErrorResponse | string }).detail;
+      payload = typeof detail === "string" ? { message: detail } : detail;
+    } else if (raw && typeof raw === "object") {
+      payload = raw as Partial<ApiErrorResponse>;
+    }
   } catch {
     payload = undefined;
   }
@@ -103,7 +142,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}, 
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_V1_BASE_URL}${path}`, {
+  const response = await fetchWithTimeout(`${API_V1_BASE_URL}${path}`, {
     method: options.method ?? "GET",
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
@@ -225,7 +264,7 @@ export const api = {
     };
 
     try {
-      const response = await fetch(uploadUrl, {
+      const response = await fetchWithTimeout(uploadUrl, {
         method: create.method,
         headers,
         body: file,
@@ -247,7 +286,7 @@ export const api = {
     }
   },
   completeUpload: (fileId: string, content: Blob) =>
-    fetch(`${API_V1_BASE_URL}/uploads/${fileId}/content`, {
+    fetchWithTimeout(`${API_V1_BASE_URL}/uploads/${fileId}/content`, {
       method: "PUT",
       body: content,
       headers: { Authorization: `Bearer ${getAccessToken()}` },
