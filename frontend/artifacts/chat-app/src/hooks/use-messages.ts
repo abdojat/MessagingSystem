@@ -33,8 +33,8 @@ export function useSendMessage() {
             }
           : old
       );
-      queryClient.setQueryData(
-        ['/channels'],
+      queryClient.setQueriesData(
+        { queryKey: ['/channels'] },
         (old: ChannelResponse[] | undefined) =>
           old?.map((channel) =>
             channel.id === variables.channelId
@@ -77,8 +77,8 @@ export function useMarkSeen() {
         ['/channels', variables.channelId],
         (old: ChannelResponse | undefined) => (old ? applySeenState(old) : old)
       );
-      queryClient.setQueryData(
-        ['/channels'],
+      queryClient.setQueriesData(
+        { queryKey: ['/channels'] },
         (old: ChannelResponse[] | undefined) =>
           old?.map((channel) => (channel.id === variables.channelId ? applySeenState(channel) : channel))
       );

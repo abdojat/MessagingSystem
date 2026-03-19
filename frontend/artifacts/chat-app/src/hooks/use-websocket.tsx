@@ -68,8 +68,8 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
               ['/channels', channelId],
               (old: ChannelResponse | undefined) => (old ? updater(old) : old)
             );
-            queryClient.setQueryData(
-              ['/channels'],
+            queryClient.setQueriesData(
+              { queryKey: ['/channels'] },
               (old: ChannelResponse[] | undefined) =>
                 old?.map((channel) => (channel.id === channelId ? updater(channel) : channel))
             );

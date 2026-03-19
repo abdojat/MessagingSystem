@@ -2,10 +2,28 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { ChannelResponse } from '../types/api';
 
-export function useChannels() {
+type ChannelScope = 'my' | 'discover';
+
+interface UseChannelsOptions {
+  scope?: ChannelScope;
+  q?: string;
+}
+
+export function useChannels(options: UseChannelsOptions = {}) {
+  const scope = options.scope ?? 'my';
+  const q = options.q?.trim() ?? '';
+
   return useQuery({
-    queryKey: ['/channels'],
-    queryFn: () => apiClient<{items: ChannelResponse[]}>('/channels').then(res => res.items)
+    queryKey: ['/channels', { scope, q }],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.set('scope', scope);
+      if (q) {
+        params.set('q', q);
+      }
+
+      return apiClient<{items: ChannelResponse[]}>(`/channels?${params.toString()}`).then(res => res.items);
+    }
   });
 }
 
@@ -16,8 +34,18 @@ export function useChannel(channelId: string) {
     queryKey: ['/channels', channelId],
     queryFn: () => apiClient<ChannelResponse>(`/channels/${channelId}`),
     initialData: () => {
-      const channels = queryClient.getQueryData<ChannelResponse[]>(['/channels']);
-      return channels?.find((channel) => channel.id === channelId);
+      const channelQueries = queryClient.getQueriesData<ChannelResponse[]>({
+        queryKey: ['/channels'],
+      });
+
+      for (const [, channels] of channelQueries) {
+        const match = channels?.find((channel) => channel.id === channelId);
+        if (match) {
+          return match;
+        }
+      }
+
+      return undefined;
     },
     enabled: !!channelId
   });

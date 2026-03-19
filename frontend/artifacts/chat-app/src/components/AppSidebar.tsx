@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Hash, Plus, Settings, Search, LogOut } from "lucide-react";
 import { useChannels } from "../hooks/use-channels";
@@ -10,14 +10,21 @@ import { ThemeToggle } from "./ThemeToggle";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 
 export function AppSidebar() {
-  const { data: channels = [] } = useChannels();
   const [location] = useLocation();
   const logout = useLogout();
   const user = useAuthStore(s => s.user);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery.trim());
 
-  const myChannels = channels.filter(c => ['owner', 'admin', 'member'].includes(c.my_role || 'none'));
-  const discoverChannels = channels.filter(c => !['owner', 'admin', 'member'].includes(c.my_role || 'none'));
+  const {
+    data: myChannels = [],
+    isLoading: isMyChannelsLoading,
+  } = useChannels({ scope: "my", q: deferredSearchQuery });
+  const {
+    data: discoverChannels = [],
+    isLoading: isDiscoverLoading,
+  } = useChannels({ scope: "discover", q: deferredSearchQuery });
 
   return (
     <>
@@ -54,6 +61,8 @@ export function AppSidebar() {
             <input 
               type="text" 
               placeholder="Search channels..." 
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
               className="w-full bg-sidebar-accent/50 border border-sidebar-border rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-sidebar-foreground placeholder:text-muted-foreground transition-all"
             />
           </div>
@@ -83,8 +92,13 @@ export function AppSidebar() {
                   ) : null}
                 </Link>
               ))}
-              {myChannels.length === 0 && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">No channels yet</div>
+              {isMyChannelsLoading && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">Loading channels...</div>
+              )}
+              {!isMyChannelsLoading && myChannels.length === 0 && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">
+                  {deferredSearchQuery ? "No matching channels" : "No channels yet"}
+                </div>
               )}
             </div>
           </div>
@@ -100,6 +114,14 @@ export function AppSidebar() {
                   <div className="font-medium truncate text-sm flex-1">{channel.name}</div>
                 </Link>
               ))}
+              {isDiscoverLoading && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">Loading channels...</div>
+              )}
+              {!isDiscoverLoading && discoverChannels.length === 0 && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">
+                  {deferredSearchQuery ? "No matching channels" : "No channels to discover"}
+                </div>
+              )}
             </div>
           </div>
         </div>
