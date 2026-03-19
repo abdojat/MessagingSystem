@@ -11,6 +11,8 @@ import AppLayout from "./pages/app-layout";
 import Sessions from "./pages/sessions";
 import Invite from "./pages/invite";
 import ProfilePage from "./pages/profile";
+import Home from "./pages/home";
+import NotFound from "./pages/not-found";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,19 +28,17 @@ function AppRouter() {
 
   return (
     <Switch>
-      <Route path="/" component={AppLayout} />
+      <Route path="/" component={Home} />
       <Route path="/app/profile" component={AppLayout} />
-      <Route path="/profile" component={ProfilePage} />
       <Route path="/app/channels/:channelId/details" component={AppLayout} />
       <Route path="/app/channels/:channelId" component={AppLayout} />
       <Route path="/app" component={AppLayout} />
+      <Route path="/profile" component={ProfilePage} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/settings/sessions" component={Sessions} />
       <Route path="/invites/:token" component={Invite} />
-      <Route>
-        <div className="flex h-screen items-center justify-center text-muted-foreground">Page not found</div>
-      </Route>
+      <Route component={NotFound} />
     </Switch>
   );
 }
