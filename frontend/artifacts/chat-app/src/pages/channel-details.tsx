@@ -4,6 +4,7 @@ import { ArrowLeft, DoorOpen, Hash, Info, Lock, Shield, UserPlus, Users } from "
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { Skeleton } from "../components/ui/skeleton";
 import { useChannel, useJoinChannel, useLeaveChannel } from "../hooks/use-channels";
 import { useAuthStore } from "../store/authStore";
 
@@ -12,6 +13,68 @@ function formatDateTime(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not available";
   return format(date, "PPP p");
+}
+
+function ChannelDetailsSkeleton() {
+  return (
+    <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-9 w-56" />
+            <Skeleton className="h-4 w-80 max-w-full" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-10 w-32 rounded-xl" />
+            <Skeleton className="h-10 w-32 rounded-xl" />
+          </div>
+        </div>
+
+        <Card className="overflow-hidden rounded-3xl border-border/60">
+          <div className="p-6 sm:p-8">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-center gap-4">
+                <Skeleton className="h-20 w-20 rounded-3xl" />
+                <div className="min-w-0 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Skeleton className="h-6 w-20 rounded-full" />
+                    <Skeleton className="h-6 w-24 rounded-full" />
+                    <Skeleton className="h-6 w-16 rounded-full" />
+                  </div>
+                  <Skeleton className="h-9 w-52 max-w-full" />
+                  <Skeleton className="h-4 w-96 max-w-full" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Card key={index} className="rounded-2xl p-4 space-y-3">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-8 w-16" />
+              </Card>
+            ))}
+          </div>
+
+          <div className="grid gap-4 border-t border-border/60 p-6 lg:grid-cols-[1.1fr_0.9fr]">
+            {Array.from({ length: 2 }).map((_, index) => (
+              <Card key={index} className="rounded-2xl p-5 space-y-4">
+                <Skeleton className="h-6 w-40" />
+                {Array.from({ length: 5 }).map((__, rowIndex) => (
+                  <div key={rowIndex} className="space-y-2">
+                    <Skeleton className="h-3 w-28" />
+                    <Skeleton className="h-4 w-40" />
+                  </div>
+                ))}
+              </Card>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
 }
 
 export default function ChannelDetailsPage() {
@@ -24,7 +87,7 @@ export default function ChannelDetailsPage() {
   const leaveChannel = useLeaveChannel();
 
   if (isInitializing) {
-    return <div className="flex h-full w-full items-center justify-center bg-background"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+    return <ChannelDetailsSkeleton />;
   }
 
   if (!isAuthenticated) {
@@ -32,7 +95,7 @@ export default function ChannelDetailsPage() {
   }
 
   if (isLoading) {
-    return <div className="flex h-full w-full items-center justify-center bg-background"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+    return <ChannelDetailsSkeleton />;
   }
 
   if (isError || !channel) {

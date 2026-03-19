@@ -1,7 +1,8 @@
-import { useDeferredValue, useState } from "react";
+import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { ChevronDown, ChevronRight, Hash, LogOut, Plus, Search, Settings } from "lucide-react";
 import { useChannels } from "../hooks/use-channels";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { useLogout } from "../hooks/use-auth";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
@@ -9,6 +10,7 @@ import { useAuthStore } from "../store/authStore";
 import { ThemeToggle } from "./ThemeToggle";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 import { ChannelResponse } from "../types/api";
+import { Skeleton } from "./ui/skeleton";
 
 function getChannelActivityAt(channel: ChannelResponse) {
   const timestamp = channel.last_message_at ?? channel.created_at ?? "";
@@ -112,6 +114,22 @@ function SidebarSection({
   );
 }
 
+function ChannelListSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 rounded-xl px-3 py-2">
+          <Skeleton className="h-8 w-8 rounded-lg" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-36 max-w-full" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AppSidebar() {
   const [location] = useLocation();
   const logout = useLogout();
@@ -121,17 +139,17 @@ export function AppSidebar() {
   const [isMyChannelsOpen, setIsMyChannelsOpen] = useState(true);
   const [isChannelsOpen, setIsChannelsOpen] = useState(true);
   const [isDiscoverOpen, setIsDiscoverOpen] = useState(true);
-  const deferredSearchQuery = useDeferredValue(searchQuery.trim());
-  const isSearching = deferredSearchQuery.length > 0;
+  const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 300);
+  const isSearching = debouncedSearchQuery.length > 0;
 
   const {
     data: memberChannels = [],
     isLoading: isMemberChannelsLoading,
-  } = useChannels({ scope: "my", q: deferredSearchQuery });
+  } = useChannels({ scope: "my", q: debouncedSearchQuery });
   const {
     data: discoverChannels = [],
     isLoading: isDiscoverLoading,
-  } = useChannels({ scope: "discover", q: deferredSearchQuery, enabled: isSearching });
+  } = useChannels({ scope: "discover", q: debouncedSearchQuery, enabled: isSearching });
 
   const sortedMemberChannels = sortChannelsByActivity(memberChannels);
   const myChannels = sortedMemberChannels.filter(channel => channel.my_role === "owner" || channel.my_role === "admin");
@@ -191,9 +209,7 @@ export function AppSidebar() {
                   isActive={location === `/app/channels/${channel.id}`}
                 />
               ))}
-              {isMemberChannelsLoading && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">Loading channels...</div>
-              )}
+              {isMemberChannelsLoading && <ChannelListSkeleton />}
               {!isMemberChannelsLoading && myChannels.length === 0 && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">
                   {isSearching ? "No matching owned or admin channels" : "No owned or admin channels yet"}
@@ -212,9 +228,7 @@ export function AppSidebar() {
                   isActive={location === `/app/channels/${channel.id}`}
                 />
               ))}
-              {isMemberChannelsLoading && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">Loading channels...</div>
-              )}
+              {isMemberChannelsLoading && <ChannelListSkeleton />}
               {!isMemberChannelsLoading && joinedChannels.length === 0 && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">
                   {isSearching ? "No matching member channels" : "No joined channels yet"}
@@ -234,9 +248,7 @@ export function AppSidebar() {
                     isActive={location === `/app/channels/${channel.id}`}
                   />
                 ))}
-                {isDiscoverLoading && (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">Loading channels...</div>
-                )}
+                {isDiscoverLoading && <ChannelListSkeleton />}
                 {!isDiscoverLoading && sortedDiscoverChannels.length === 0 && (
                   <div className="px-3 py-2 text-sm text-muted-foreground">No matching discoverable channels</div>
                 )}

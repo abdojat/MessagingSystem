@@ -6,6 +6,7 @@ import ChannelDetailsPage from "./channel-details";
 import ProfilePage from "./profile";
 import { Hash } from "lucide-react";
 import { useWS } from "../hooks/use-websocket";
+import { Skeleton } from "../components/ui/skeleton";
 
 function EmptyState() {
   return (
@@ -21,13 +22,66 @@ function EmptyState() {
   );
 }
 
+function AppLayoutSkeleton() {
+  return (
+    <div className="flex h-screen w-full bg-background overflow-hidden relative">
+      <div className="w-72 h-screen flex flex-col bg-sidebar border-r border-sidebar-border shadow-2xl z-10 flex-shrink-0">
+        <div className="p-4 border-b border-sidebar-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-8 w-8 rounded-xl" />
+            <Skeleton className="h-5 w-24" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-8 w-8 rounded-lg" />
+            <Skeleton className="h-8 w-8 rounded-lg" />
+          </div>
+        </div>
+        <div className="p-3">
+          <Skeleton className="h-10 w-full rounded-xl" />
+        </div>
+        <div className="flex-1 px-3 py-2 space-y-6">
+          {Array.from({ length: 3 }).map((_, sectionIndex) => (
+            <div key={sectionIndex} className="space-y-3">
+              <Skeleton className="h-3 w-24" />
+              {Array.from({ length: 3 }).map((__, itemIndex) => (
+                <div key={itemIndex} className="flex items-center gap-3 rounded-xl px-3 py-2">
+                  <Skeleton className="h-8 w-8 rounded-lg" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-3 w-32" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 h-full p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-4 w-80 max-w-full" />
+          </div>
+          <Skeleton className="h-10 w-28 rounded-xl" />
+        </div>
+        <Skeleton className="h-40 w-full rounded-3xl" />
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, cardIndex) => (
+            <Skeleton key={cardIndex} className="h-32 w-full rounded-3xl" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AppLayout() {
   const isAuthenticated = useAuthStore(s => s.isAuthenticated);
   const isInitializing = useAuthStore(s => s.isInitializing);
   const wsStatus = useWS().status;
 
   if (isInitializing) {
-    return <div className="h-screen w-full flex items-center justify-center bg-background"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>;
+    return <AppLayoutSkeleton />;
   }
 
   if (!isAuthenticated) {

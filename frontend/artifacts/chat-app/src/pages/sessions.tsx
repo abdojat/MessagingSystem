@@ -3,6 +3,26 @@ import { format } from "date-fns";
 import { Button } from "../components/ui/button";
 import { Laptop, Smartphone, Globe, ShieldAlert } from "lucide-react";
 import { Link } from "wouter";
+import { Skeleton } from "../components/ui/skeleton";
+
+function SessionsSkeleton() {
+  return (
+    <div className="grid gap-4">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <div key={index} className="p-6 rounded-2xl border border-border bg-card shadow-sm flex flex-col sm:flex-row gap-6 items-start sm:items-center">
+          <Skeleton className="h-14 w-14 rounded-xl" />
+          <div className="flex-1 min-w-0 space-y-3">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-4 w-64 max-w-full" />
+            <Skeleton className="h-4 w-56 max-w-full" />
+            <Skeleton className="h-4 w-60 max-w-full" />
+          </div>
+          <Skeleton className="h-10 w-32 rounded-xl" />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function Sessions() {
   const { data: sessions = [], isLoading } = useSessions();
@@ -37,7 +57,7 @@ export default function Sessions() {
         </div>
 
         {isLoading ? (
-          <div className="text-center py-20 text-muted-foreground">Loading sessions...</div>
+          <SessionsSkeleton />
         ) : (
           <div className="grid gap-4">
             {sessions.map(session => (

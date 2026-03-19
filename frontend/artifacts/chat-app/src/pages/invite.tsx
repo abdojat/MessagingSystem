@@ -4,6 +4,21 @@ import { apiClient } from "../lib/apiClient";
 import { InviteDetailsResponse } from "../types/api";
 import { Button } from "../components/ui/button";
 import { Hash, LogIn } from "lucide-react";
+import { Skeleton } from "../components/ui/skeleton";
+
+function InviteSkeleton() {
+  return (
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,var(--tw-gradient-stops))] from-primary/10 via-background to-background" />
+      <div className="relative z-10 bg-card/80 backdrop-blur-2xl border border-border p-10 rounded-[2rem] shadow-2xl shadow-black/20 max-w-md w-full text-center">
+        <Skeleton className="h-24 w-24 rounded-3xl mx-auto mb-6" />
+        <Skeleton className="h-9 w-56 max-w-full mx-auto mb-3" />
+        <Skeleton className="h-4 w-64 max-w-full mx-auto mb-8" />
+        <Skeleton className="h-14 w-full rounded-xl" />
+      </div>
+    </div>
+  );
+}
 
 export default function Invite() {
   const { token } = useParams();
@@ -26,7 +41,7 @@ export default function Invite() {
     }
   });
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-background"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (isLoading) return <InviteSkeleton />;
 
   if (isError || !invite || !invite.is_valid) {
     return (

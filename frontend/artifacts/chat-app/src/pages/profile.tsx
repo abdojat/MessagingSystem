@@ -4,6 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { Skeleton } from "../components/ui/skeleton";
 import { useAuthStore } from "../store/authStore";
 
 function formatDate(value?: string | null, fallback = "Not available") {
@@ -13,13 +14,76 @@ function formatDate(value?: string | null, fallback = "Not available") {
   return format(date, "PPP");
 }
 
+function ProfileSkeleton() {
+  return (
+    <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-9 w-40" />
+            <Skeleton className="h-4 w-72 max-w-full" />
+          </div>
+          <Skeleton className="h-10 w-36 rounded-xl" />
+        </div>
+
+        <Card className="overflow-hidden rounded-3xl border-border/60 bg-card/90 shadow-xl">
+          <div className="p-6 sm:p-8">
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <Skeleton className="h-24 w-24 rounded-full" />
+                <div className="min-w-0 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Skeleton className="h-6 w-28 rounded-full" />
+                    <Skeleton className="h-6 w-24 rounded-full" />
+                  </div>
+                  <Skeleton className="h-9 w-48 max-w-full" />
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-4 w-96 max-w-full" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Card key={index} className="rounded-2xl p-4 space-y-3">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-5 w-28" />
+              </Card>
+            ))}
+          </div>
+
+          <div className="grid gap-4 border-t border-border/60 p-6 lg:grid-cols-[1.2fr_0.8fr]">
+            <Card className="rounded-2xl p-5 space-y-4">
+              <Skeleton className="h-6 w-36" />
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="space-y-2">
+                  <Skeleton className="h-3 w-24" />
+                  <Skeleton className="h-4 w-72 max-w-full" />
+                </div>
+              ))}
+            </Card>
+            <Card className="rounded-2xl p-5 space-y-4">
+              <Skeleton className="h-6 w-28" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-11/12" />
+              <Skeleton className="h-10 w-full rounded-xl" />
+            </Card>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 export default function ProfilePage() {
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitializing = useAuthStore((state) => state.isInitializing);
 
   if (isInitializing) {
-    return <div className="flex h-full w-full items-center justify-center bg-background"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+    return <ProfileSkeleton />;
   }
 
   if (!isAuthenticated || !user) {

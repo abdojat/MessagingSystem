@@ -7,6 +7,47 @@ import { format } from "date-fns";
 import { Button } from "../components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { useAuthStore } from "../store/authStore";
+import { Skeleton } from "../components/ui/skeleton";
+
+function ChannelViewSkeleton() {
+  return (
+    <div className="flex-1 flex flex-col h-full bg-background relative z-0">
+      <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center justify-between px-6 flex-shrink-0 z-10">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-10 w-10 rounded-xl" />
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-56" />
+          </div>
+        </div>
+        <Skeleton className="h-10 w-10 rounded-xl" />
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-background to-background/50">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div key={index} className="flex gap-4">
+            <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
+            <div className="flex-1 space-y-3">
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-3 w-16" />
+              </div>
+              <Skeleton className={`h-14 rounded-2xl ${index % 2 === 0 ? "w-80 max-w-full" : "w-64 max-w-full"}`} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="p-4 bg-background border-t border-border flex-shrink-0">
+        <div className="max-w-4xl mx-auto rounded-2xl border border-border/50 p-2 flex items-end gap-2">
+          <Skeleton className="h-10 w-10 rounded-xl flex-shrink-0" />
+          <Skeleton className="h-12 flex-1 rounded-xl" />
+          <Skeleton className="h-10 w-10 rounded-xl flex-shrink-0" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function ChannelView() {
   const { channelId } = useParams();
@@ -63,7 +104,7 @@ export default function ChannelView() {
     );
   }, [channel?.my_last_seen_seq_id, channelId, isMember, markSeen, messages]);
 
-  if (isChannelLoading) return <div className="flex-1 flex items-center justify-center"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (isChannelLoading) return <ChannelViewSkeleton />;
   if (isChannelError && !channel) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6">
@@ -145,7 +186,20 @@ export default function ChannelView() {
         ) : (
           <>
             {isMessagesLoading ? (
-              <div className="text-center text-muted-foreground py-10">Loading messages...</div>
+              <div className="space-y-6">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div key={index} className="flex gap-4">
+                    <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
+                    <div className="flex-1 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-3 w-24" />
+                        <Skeleton className="h-3 w-14" />
+                      </div>
+                      <Skeleton className={`h-14 rounded-2xl ${index % 2 === 0 ? "w-72 max-w-full" : "w-56 max-w-full"}`} />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center pb-20">
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
