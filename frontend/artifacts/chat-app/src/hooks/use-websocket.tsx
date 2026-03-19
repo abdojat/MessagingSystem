@@ -11,7 +11,7 @@ interface WSContextType {
 const WSContext = createContext<WSContextType>({ status: 'disconnected', emit: () => {} });
 
 export function WSProvider({ children }: { children: React.ReactNode }) {
-  const { accessToken, isAuthenticated } = useAuthStore();
+  const { accessToken, isAuthenticated, user } = useAuthStore();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
   const ws = useRef<WebSocket | null>(null);
@@ -50,6 +50,22 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
         try {
           const data = JSON.parse(event.data) as { type?: string; payload?: any };
           const payload = data.payload;
+          const activeChannelId = window.location.pathname.match(/\/app\/channels\/([^/]+)/)?.[1] ?? null;
+
+          const updateChannelCaches = (
+            channelId: string,
+            updater: (channel: ChannelResponse) => ChannelResponse
+          ) => {
+            queryClient.setQueryData(
+              ['/channels', channelId],
+              (old: ChannelResponse | undefined) => (old ? updater(old) : old)
+            );
+            queryClient.setQueryData(
+              ['/channels'],
+              (old: ChannelResponse[] | undefined) =>
+                old?.map((channel) => (channel.id === channelId ? updater(channel) : channel))
+            );
+          };
 
           if (data.type === 'sync' && payload?.messages) {
             for (const msg of payload.messages as MessageResponse[]) {
@@ -60,8 +76,17 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
                   return items.some((item) => item.id === msg.id) ? items : [...items, msg].sort((a, b) => a.seq_id - b.seq_id);
                 }
               );
+              updateChannelCaches(msg.channel_id, (channel) => {
+                const lastSeenSeqId = channel.my_last_seen_seq_id ?? 0;
+                const isUnread = msg.sender_user_id !== user?.id && msg.seq_id > lastSeenSeqId && activeChannelId !== msg.channel_id;
+                return {
+                  ...channel,
+                  last_message: msg,
+                  last_message_at: msg.created_at,
+                  unread_count: isUnread ? channel.unread_count + 1 : channel.unread_count,
+                };
+              });
             }
-            queryClient.invalidateQueries({ queryKey: ['/channels'] });
           } else if (data.type === 'message' || data.type === 'message_updated') {
             const msg = payload as MessageResponse;
             queryClient.setQueryData(
@@ -71,12 +96,38 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
                 return items.filter((item) => item.id !== msg.id).concat(msg).sort((a, b) => a.seq_id - b.seq_id);
               }
             );
-            queryClient.setQueryData(
-              ['/channels', msg.channel_id],
-              (old: ChannelResponse | undefined) => old ? { ...old, last_message: msg, last_message_at: msg.created_at } : old
-            );
-            queryClient.invalidateQueries({ queryKey: ['/channels'] });
-          } else if (data.type === 'channel_updated' || data.type === 'membership_update' || data.type === 'seen') {
+            updateChannelCaches(msg.channel_id, (channel) => {
+              const isOwnMessage = msg.sender_user_id === user?.id;
+              const lastSeenSeqId = channel.my_last_seen_seq_id ?? 0;
+              const shouldIncrementUnread =
+                data.type === 'message' &&
+                !isOwnMessage &&
+                msg.seq_id > lastSeenSeqId &&
+                activeChannelId !== msg.channel_id;
+
+              return {
+                ...channel,
+                last_message: msg,
+                last_message_at: msg.created_at,
+                unread_count: shouldIncrementUnread ? channel.unread_count + 1 : channel.unread_count,
+              };
+            });
+          } else if (data.type === 'seen') {
+            const seenState = payload as {
+              channel_id: string;
+              user_id: string;
+              last_seen_seq_id?: number | null;
+              unread_count?: number | null;
+            };
+
+            if (seenState.user_id === user?.id) {
+              updateChannelCaches(seenState.channel_id, (channel) => ({
+                ...channel,
+                my_last_seen_seq_id: seenState.last_seen_seq_id ?? channel.my_last_seen_seq_id ?? null,
+                unread_count: seenState.unread_count ?? 0,
+              }));
+            }
+          } else if (data.type === 'channel_updated' || data.type === 'membership_update') {
             queryClient.invalidateQueries({ queryKey: ['/channels'] });
           }
         } catch (e) {
@@ -103,7 +154,7 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
         ws.current.close();
       }
     };
-  }, [isAuthenticated, accessToken, queryClient]);
+  }, [isAuthenticated, accessToken, queryClient, user?.id]);
 
   const emit = (type: string, payload: any) => {
     if (ws.current?.readyState === WebSocket.OPEN) {

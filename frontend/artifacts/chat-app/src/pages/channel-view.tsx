@@ -1,6 +1,6 @@
 import { useLocation, useParams } from "wouter";
 import { useChannel, useJoinChannel } from "../hooks/use-channels";
-import { useMessages, useSendMessage } from "../hooks/use-messages";
+import { useMarkSeen, useMessages, useSendMessage } from "../hooks/use-messages";
 import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { format } from "date-fns";
@@ -20,14 +20,47 @@ export default function ChannelView() {
   const { data: messages = [], isLoading: isMessagesLoading } = useMessages(channelId || '');
   const joinChannel = useJoinChannel();
   const sendMessage = useSendMessage();
+  const markSeen = useMarkSeen();
   
   const [content, setContent] = useState("");
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastMarkedSeenSeqRef = useRef<number | null>(null);
   const user = useAuthStore(s => s.user);
+  const isMember = ['owner', 'admin', 'member'].includes(channel?.my_role || '');
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (!channelId || !isMember || messages.length === 0) return;
+
+    const latestMessage = messages[messages.length - 1];
+    const latestSeqId = latestMessage?.seq_id;
+    const currentSeenSeqId = channel?.my_last_seen_seq_id ?? 0;
+
+    if (!latestSeqId || latestSeqId <= currentSeenSeqId || lastMarkedSeenSeqRef.current === latestSeqId) {
+      return;
+    }
+
+    const container = scrollContainerRef.current;
+    const isNearBottom = !container || container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+
+    if (!isNearBottom) return;
+
+    lastMarkedSeenSeqRef.current = latestSeqId;
+    markSeen.mutate(
+      { channelId, lastSeenSeqId: latestSeqId },
+      {
+        onError: () => {
+          if (lastMarkedSeenSeqRef.current === latestSeqId) {
+            lastMarkedSeenSeqRef.current = null;
+          }
+        },
+      }
+    );
+  }, [channel?.my_last_seen_seq_id, channelId, isMember, markSeen, messages]);
 
   if (isChannelLoading) return <div className="flex-1 flex items-center justify-center"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" /></div>;
   if (isChannelError && !channel) {
@@ -41,8 +74,6 @@ export default function ChannelView() {
     );
   }
   if (!channel) return <div className="flex-1 flex items-center justify-center text-muted-foreground">Channel not found</div>;
-
-  const isMember = ['owner', 'admin', 'member'].includes(channel.my_role || '');
 
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -93,7 +124,7 @@ export default function ChannelView() {
       </header>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-background to-background/50">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-background to-background/50">
         {!isMember ? (
           <div className="h-full flex flex-col items-center justify-center text-center">
             <div className="w-20 h-20 rounded-2xl bg-secondary flex items-center justify-center mb-6 shadow-inner">
