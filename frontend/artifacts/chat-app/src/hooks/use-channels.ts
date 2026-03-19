@@ -7,11 +7,13 @@ type ChannelScope = 'my' | 'discover';
 interface UseChannelsOptions {
   scope?: ChannelScope;
   q?: string;
+  enabled?: boolean;
 }
 
 export function useChannels(options: UseChannelsOptions = {}) {
   const scope = options.scope ?? 'my';
   const q = options.q?.trim() ?? '';
+  const enabled = options.enabled ?? true;
 
   return useQuery({
     queryKey: ['/channels', { scope, q }],
@@ -23,7 +25,8 @@ export function useChannels(options: UseChannelsOptions = {}) {
       }
 
       return apiClient<{items: ChannelResponse[]}>(`/channels?${params.toString()}`).then(res => res.items);
-    }
+    },
+    enabled,
   });
 }
 

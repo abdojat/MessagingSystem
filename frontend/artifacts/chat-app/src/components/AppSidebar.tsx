@@ -1,6 +1,6 @@
 import { useDeferredValue, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Hash, Plus, Settings, Search, LogOut } from "lucide-react";
+import { ChevronDown, ChevronRight, Hash, LogOut, Plus, Search, Settings } from "lucide-react";
 import { useChannels } from "../hooks/use-channels";
 import { useLogout } from "../hooks/use-auth";
 import { Button } from "./ui/button";
@@ -8,6 +8,109 @@ import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { useAuthStore } from "../store/authStore";
 import { ThemeToggle } from "./ThemeToggle";
 import { CreateChannelDialog } from "./CreateChannelDialog";
+import { ChannelResponse } from "../types/api";
+
+function getChannelActivityAt(channel: ChannelResponse) {
+  const timestamp = channel.last_message_at ?? channel.created_at ?? "";
+  const parsed = timestamp ? Date.parse(timestamp) : 0;
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function sortChannelsByActivity(channels: ChannelResponse[]) {
+  return [...channels].sort((left, right) => {
+    const activityDiff = getChannelActivityAt(right) - getChannelActivityAt(left);
+    if (activityDiff !== 0) {
+      return activityDiff;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
+function ChannelListItem({
+  channel,
+  href,
+  isActive,
+}: {
+  channel: ChannelResponse;
+  href: string;
+  isActive: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 group ${
+        isActive
+          ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
+          : "hover:bg-sidebar-accent text-sidebar-foreground/80 hover:text-sidebar-foreground"
+      }`}
+    >
+      <div
+        className={`flex items-center justify-center w-8 h-8 rounded-lg ${
+          isActive
+            ? "bg-primary-foreground/20 text-white"
+            : "bg-sidebar-accent-foreground/10 text-sidebar-foreground/60 group-hover:text-sidebar-foreground"
+        }`}
+      >
+        {channel.avatar_url ? (
+          <img src={channel.avatar_url} alt={channel.name} className="w-full h-full rounded-lg object-cover" />
+        ) : (
+          <Hash className="w-4 h-4" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-medium truncate text-sm">{channel.name}</div>
+        {channel.last_message?.content_text && (
+          <div className={`text-xs truncate ${isActive ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+            {channel.last_message.content_text}
+          </div>
+        )}
+      </div>
+      {channel.unread_count ? (
+        <div className="bg-destructive text-destructive-foreground text-[10px] font-bold px-2 py-0.5 rounded-full">
+          {channel.unread_count}
+        </div>
+      ) : null}
+    </Link>
+  );
+}
+
+function SidebarSection({
+  title,
+  isOpen,
+  onToggle,
+  children,
+}: {
+  title: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="mb-3 flex w-full items-center justify-between px-2 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground"
+        aria-expanded={isOpen}
+      >
+        <span>{title}</span>
+        {isOpen ? (
+          <ChevronDown className="h-4 w-4 transition-transform duration-200" />
+        ) : (
+          <ChevronRight className="h-4 w-4 transition-transform duration-200" />
+        )}
+      </button>
+      <div
+        className={`grid transition-[grid-template-rows,opacity] duration-250 ease-out ${
+          isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 export function AppSidebar() {
   const [location] = useLocation();
@@ -15,16 +118,25 @@ export function AppSidebar() {
   const user = useAuthStore(s => s.user);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isMyChannelsOpen, setIsMyChannelsOpen] = useState(true);
+  const [isChannelsOpen, setIsChannelsOpen] = useState(true);
+  const [isDiscoverOpen, setIsDiscoverOpen] = useState(true);
   const deferredSearchQuery = useDeferredValue(searchQuery.trim());
+  const isSearching = deferredSearchQuery.length > 0;
 
   const {
-    data: myChannels = [],
-    isLoading: isMyChannelsLoading,
+    data: memberChannels = [],
+    isLoading: isMemberChannelsLoading,
   } = useChannels({ scope: "my", q: deferredSearchQuery });
   const {
     data: discoverChannels = [],
     isLoading: isDiscoverLoading,
-  } = useChannels({ scope: "discover", q: deferredSearchQuery });
+  } = useChannels({ scope: "discover", q: deferredSearchQuery, enabled: isSearching });
+
+  const sortedMemberChannels = sortChannelsByActivity(memberChannels);
+  const myChannels = sortedMemberChannels.filter(channel => channel.my_role === "owner" || channel.my_role === "admin");
+  const joinedChannels = sortedMemberChannels.filter(channel => channel.my_role !== "owner" && channel.my_role !== "admin");
+  const sortedDiscoverChannels = sortChannelsByActivity(discoverChannels);
 
   return (
     <>
@@ -69,61 +181,68 @@ export function AppSidebar() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-6">
-          <div>
-            <h3 className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mb-3 px-2">My Channels</h3>
+          <SidebarSection title="My Channels" isOpen={isMyChannelsOpen} onToggle={() => setIsMyChannelsOpen(open => !open)}>
             <div className="space-y-1">
               {myChannels.map(channel => (
-                <Link key={channel.id} href={`/app/channels/${channel.id}`} className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 group ${location === `/app/channels/${channel.id}` ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' : 'hover:bg-sidebar-accent text-sidebar-foreground/80 hover:text-sidebar-foreground'}`}>
-                  <div className={`flex items-center justify-center w-8 h-8 rounded-lg ${location === `/app/channels/${channel.id}` ? 'bg-primary-foreground/20 text-white' : 'bg-sidebar-accent-foreground/10 text-sidebar-foreground/60 group-hover:text-sidebar-foreground'}`}>
-                    {channel.avatar_url ? <img src={channel.avatar_url} className="w-full h-full rounded-lg object-cover" /> : <Hash className="w-4 h-4" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium truncate text-sm">{channel.name}</div>
-                    {channel.last_message?.content_text && (
-                      <div className={`text-xs truncate ${location === `/app/channels/${channel.id}` ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                        {channel.last_message.content_text}
-                      </div>
-                    )}
-                  </div>
-                  {channel.unread_count ? (
-                    <div className="bg-destructive text-destructive-foreground text-[10px] font-bold px-2 py-0.5 rounded-full">
-                      {channel.unread_count}
-                    </div>
-                  ) : null}
-                </Link>
+                <ChannelListItem
+                  key={channel.id}
+                  channel={channel}
+                  href={`/app/channels/${channel.id}`}
+                  isActive={location === `/app/channels/${channel.id}`}
+                />
               ))}
-              {isMyChannelsLoading && (
+              {isMemberChannelsLoading && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">Loading channels...</div>
               )}
-              {!isMyChannelsLoading && myChannels.length === 0 && (
+              {!isMemberChannelsLoading && myChannels.length === 0 && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">
-                  {deferredSearchQuery ? "No matching channels" : "No channels yet"}
+                  {isSearching ? "No matching owned or admin channels" : "No owned or admin channels yet"}
                 </div>
               )}
             </div>
-          </div>
+          </SidebarSection>
 
-          <div>
-            <h3 className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mb-3 px-2">Discover</h3>
+          <SidebarSection title="Channels" isOpen={isChannelsOpen} onToggle={() => setIsChannelsOpen(open => !open)}>
             <div className="space-y-1">
-              {discoverChannels.map(channel => (
-                <Link key={channel.id} href={`/app/channels/${channel.id}`} className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 hover:bg-sidebar-accent text-sidebar-foreground/80 hover:text-sidebar-foreground`}>
-                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-sidebar-accent-foreground/10 text-sidebar-foreground/60">
-                    <Hash className="w-4 h-4" />
-                  </div>
-                  <div className="font-medium truncate text-sm flex-1">{channel.name}</div>
-                </Link>
+              {joinedChannels.map(channel => (
+                <ChannelListItem
+                  key={channel.id}
+                  channel={channel}
+                  href={`/app/channels/${channel.id}`}
+                  isActive={location === `/app/channels/${channel.id}`}
+                />
               ))}
-              {isDiscoverLoading && (
+              {isMemberChannelsLoading && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">Loading channels...</div>
               )}
-              {!isDiscoverLoading && discoverChannels.length === 0 && (
+              {!isMemberChannelsLoading && joinedChannels.length === 0 && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">
-                  {deferredSearchQuery ? "No matching channels" : "No channels to discover"}
+                  {isSearching ? "No matching member channels" : "No joined channels yet"}
                 </div>
               )}
             </div>
-          </div>
+          </SidebarSection>
+
+          {isSearching ? (
+            <SidebarSection title="Discover" isOpen={isDiscoverOpen} onToggle={() => setIsDiscoverOpen(open => !open)}>
+              <div className="space-y-1">
+                {sortedDiscoverChannels.map(channel => (
+                  <ChannelListItem
+                    key={channel.id}
+                    channel={channel}
+                    href={`/app/channels/${channel.id}`}
+                    isActive={location === `/app/channels/${channel.id}`}
+                  />
+                ))}
+                {isDiscoverLoading && (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">Loading channels...</div>
+                )}
+                {!isDiscoverLoading && sortedDiscoverChannels.length === 0 && (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">No matching discoverable channels</div>
+                )}
+              </div>
+            </SidebarSection>
+          ) : null}
         </div>
 
         <div className="p-4 border-t border-sidebar-border bg-sidebar/50">
