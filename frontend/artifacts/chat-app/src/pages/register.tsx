@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useRegister } from "../hooks/use-auth";
 import { Button } from "../components/ui/button";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 export default function Register() {
   const [username, setUsername] = useState("");
@@ -27,6 +28,7 @@ export default function Register() {
         />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/80 to-transparent" />
       </div>
+      <ThemeToggle className="absolute right-6 top-6 z-20 rounded-xl border border-border/70 bg-background/70 text-foreground shadow-sm backdrop-blur hover:bg-accent" />
 
       <div className="relative z-10 w-full max-w-md p-8">
         <div className="text-center mb-10">

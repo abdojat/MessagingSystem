@@ -3,6 +3,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { MessageCircle, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAuthStore } from "@/store/authStore";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const features = [
   {
@@ -27,8 +28,8 @@ export default function Home() {
   const user = useAuthStore((s) => s.user);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_20%_20%,hsl(var(--primary)/0.32),transparent_48%),radial-gradient(circle_at_88%_12%,hsl(186_92%_44%/0.18),transparent_40%),linear-gradient(165deg,hsl(232_23%_7%),hsl(228_18%_5%))] text-foreground">
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(hsl(0_0%_100%/0.06)_1px,transparent_1px),linear-gradient(90deg,hsl(0_0%_100%/0.06)_1px,transparent_1px)] bg-[size:44px_44px] opacity-20" />
+    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_20%_20%,hsl(var(--primary)/0.18),transparent_48%),radial-gradient(circle_at_88%_12%,hsl(186_92%_44%/0.12),transparent_40%),linear-gradient(165deg,hsl(210_40%_99%),hsl(220_40%_95%))] text-foreground dark:bg-[radial-gradient(circle_at_20%_20%,hsl(var(--primary)/0.32),transparent_48%),radial-gradient(circle_at_88%_12%,hsl(186_92%_44%/0.18),transparent_40%),linear-gradient(165deg,hsl(232_23%_7%),hsl(228_18%_5%))]">
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(hsl(224_20%_20%/0.06)_1px,transparent_1px),linear-gradient(90deg,hsl(224_20%_20%/0.06)_1px,transparent_1px)] bg-[size:44px_44px] opacity-30 dark:bg-[linear-gradient(hsl(0_0%_100%/0.06)_1px,transparent_1px),linear-gradient(90deg,hsl(0_0%_100%/0.06)_1px,transparent_1px)] dark:opacity-20" />
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 pb-16 pt-7 sm:px-10 lg:px-12">
         <header className="flex items-center justify-between">
@@ -42,15 +43,16 @@ export default function Home() {
             </div>
           </Link>
           <div className="flex items-center gap-2 sm:gap-3">
+            <ThemeToggle className="rounded-xl border border-border/70 bg-background/70 text-foreground shadow-sm backdrop-blur hover:bg-accent dark:border-white/12 dark:bg-white/5 dark:hover:bg-white/10" />
             {!isAuthenticated && (
-              <Link href="/login" className={buttonVariants({ variant: "ghost", className: "text-foreground/90 hover:bg-white/10" })}>
+              <Link href="/login" className={buttonVariants({ variant: "ghost", className: "text-foreground/90 hover:bg-black/5 dark:hover:bg-white/10" })}>
                 Log in
               </Link>
             )}
             <Link
               href={isAuthenticated ? "/app" : "/register"}
               className={buttonVariants({
-                className: "rounded-xl bg-white text-slate-900 hover:bg-white/90 px-5 shadow-xl shadow-black/30",
+                className: "rounded-xl bg-foreground text-background hover:opacity-90 px-5 shadow-xl shadow-primary/15 dark:bg-white dark:text-slate-900 dark:shadow-black/30",
               })}
             >
               {isAuthenticated ? "Open app" : "Create account"}
@@ -65,8 +67,8 @@ export default function Home() {
             transition={{ duration: 0.55 }}
             className="max-w-2xl"
           >
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/8 px-4 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-white/85">
-              <Sparkles className="h-3.5 w-3.5 text-cyan-300" />
+            <span className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-4 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-foreground/80 shadow-sm backdrop-blur dark:border-white/20 dark:bg-white/8 dark:text-white/85">
+              <Sparkles className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-300" />
               Built for focused conversations
             </span>
 
@@ -74,7 +76,7 @@ export default function Home() {
               Welcome{user?.username ? `, ${user.username}` : ""}. Chat with clarity, not chaos.
             </h1>
 
-            <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-300 sm:text-lg">
+            <p className="mt-5 max-w-xl text-base leading-relaxed text-foreground/70 sm:text-lg dark:text-slate-300">
               Launch channels in seconds, keep discussions organized, and move from idea to action with a workspace your team actually enjoys using.
             </p>
 
@@ -93,7 +95,7 @@ export default function Home() {
                 className={buttonVariants({
                   variant: "outline",
                   size: "lg",
-                  className: "h-12 rounded-xl border-white/20 bg-white/5 px-7 text-[15px] text-foreground hover:bg-white/12",
+                  className: "h-12 rounded-xl border-border/80 bg-background/75 px-7 text-[15px] text-foreground hover:bg-accent dark:border-white/20 dark:bg-white/5 dark:hover:bg-white/12",
                 })}
               >
                 {isAuthenticated ? "Manage profile" : "I already have an account"}
@@ -109,23 +111,23 @@ export default function Home() {
           >
             <div className="absolute -left-10 top-8 h-40 w-40 rounded-full bg-cyan-300/18 blur-3xl" />
             <div className="absolute -right-8 -top-2 h-40 w-40 rounded-full bg-primary/30 blur-3xl" />
-            <div className="relative overflow-hidden rounded-3xl border border-white/12 bg-slate-900/70 p-5 shadow-2xl shadow-black/60 backdrop-blur-xl sm:p-6">
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                <p className="text-sm font-medium text-white/90">Workspace preview</p>
-                <span className="rounded-full bg-emerald-400/20 px-2.5 py-1 text-xs text-emerald-300">Live</span>
+            <div className="relative overflow-hidden rounded-3xl border border-border/70 bg-white/70 p-5 shadow-2xl shadow-slate-300/50 backdrop-blur-xl sm:p-6 dark:border-white/12 dark:bg-slate-900/70 dark:shadow-black/60">
+              <div className="flex items-center justify-between border-b border-border/80 pb-4 dark:border-white/10">
+                <p className="text-sm font-medium text-foreground/90 dark:text-white/90">Workspace preview</p>
+                <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-600 dark:bg-emerald-400/20 dark:text-emerald-300">Live</span>
               </div>
               <div className="space-y-3 pt-4">
-                <div className="rounded-2xl border border-white/12 bg-white/6 p-3">
-                  <p className="text-xs text-cyan-300"># product</p>
-                  <p className="mt-1 text-sm text-slate-200">"Landing page shipped. Feedback is coming in fast."</p>
+                <div className="rounded-2xl border border-border/80 bg-background/80 p-3 dark:border-white/12 dark:bg-white/6">
+                  <p className="text-xs text-cyan-600 dark:text-cyan-300"># product</p>
+                  <p className="mt-1 text-sm text-foreground/80 dark:text-slate-200">"Landing page shipped. Feedback is coming in fast."</p>
                 </div>
-                <div className="rounded-2xl border border-white/12 bg-white/6 p-3">
+                <div className="rounded-2xl border border-border/80 bg-background/80 p-3 dark:border-white/12 dark:bg-white/6">
                   <p className="text-xs text-primary"># engineering</p>
-                  <p className="mt-1 text-sm text-slate-200">"WebSocket events are stable. Ready for demo."</p>
+                  <p className="mt-1 text-sm text-foreground/80 dark:text-slate-200">"WebSocket events are stable. Ready for demo."</p>
                 </div>
-                <div className="rounded-2xl border border-white/12 bg-white/6 p-3">
-                  <p className="text-xs text-emerald-300"># support</p>
-                  <p className="mt-1 text-sm text-slate-200">"Resolution time is down 32% this week."</p>
+                <div className="rounded-2xl border border-border/80 bg-background/80 p-3 dark:border-white/12 dark:bg-white/6">
+                  <p className="text-xs text-emerald-600 dark:text-emerald-300"># support</p>
+                  <p className="mt-1 text-sm text-foreground/80 dark:text-slate-200">"Resolution time is down 32% this week."</p>
                 </div>
               </div>
             </div>
@@ -139,11 +141,11 @@ export default function Home() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 0.2 + index * 0.08 }}
-              className="rounded-2xl border border-white/12 bg-white/6 p-5 backdrop-blur-sm"
+              className="rounded-2xl border border-border/70 bg-background/70 p-5 shadow-sm backdrop-blur-sm dark:border-white/12 dark:bg-white/6"
             >
-              <feature.icon className="h-5 w-5 text-cyan-300" />
+              <feature.icon className="h-5 w-5 text-cyan-600 dark:text-cyan-300" />
               <h2 className="mt-3 text-base font-semibold text-foreground">{feature.title}</h2>
-              <p className="mt-1 text-sm leading-relaxed text-slate-300">{feature.description}</p>
+              <p className="mt-1 text-sm leading-relaxed text-foreground/70 dark:text-slate-300">{feature.description}</p>
             </motion.article>
           ))}
         </section>

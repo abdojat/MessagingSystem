@@ -5,6 +5,7 @@ import { useLogout } from "../hooks/use-auth";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { useAuthStore } from "../store/authStore";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function AppSidebar() {
   const { data: channels = [] } = useChannels();
@@ -25,25 +26,28 @@ export function AppSidebar() {
           </div>
           <h1 className="font-bold text-sidebar-foreground">ChatCore</h1>
         </div>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="text-sidebar-foreground hover:bg-sidebar-accent"
-          onClick={() => {
-            const name = window.prompt("Channel name");
-            const trimmed = name?.trim();
-            if (!trimmed) return;
-            createChannel.mutate(
-              { name: trimmed, visibility: 'public', join_mode: 'open' },
-              {
-                onSuccess: (channel) => setLocation(`/app/channels/${channel.id}`),
-              }
-            );
-          }}
-          disabled={createChannel.isPending}
-        >
-          <Plus className="w-5 h-5" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <ThemeToggle className="text-sidebar-foreground hover:bg-sidebar-accent" />
+          <Button
+            size="icon"
+            variant="ghost"
+            className="text-sidebar-foreground hover:bg-sidebar-accent"
+            onClick={() => {
+              const name = window.prompt("Channel name");
+              const trimmed = name?.trim();
+              if (!trimmed) return;
+              createChannel.mutate(
+                { name: trimmed, visibility: 'public', join_mode: 'open' },
+                {
+                  onSuccess: (channel) => setLocation(`/app/channels/${channel.id}`),
+                }
+              );
+            }}
+            disabled={createChannel.isPending}
+          >
+            <Plus className="w-5 h-5" />
+          </Button>
+        </div>
       </div>
 
       <div className="p-3">
