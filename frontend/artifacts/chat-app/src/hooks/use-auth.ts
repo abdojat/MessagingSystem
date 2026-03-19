@@ -5,6 +5,16 @@ import { useAuthStore } from '../store/authStore';
 import { LoginRequest, RegisterRequest, TokenPair, MeResponse, SessionResponse } from '../types/api';
 import { useEffect } from 'react';
 
+function redirectToHomeAndReload() {
+  const homePath = import.meta.env.BASE_URL || '/';
+  window.location.replace(homePath);
+}
+
+function completeClientLogout(queryClient: ReturnType<typeof useQueryClient>) {
+  useAuthStore.getState().clearAuth();
+  queryClient.clear();
+}
+
 export function useInitializeAuth() {
   const { setAuth, clearAuth, setInitializing } = useAuthStore();
 
@@ -87,7 +97,6 @@ export function useRegister() {
 }
 
 export function useLogout() {
-  const { clearAuth } = useAuthStore();
   const queryClient = useQueryClient();
   
   return useMutation({
@@ -98,8 +107,8 @@ export function useLogout() {
           await apiClient('/auth/logout', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) });
         } catch (e) { }
       }
-      clearAuth();
-      queryClient.clear();
+      completeClientLogout(queryClient);
+      redirectToHomeAndReload();
     }
   });
 }
@@ -123,6 +132,9 @@ export function useLogoutAll() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => apiClient('/auth/logout_all', { method: 'POST' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/auth/sessions'] })
+    onSuccess: () => {
+      completeClientLogout(queryClient);
+      redirectToHomeAndReload();
+    }
   });
 }

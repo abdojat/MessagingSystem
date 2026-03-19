@@ -48,11 +48,11 @@ export default function Sessions() {
           <Button 
             variant="destructive" 
             onClick={() => logoutAll.mutate()}
-            disabled={logoutAll.isPending || sessions.length <= 1}
+            disabled={logoutAll.isPending || sessions.length === 0}
             className="shadow-sm shadow-destructive/20"
           >
             <ShieldAlert className="w-4 h-4 mr-2" />
-            Terminate All Other Sessions
+            Terminate All Sessions
           </Button>
         </div>
 
