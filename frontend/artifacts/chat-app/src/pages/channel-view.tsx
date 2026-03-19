@@ -28,6 +28,7 @@ export default function ChannelView() {
   const lastMarkedSeenSeqRef = useRef<number | null>(null);
   const user = useAuthStore(s => s.user);
   const isMember = ['owner', 'admin', 'member'].includes(channel?.my_role || '');
+  const canCompose = ['owner', 'admin'].includes(channel?.my_role || '');
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -77,7 +78,7 @@ export default function ChannelView() {
 
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!content.trim() || !channelId) return;
+    if (!canCompose || !content.trim() || !channelId) return;
     sendMessage.mutate({ channelId, content_text: content });
     setContent("");
   };
@@ -210,7 +211,7 @@ export default function ChannelView() {
       </div>
 
       {/* Compose Box */}
-      {isMember && (
+      {canCompose && (
         <div className="p-4 bg-background border-t border-border flex-shrink-0">
           <div className="max-w-4xl mx-auto bg-secondary rounded-2xl border border-border/50 shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all p-2 flex items-end gap-2 relative">
             <Button size="icon" variant="ghost" className="h-10 w-10 text-muted-foreground hover:bg-background rounded-xl flex-shrink-0 mb-1">
