@@ -1,8 +1,8 @@
 import { useAuthStore } from '../store/authStore';
+import { getApiBaseUrl } from './runtimeConfig';
 
 const getBaseUrl = () => {
-  const url = import.meta.env.VITE_API_BASE_URL || '/v1';
-  return url.endsWith('/') ? url.slice(0, -1) : url;
+  return getApiBaseUrl();
 };
 
 class ApiError extends Error {

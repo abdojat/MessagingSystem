@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { useAuthStore } from '../store/authStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChannelResponse, MessageResponse } from '../types/api';
+import { getWsUrl } from '../lib/runtimeConfig';
 
 interface WSContextType {
   status: 'connecting' | 'connected' | 'disconnected';
@@ -16,34 +17,41 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
   const ws = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
+  const reconnectTimer = useRef<number | null>(null);
+  const shouldReconnect = useRef(false);
   const maxBackoff = 30000;
 
   useEffect(() => {
     if (!isAuthenticated || !accessToken) {
+      shouldReconnect.current = false;
+      if (reconnectTimer.current !== null) {
+        window.clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
       if (ws.current) {
         ws.current.close();
         ws.current = null;
       }
+      setStatus('disconnected');
       return;
     }
 
     let isUnmounted = false;
+    shouldReconnect.current = true;
 
     const connect = () => {
-      if (isUnmounted) return;
+      if (isUnmounted || !shouldReconnect.current) return;
       setStatus('connecting');
-      
-      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/v1';
-      const wsBase = apiBaseUrl.startsWith('http')
-        ? apiBaseUrl.replace(/^http/, 'ws')
-        : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${apiBaseUrl}`;
-      const wsUrl = `${wsBase.replace(/\/$/, '')}/ws`;
-      
+      const wsUrl = getWsUrl(accessToken);
       ws.current = new WebSocket(wsUrl);
 
       ws.current.onopen = () => {
         setStatus('connected');
         reconnectAttempt.current = 0;
+        if (reconnectTimer.current !== null) {
+          window.clearTimeout(reconnectTimer.current);
+          reconnectTimer.current = null;
+        }
       };
 
       ws.current.onmessage = (event) => {
@@ -138,10 +146,10 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
       ws.current.onclose = () => {
         setStatus('disconnected');
         ws.current = null;
-        if (!isUnmounted) {
+        if (!isUnmounted && shouldReconnect.current) {
           const backoff = Math.min(1000 * Math.pow(2, reconnectAttempt.current), maxBackoff);
           reconnectAttempt.current += 1;
-          setTimeout(connect, backoff);
+          reconnectTimer.current = window.setTimeout(connect, backoff);
         }
       };
     };
@@ -150,15 +158,21 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       isUnmounted = true;
+      shouldReconnect.current = false;
+      if (reconnectTimer.current !== null) {
+        window.clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
       if (ws.current) {
         ws.current.close();
+        ws.current = null;
       }
     };
   }, [isAuthenticated, accessToken, queryClient, user?.id]);
 
   const emit = (type: string, payload: any) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ type, payload }));
+      ws.current.send(JSON.stringify({ type, payload, ts: new Date().toISOString() }));
     }
   };
 

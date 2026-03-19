@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
+import { getApiBaseUrl } from '../lib/runtimeConfig';
 import { useAuthStore } from '../store/authStore';
 import { LoginRequest, RegisterRequest, TokenPair, MeResponse, SessionResponse } from '../types/api';
 import { useEffect } from 'react';
@@ -16,7 +17,7 @@ export function useInitializeAuth() {
       }
 
       try {
-        const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/v1').replace(/\/$/, '');
+        const baseUrl = getApiBaseUrl();
         // Use refresh_token to get a new token pair
         const refreshRes = await fetch(`${baseUrl}/auth/refresh`, {
           method: 'POST',
