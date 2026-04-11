@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import (
     JSON,
     BigInteger,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -68,6 +69,10 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    __table_args__ = (
+        CheckConstraint("position(' ' in username) = 0", name="ck_users_username_no_spaces"),
+    )
+
 
 class UserSession(Base):
     __tablename__ = "user_sessions"
@@ -89,6 +94,7 @@ class Channel(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(Text)
+    channel_slug: Mapped[str] = mapped_column(String(64), unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     visibility: Mapped[ChannelVisibility] = mapped_column(Enum(ChannelVisibility, name="channel_visibility"), nullable=False)
@@ -99,6 +105,10 @@ class Channel(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seq_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+
+    __table_args__ = (
+        CheckConstraint("position(' ' in channel_slug) = 0", name="ck_channels_slug_no_spaces"),
+    )
 
 
 class ChannelCounter(Base):

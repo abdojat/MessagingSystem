@@ -16,6 +16,8 @@ class AuthService:
     async def register(db: AsyncSession, req: RegisterRequest) -> User:
         username = req.username.strip()
         email = req.email.strip().lower() if req.email is not None else None
+        if any(ch.isspace() for ch in username):
+            raise AppError("username must not contain spaces", 400, code="VALIDATION_ERROR", details={"field": "username"})
 
         existing_username = await db.execute(select(User.id).where(User.username == username))
         if existing_username.scalar_one_or_none() is not None:

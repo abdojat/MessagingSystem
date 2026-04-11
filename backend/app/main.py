@@ -157,10 +157,10 @@ async def _run_websocket_with_token(websocket: WebSocket, token: str, pre_accept
             return
 
     manager: WSManager = app.state.ws_manager
-    await manager.connect(websocket, user.id, pre_accepted=pre_accepted)
+    await manager.connect(websocket, user.id, user.username, pre_accepted=pre_accepted)
     try:
-        await manager.run_socket(websocket, user.id)
+        await manager.run_socket(websocket, user.id, user.username)
     except WebSocketDisconnect:
         pass
     finally:
-        await manager.disconnect(websocket, user.id)
+        await manager.disconnect(websocket, user.username)

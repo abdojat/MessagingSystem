@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.errors import AppError
 from app.core.utils import utcnow
-from app.db.models import ChannelMembership, MembershipRole, Message
+from app.db.models import Channel, ChannelMembership, MembershipRole, Message
 from app.mq.publisher import bind_user_channel
 from app.realtime.protocol import (
     WSResumePayload,
@@ -38,18 +38,18 @@ class WSManager:
         self._amqp = amqp
         self._subscriptions: dict[int, set[str]] = {}
 
-    async def connect(self, websocket: WebSocket, user_id: UUID, pre_accepted: bool = False) -> None:
+    async def connect(self, websocket: WebSocket, user_id: UUID, username: str, pre_accepted: bool = False) -> None:
         if not pre_accepted:
             await websocket.accept()
-        await mark_user_online(self._redis, str(user_id))
-        await self._ensure_user_bindings(user_id)
+        await mark_user_online(self._redis, username)
+        await self._ensure_user_bindings(user_id, username)
         self._subscriptions[id(websocket)] = set(await self._member_channel_ids(user_id))
 
-    async def disconnect(self, websocket: WebSocket, user_id: UUID) -> None:
+    async def disconnect(self, websocket: WebSocket, username: str) -> None:
         self._subscriptions.pop(id(websocket), None)
-        await mark_user_offline(self._redis, str(user_id))
+        await mark_user_offline(self._redis, username)
 
-    async def run_socket(self, websocket: WebSocket, user_id: UUID) -> None:
+    async def run_socket(self, websocket: WebSocket, user_id: UUID, username: str) -> None:
         await websocket.send_json(
             build_envelope(
                 "hello",
@@ -61,7 +61,7 @@ class WSManager:
             )
         )
 
-        redis_task = asyncio.create_task(self._redis_forward_loop(websocket, user_id))
+        redis_task = asyncio.create_task(self._redis_forward_loop(websocket, username))
         inbound_task = asyncio.create_task(self._inbound_loop(websocket, user_id))
         done, pending = await asyncio.wait({redis_task, inbound_task}, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
@@ -80,12 +80,25 @@ class WSManager:
             )
             return [str(cid) for cid in rows.scalars().all()]
 
-    async def _ensure_user_bindings(self, user_id: UUID) -> None:
-        channel_ids = await self._member_channel_ids(user_id)
+    async def _member_channel_slugs(self, user_id: UUID) -> list[str]:
+        async with self._session_factory() as db:
+            rows = await db.execute(
+                select(Channel.channel_slug)
+                .join(ChannelMembership, ChannelMembership.channel_id == Channel.id)
+                .where(
+                    ChannelMembership.user_id == user_id,
+                    ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+                    Channel.deleted_at.is_(None),
+                )
+            )
+            return [str(slug) for slug in rows.scalars().all()]
+
+    async def _ensure_user_bindings(self, user_id: UUID, username: str) -> None:
+        channel_slugs = await self._member_channel_slugs(user_id)
         amqp_channel = await self._amqp.channel()
         try:
-            for channel_id in channel_ids:
-                await bind_user_channel(amqp_channel, str(user_id), channel_id)
+            for channel_slug in channel_slugs:
+                await bind_user_channel(amqp_channel, username, channel_slug)
         finally:
             await amqp_channel.close()
 
@@ -310,8 +323,8 @@ class WSManager:
                 )
             )
 
-    async def _redis_forward_loop(self, websocket: WebSocket, user_id: UUID) -> None:
-        channel_name = user_pubsub_channel(str(user_id))
+    async def _redis_forward_loop(self, websocket: WebSocket, username: str) -> None:
+        channel_name = user_pubsub_channel(username)
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(channel_name)
         try:

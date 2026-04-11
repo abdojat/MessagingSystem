@@ -63,6 +63,7 @@ class ChannelService:
             "id": channel.id,
             "owner_user_id": channel.owner_user_id,
             "name": channel.name,
+            "channel_slug": channel.channel_slug,
             "description": channel.description,
             "avatar_url": channel.avatar_url,
             "visibility": channel.visibility,
@@ -90,6 +91,7 @@ class ChannelService:
         channel = Channel(
             owner_user_id=owner_user_id,
             name=req.name,
+            channel_slug=req.channel_slug,
             description=req.description,
             avatar_url=req.avatar_url,
             visibility=req.visibility,
@@ -118,9 +120,13 @@ class ChannelService:
         await db.commit()
         await db.refresh(channel)
 
+        owner = await db.get(User, owner_user_id)
+        if owner is None:
+            raise AppError("owner not found", 404, code="USER_NOT_FOUND")
+
         amqp_channel = await amqp.channel()
         try:
-            await bind_user_channel(amqp_channel, str(owner_user_id), str(channel.id))
+            await bind_user_channel(amqp_channel, owner.username, channel.channel_slug)
         finally:
             await amqp_channel.close()
         return channel
@@ -361,9 +367,12 @@ class ChannelService:
         if not membership or membership.role != MembershipRole.owner:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
+        old_channel_slug = channel.channel_slug
         provided_fields = req.model_fields_set
         if req.name is not None:
             channel.name = req.name
+        if req.channel_slug is not None:
+            channel.channel_slug = req.channel_slug
         if "description" in provided_fields:
             channel.description = req.description
         if "avatar_url" in provided_fields:
@@ -379,6 +388,7 @@ class ChannelService:
             {
                 "channel_id": str(channel_id),
                 "name": channel.name,
+                "channel_slug": channel.channel_slug,
                 "description": channel.description,
                 "avatar_url": channel.avatar_url,
                 "visibility": channel.visibility.value,
@@ -397,6 +407,7 @@ class ChannelService:
                 "channel_id": str(channel_id),
                 "patch": {
                     "name": channel.name,
+                    "channel_slug": channel.channel_slug,
                     "description": channel.description,
                     "avatar_url": channel.avatar_url,
                     "visibility": channel.visibility.value,
@@ -406,6 +417,24 @@ class ChannelService:
         )
         await db.commit()
         await db.refresh(channel)
+
+        if old_channel_slug != channel.channel_slug:
+            member_rows = await db.execute(
+                select(User.username)
+                .join(ChannelMembership, ChannelMembership.user_id == User.id)
+                .where(
+                    ChannelMembership.channel_id == channel_id,
+                    ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+                )
+            )
+            usernames = list(member_rows.scalars().all())
+            amqp_channel = await amqp.channel()
+            try:
+                for username in usernames:
+                    await unbind_user_channel(amqp_channel, username, old_channel_slug)
+                    await bind_user_channel(amqp_channel, username, channel.channel_slug)
+            finally:
+                await amqp_channel.close()
         return channel
 
     @staticmethod
@@ -440,13 +469,15 @@ class ChannelService:
         amqp_channel = await amqp.channel()
         try:
             rows = await db.execute(
-                select(ChannelMembership.user_id).where(
+                select(User.username)
+                .join(ChannelMembership, ChannelMembership.user_id == User.id)
+                .where(
                     ChannelMembership.channel_id == channel_id,
                     ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
                 )
             )
-            for uid in rows.scalars().all():
-                await unbind_user_channel(amqp_channel, str(uid), str(channel_id))
+            for username in rows.scalars().all():
+                await unbind_user_channel(amqp_channel, username, channel.channel_slug)
         finally:
             await amqp_channel.close()
 
@@ -518,9 +549,10 @@ class ChannelService:
         await db.commit()
 
         if membership.role in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member}:
+            username = await ChannelService._require_username(db, user_id)
             amqp_channel = await amqp.channel()
             try:
-                await bind_user_channel(amqp_channel, str(user_id), str(channel_id))
+                await bind_user_channel(amqp_channel, username, channel.channel_slug)
             finally:
                 await amqp_channel.close()
         return (status, membership, message)
@@ -726,7 +758,7 @@ class ChannelService:
 
         amqp_channel = await amqp.channel()
         try:
-            await bind_user_channel(amqp_channel, str(user_id), str(invite.channel_id))
+            await bind_user_channel(amqp_channel, user.username, channel.channel_slug)
         finally:
             await amqp_channel.close()
         return membership
@@ -766,9 +798,11 @@ class ChannelService:
         )
         await db.commit()
 
+        target_username = await ChannelService._require_username(db, target_id)
+        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
         try:
-            await bind_user_channel(amqp_channel, str(target_id), str(channel_id))
+            await bind_user_channel(amqp_channel, target_username, channel_slug)
         finally:
             await amqp_channel.close()
         return target
@@ -815,9 +849,11 @@ class ChannelService:
         )
         await db.commit()
 
+        target_username = await ChannelService._require_username(db, target_id)
+        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
         try:
-            await bind_user_channel(amqp_channel, str(target_id), str(channel_id))
+            await bind_user_channel(amqp_channel, target_username, channel_slug)
         finally:
             await amqp_channel.close()
         return target
@@ -900,9 +936,11 @@ class ChannelService:
         )
         await db.commit()
 
+        target_username = await ChannelService._require_username(db, target_id)
+        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
         try:
-            await unbind_user_channel(amqp_channel, str(target_id), str(channel_id))
+            await unbind_user_channel(amqp_channel, target_username, channel_slug)
         finally:
             await amqp_channel.close()
 
@@ -935,9 +973,11 @@ class ChannelService:
         )
         await db.commit()
 
+        username = await ChannelService._require_username(db, user_id)
+        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
         try:
-            await unbind_user_channel(amqp_channel, str(user_id), str(channel_id))
+            await unbind_user_channel(amqp_channel, username, channel_slug)
         finally:
             await amqp_channel.close()
 
@@ -1050,6 +1090,18 @@ class ChannelService:
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not membership or membership.role not in {MembershipRole.owner, MembershipRole.admin}:
             raise AppError("forbidden", 403, code="FORBIDDEN")
+
+    @staticmethod
+    async def _require_username(db: AsyncSession, user_id: UUID) -> str:
+        user = await db.get(User, user_id)
+        if user is None:
+            raise AppError("user not found", 404, code="USER_NOT_FOUND")
+        return user.username
+
+    @staticmethod
+    async def _require_channel_slug(db: AsyncSession, channel_id: UUID) -> str:
+        channel = await ChannelService.get_channel_or_404(db, channel_id)
+        return channel.channel_slug
 
     @staticmethod
     async def _validate_invite(db: AsyncSession, channel_id: UUID, token: str, user_id: UUID) -> ChannelInvite:

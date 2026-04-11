@@ -23,24 +23,24 @@ class OnlineUserConsumerManager:
                 online = await self.redis.smembers(online_users_key())
                 online_users = {u.decode("utf-8") if isinstance(u, bytes) else str(u) for u in online}
 
-                for uid in online_users:
-                    if uid not in self.tasks:
-                        self.tasks[uid] = asyncio.create_task(self._consume_user(uid))
+                for username in online_users:
+                    if username not in self.tasks:
+                        self.tasks[username] = asyncio.create_task(self._consume_user(username))
 
-                for uid in list(self.tasks):
-                    if uid not in online_users:
-                        self.tasks[uid].cancel()
-                        self.tasks.pop(uid, None)
+                for username in list(self.tasks):
+                    if username not in online_users:
+                        self.tasks[username].cancel()
+                        self.tasks.pop(username, None)
             except Exception:
                 logger.exception("online user scan failed")
             await asyncio.sleep(self.settings.worker_online_scan_interval)
 
-    async def _consume_user(self, user_id: str) -> None:
+    async def _consume_user(self, username: str) -> None:
         channel = await self.amqp.channel()
-        queue = await channel.declare_queue(user_queue_name(user_id), durable=True, auto_delete=False, exclusive=False)
+        queue = await channel.declare_queue(user_queue_name(username), durable=True, auto_delete=False, exclusive=False)
 
         async with queue.iterator() as iterator:
             async for message in iterator:
                 async with message.process(requeue=True):
                     data = message.body.decode("utf-8")
-                    await self.redis.publish(user_pubsub_channel(user_id), data)
+                    await self.redis.publish(user_pubsub_channel(username), data)
