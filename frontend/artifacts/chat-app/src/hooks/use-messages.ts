@@ -12,11 +12,23 @@ export function useMessages(channelId: string) {
 
 export function useSendMessage() {
   const queryClient = useQueryClient();
+
+  type SendMessageInput = {
+    channelId: string;
+    content_text: string;
+    reply_to_message_id?: string | null;
+    reply_to_seq_id?: number | null;
+  };
+
   return useMutation({
-    mutationFn: ({ channelId, content_text }: { channelId: string, content_text: string }) => 
+    mutationFn: ({ channelId, content_text, reply_to_message_id, reply_to_seq_id }: SendMessageInput) =>
       apiClient<MessageResponse>(`/channels/${channelId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content_text })
+        body: JSON.stringify({
+          content_text,
+          reply_to_message_id,
+          reply_to_seq_id,
+        }),
       }),
     onSuccess: (newMessage, variables) => {
       queryClient.setQueryData(

@@ -75,6 +75,12 @@ class MessageService:
                 return existing_message
 
         attachments = await MessageService._normalize_attachments(db, sender_id, req.attachments)
+        reply_to_message_id, reply_to_seq_id = await MessageService._resolve_reply_target(
+            db,
+            channel_id,
+            req.reply_to_message_id,
+            req.reply_to_seq_id,
+        )
         channel.last_seq_id = int(channel.last_seq_id or 0) + 1
         seq_id = int(channel.last_seq_id)
         await db.flush()
@@ -87,8 +93,8 @@ class MessageService:
             content_type=content_type,
             content_text=req.content_text,
             content_json=req.content_json,
-            reply_to_message_id=req.reply_to_message_id,
-            reply_to_seq_id=req.reply_to_seq_id,
+            reply_to_message_id=reply_to_message_id,
+            reply_to_seq_id=reply_to_seq_id,
             attachments=attachments,
             client_msg_id=req.client_msg_id,
         )
@@ -122,6 +128,37 @@ class MessageService:
             raise AppError("message conflict", 409, code="CONFLICT") from exc
         await db.refresh(message)
         return message
+
+    @staticmethod
+    async def _resolve_reply_target(
+        db: AsyncSession,
+        channel_id: UUID,
+        reply_to_message_id: UUID | None,
+        reply_to_seq_id: int | None,
+    ) -> tuple[UUID | None, int | None]:
+        if reply_to_message_id is None and reply_to_seq_id is None:
+            return None, None
+
+        target: Message | None = None
+        if reply_to_message_id is not None:
+            target = await db.get(Message, reply_to_message_id)
+            if target is None or target.channel_id != channel_id or target.deleted_at is not None:
+                raise AppError("reply target not found", 404, code="MESSAGE_NOT_FOUND")
+            if reply_to_seq_id is not None and int(target.seq_id) != int(reply_to_seq_id):
+                raise AppError("reply target mismatch", 400, code="VALIDATION_ERROR")
+        else:
+            rows = await db.execute(
+                select(Message).where(
+                    Message.channel_id == channel_id,
+                    Message.seq_id == int(reply_to_seq_id),
+                    Message.deleted_at.is_(None),
+                )
+            )
+            target = rows.scalar_one_or_none()
+            if target is None:
+                raise AppError("reply target not found", 404, code="MESSAGE_NOT_FOUND")
+
+        return target.id, int(target.seq_id)
 
     @staticmethod
     async def get_message(db: AsyncSession, channel_id: UUID, user_id: UUID, message_id: UUID) -> Message:
