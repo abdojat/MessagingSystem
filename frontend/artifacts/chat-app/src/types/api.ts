@@ -12,6 +12,13 @@ export interface MeResponse extends User {
   updated_at?: string | null;
 }
 
+export interface UpdateMeRequest {
+  email?: string | null;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
+}
+
 export interface TokenPair {
   access_token: string;
   refresh_token: string;

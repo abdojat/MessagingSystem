@@ -3,12 +3,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUserDep, DBDep
 from app.core.errors import AppError, to_http_exception
 from app.db.models import User
 from app.schemas.auth import MeResponse
-from app.schemas.users import UserPublicProfile, UserSearchItem, UserSearchResponse
+from app.schemas.users import UpdateMeRequest, UserPublicProfile, UserSearchItem, UserSearchResponse
 
 router = APIRouter(tags=["users"])
 
@@ -25,6 +26,28 @@ async def me(user: CurrentUserDep) -> MeResponse:
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
+
+
+@router.patch("/me", response_model=MeResponse)
+async def update_me(req: UpdateMeRequest, db: DBDep, user: CurrentUserDep) -> MeResponse:
+    payload = req.model_dump(exclude_unset=True)
+    if not payload:
+        return await me(user)
+
+    for field, value in payload.items():
+        setattr(user, field, value)
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(getattr(exc, "orig", exc)).lower()
+        if "email" in message and "unique" in message:
+            raise to_http_exception(AppError("email already in use", 409, code="CONFLICT")) from exc
+        raise to_http_exception(AppError("failed to update profile", 400, code="VALIDATION_ERROR")) from exc
+
+    await db.refresh(user)
+    return await me(user)
 
 
 def _encode_cursor(username: str, user_id: UUID) -> str:

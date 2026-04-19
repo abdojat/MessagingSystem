@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import {
@@ -20,12 +20,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { Input } from "../components/ui/input";
 import { Progress } from "../components/ui/progress";
 import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Textarea } from "../components/ui/textarea";
 import { apiClient } from "../lib/apiClient";
 import { useAuthStore } from "../store/authStore";
-import type { MeResponse } from "../types/api";
+import type { MeResponse, UpdateMeRequest } from "../types/api";
 
 type ProfileChecklistItem = {
   id: string;
@@ -33,6 +35,18 @@ type ProfileChecklistItem = {
   hint: string;
   completed: boolean;
 };
+
+type ProfileFormState = {
+  display_name: string;
+  email: string;
+  avatar_url: string;
+  bio: string;
+};
+
+function normalizeFormValue(value: string): string | null {
+  const normalized = value.trim();
+  return normalized || null;
+}
 
 function formatDate(value?: string | null, fallback = "Not available") {
   if (!value) return fallback;
@@ -187,6 +201,22 @@ export default function ProfilePage() {
   const updateUser = useAuthStore((state) => state.updateUser);
   const { data: sessions = [], isLoading: isSessionsLoading } = useSessions(isAuthenticated);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [formState, setFormState] = useState<ProfileFormState>({
+    display_name: user?.display_name ?? "",
+    email: user?.email ?? "",
+    avatar_url: user?.avatar_url ?? "",
+    bio: user?.bio ?? "",
+  });
+
+  useEffect(() => {
+    if (!user) return;
+    setFormState({
+      display_name: user.display_name ?? "",
+      email: user.email ?? "",
+      avatar_url: user.avatar_url ?? "",
+      bio: user.bio ?? "",
+    });
+  }, [user?.id, user?.updated_at, user?.display_name, user?.email, user?.avatar_url, user?.bio]);
 
   const refreshProfile = useMutation({
     mutationFn: () => apiClient<MeResponse>("/me"),
@@ -207,6 +237,52 @@ export default function ProfilePage() {
     },
   });
 
+  const buildUpdatePayload = (currentUser: MeResponse): UpdateMeRequest => {
+    const payload: UpdateMeRequest = {};
+    const nextDisplayName = normalizeFormValue(formState.display_name);
+    const nextEmail = normalizeFormValue(formState.email);
+    const nextAvatarUrl = normalizeFormValue(formState.avatar_url);
+    const nextBio = normalizeFormValue(formState.bio);
+
+    if ((currentUser.display_name?.trim() || null) !== nextDisplayName) {
+      payload.display_name = nextDisplayName;
+    }
+    if ((currentUser.email?.trim() || null) !== nextEmail) {
+      payload.email = nextEmail;
+    }
+    if ((currentUser.avatar_url?.trim() || null) !== nextAvatarUrl) {
+      payload.avatar_url = nextAvatarUrl;
+    }
+    if ((currentUser.bio?.trim() || null) !== nextBio) {
+      payload.bio = nextBio;
+    }
+
+    return payload;
+  };
+
+  const updateProfile = useMutation({
+    mutationFn: (payload: UpdateMeRequest) =>
+      apiClient<MeResponse>("/me", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: (updatedUser) => {
+      updateUser(updatedUser);
+      setLastSyncedAt(new Date());
+      toast({
+        title: "Profile updated",
+        description: "Your profile changes were saved successfully.",
+      });
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: "Update failed",
+        description: getErrorMessage(error, "We couldn't save your profile changes."),
+        variant: "destructive",
+      });
+    },
+  });
+
   if (isInitializing) {
     return <ProfileSkeleton />;
   }
@@ -214,6 +290,9 @@ export default function ProfilePage() {
   if (!isAuthenticated || !user) {
     return <Redirect to="/login" />;
   }
+
+  const updatePayload = buildUpdatePayload(user);
+  const hasProfileChanges = Object.keys(updatePayload).length > 0;
 
   const displayName = user.display_name?.trim() || user.username;
   const initials =
@@ -323,6 +402,32 @@ export default function ProfilePage() {
     }
   };
 
+  const handleFormChange = (field: keyof ProfileFormState, value: string) => {
+    setFormState((previous) => ({ ...previous, [field]: value }));
+  };
+
+  const handleResetForm = () => {
+    setFormState({
+      display_name: user.display_name ?? "",
+      email: user.email ?? "",
+      avatar_url: user.avatar_url ?? "",
+      bio: user.bio ?? "",
+    });
+  };
+
+  const handleSaveProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const payload = buildUpdatePayload(user);
+    if (!Object.keys(payload).length) {
+      toast({
+        title: "No changes to save",
+        description: "Update a field first, then try again.",
+      });
+      return;
+    }
+    updateProfile.mutate(payload);
+  };
+
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
       <div className="mx-auto max-w-5xl space-y-6 pb-6">
@@ -375,7 +480,7 @@ export default function ProfilePage() {
                   <h2 className="mt-3 truncate text-3xl font-bold">{displayName}</h2>
                   <p className="text-muted-foreground">@{user.username}</p>
                   <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-                    {user.bio?.trim() || "No bio yet. Add one when backend profile editing is enabled."}
+                    {user.bio?.trim() || "No bio set yet."}
                   </p>
                 </div>
               </div>
@@ -547,15 +652,75 @@ export default function ProfilePage() {
                   </Card>
 
                   <Card className="rounded-2xl p-5">
-                    <h3 className="text-lg font-semibold">Editing status</h3>
-                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                      Backend profile updates are currently unavailable in this project API, so this page focuses on viewing and managing profile data quality.
+                    <h3 className="text-lg font-semibold">Edit profile</h3>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      Keep your identity details accurate for mentions, invites, and teammates.
                     </p>
-                    <div className="mt-4 space-y-3 text-sm text-muted-foreground">
-                      <p>1. Use Refresh Profile after re-authentication or backend changes.</p>
-                      <p>2. Export JSON snapshots for debugging or support requests.</p>
-                      <p>3. Revoke outdated sessions regularly from session settings.</p>
-                    </div>
+                    <form className="mt-4 space-y-3" onSubmit={handleSaveProfile}>
+                      <div>
+                        <label htmlFor="display-name" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                          Display name
+                        </label>
+                        <Input
+                          id="display-name"
+                          value={formState.display_name}
+                          onChange={(event) => handleFormChange("display_name", event.target.value)}
+                          placeholder="How your name appears in chats"
+                          maxLength={128}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="email" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                          Email
+                        </label>
+                        <Input
+                          id="email"
+                          type="email"
+                          value={formState.email}
+                          onChange={(event) => handleFormChange("email", event.target.value)}
+                          placeholder="name@example.com"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="avatar-url" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                          Avatar URL
+                        </label>
+                        <Input
+                          id="avatar-url"
+                          type="url"
+                          value={formState.avatar_url}
+                          onChange={(event) => handleFormChange("avatar_url", event.target.value)}
+                          placeholder="https://example.com/avatar.png"
+                          maxLength={2048}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="bio" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                          Bio
+                        </label>
+                        <Textarea
+                          id="bio"
+                          value={formState.bio}
+                          onChange={(event) => handleFormChange("bio", event.target.value)}
+                          placeholder="Share your role, focus, or current responsibilities."
+                          maxLength={2000}
+                          rows={4}
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="submit" disabled={updateProfile.isPending || !hasProfileChanges}>
+                          {updateProfile.isPending ? "Saving..." : "Save Changes"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleResetForm}
+                          disabled={updateProfile.isPending || !hasProfileChanges}
+                        >
+                          Reset
+                        </Button>
+                      </div>
+                    </form>
                   </Card>
                 </div>
               </TabsContent>
