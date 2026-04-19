@@ -62,6 +62,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    develop:
+      watch:
+        - path: ./backend
+          action: rebuild
 
   worker:
     build:
@@ -78,6 +82,10 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
+    develop:
+      watch:
+        - path: ./worker
+          action: rebuild
 
   frontend:
     build:
@@ -88,6 +96,10 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    develop:
+      watch:
+        - path: ./frontend
+          action: rebuild
 
 volumes:
   pg_data:

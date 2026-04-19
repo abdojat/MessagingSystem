@@ -444,23 +444,6 @@ export default function ProfilePage() {
                 : `Last server update ${formatRelativeTime(user.updated_at)}`}
             </p>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={() => refreshProfile.mutate()}
-              disabled={refreshProfile.isPending}
-            >
-              <RefreshCcw className={`mr-2 h-4 w-4 ${refreshProfile.isPending ? "animate-spin" : ""}`} />
-              {refreshProfile.isPending ? "Refreshing..." : "Refresh Profile"}
-            </Button>
-            <Link href="/settings/sessions">
-              <Button variant="outline">
-                <ShieldCheck className="mr-2 h-4 w-4" />
-                Manage Sessions
-              </Button>
-            </Link>
-          </div>
         </div>
 
         <Card className="overflow-hidden rounded-3xl border-border/60 bg-card/90 shadow-xl">
@@ -489,10 +472,6 @@ export default function ProfilePage() {
                 <Button variant="secondary" onClick={() => void handleCopy("Username", user.username)}>
                   <Copy className="mr-2 h-4 w-4" />
                   Copy Username
-                </Button>
-                <Button variant="outline" onClick={handleDownloadProfile}>
-                  <Download className="mr-2 h-4 w-4" />
-                  Export JSON
                 </Button>
               </div>
             </div>

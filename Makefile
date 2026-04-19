@@ -1,7 +1,10 @@
-.PHONY: up down logs migrate seed test
+.PHONY: up up-watch down logs migrate seed test
 
 up:
 	docker compose up --build
+
+up-watch:
+	docker compose up --build --watch
 
 down:
 	docker compose down -v
