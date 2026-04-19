@@ -86,7 +86,12 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
               );
               updateChannelCaches(msg.channel_id, (channel) => {
                 const lastSeenSeqId = channel.my_last_seen_seq_id ?? 0;
-                const isUnread = msg.sender_user_id !== user?.id && msg.seq_id > lastSeenSeqId && activeChannelId !== msg.channel_id;
+                const isReplyMessage = !!(msg.reply_to_message_id || msg.reply_to_seq_id);
+                const isUnread =
+                  msg.sender_user_id !== user?.id &&
+                  msg.seq_id > lastSeenSeqId &&
+                  activeChannelId !== msg.channel_id &&
+                  !isReplyMessage;
                 return {
                   ...channel,
                   last_message: msg,
@@ -106,12 +111,14 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
             );
             updateChannelCaches(msg.channel_id, (channel) => {
               const isOwnMessage = msg.sender_user_id === user?.id;
+              const isReplyMessage = !!(msg.reply_to_message_id || msg.reply_to_seq_id);
               const lastSeenSeqId = channel.my_last_seen_seq_id ?? 0;
               const shouldIncrementUnread =
                 data.type === 'message' &&
                 !isOwnMessage &&
                 msg.seq_id > lastSeenSeqId &&
-                activeChannelId !== msg.channel_id;
+                activeChannelId !== msg.channel_id &&
+                !isReplyMessage;
 
               return {
                 ...channel,

@@ -313,6 +313,8 @@ class ChannelService:
                 Message.channel_id.in_(channel_ids),
                 Message.deleted_at.is_(None),
                 Message.seq_id > func.coalesce(state_sq.c.last_seen_seq_id, 0),
+                Message.reply_to_message_id.is_(None),
+                Message.reply_to_seq_id.is_(None),
             )
             .group_by(Message.channel_id)
         )
@@ -1269,6 +1271,8 @@ class ChannelService:
                 Message.channel_id == channel.id,
                 Message.deleted_at.is_(None),
                 Message.seq_id > seen_seq,
+                Message.reply_to_message_id.is_(None),
+                Message.reply_to_seq_id.is_(None),
             )
         )
         payload["unread_count"] = int(unread_result.scalar_one() or 0)

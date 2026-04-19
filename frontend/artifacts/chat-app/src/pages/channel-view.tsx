@@ -1,7 +1,7 @@
 import { useLocation, useParams } from "wouter";
 import { useChannel, useJoinChannel } from "../hooks/use-channels";
 import { useMarkSeen, useMessages, useSendMessage } from "../hooks/use-messages";
-import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X } from "lucide-react";
+import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { format } from "date-fns";
 import { Button } from "../components/ui/button";
@@ -83,6 +83,7 @@ export default function ChannelView() {
   
   const [content, setContent] = useState("");
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null);
+  const [collapsedReplyRoots, setCollapsedReplyRoots] = useState<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -90,6 +91,7 @@ export default function ChannelView() {
   const user = useAuthStore(s => s.user);
   const isMember = ['owner', 'admin', 'member'].includes(channel?.my_role || '');
   const canCompose = ['owner', 'admin'].includes(channel?.my_role || '');
+  const canReplyAsMember = isMember && !canCompose;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -97,6 +99,7 @@ export default function ChannelView() {
 
   useEffect(() => {
     setReplyingTo(null);
+    setCollapsedReplyRoots(new Set());
   }, [channelId]);
 
   useEffect(() => {
@@ -143,9 +146,10 @@ export default function ChannelView() {
 
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!canCompose || !content.trim() || !channelId) return;
     const currentReplyTarget = replyingTo ? messages.find((item) => item.id === replyingTo.id) ?? replyingTo : null;
     const canReplyToTarget = currentReplyTarget && !currentReplyTarget.deleted_at;
+    const canSend = canCompose || (canReplyAsMember && !!canReplyToTarget);
+    if (!canSend || !content.trim() || !channelId) return;
     sendMessage.mutate({
       channelId,
       content_text: content,
@@ -164,6 +168,17 @@ export default function ChannelView() {
   };
 
   const messageById = new Map(messages.map((message) => [message.id, message]));
+  const replyChildrenById = new Map<string, MessageResponse[]>();
+  for (const message of messages) {
+    const parentId = message.reply_to_message_id;
+    if (!parentId) continue;
+    const children = replyChildrenById.get(parentId);
+    if (children) {
+      children.push(message);
+    } else {
+      replyChildrenById.set(parentId, [message]);
+    }
+  }
 
   const resolveSenderLabel = (message: MessageResponse | undefined) => {
     if (!message) return "Message";
@@ -185,14 +200,65 @@ export default function ChannelView() {
     return depth;
   };
 
+  const getDescendantReplyCount = (messageId: string): number => {
+    let count = 0;
+    const visited = new Set<string>();
+    const stack = [...(replyChildrenById.get(messageId) ?? [])];
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current || visited.has(current.id)) continue;
+      visited.add(current.id);
+      count += 1;
+      const children = replyChildrenById.get(current.id);
+      if (children && children.length > 0) {
+        stack.push(...children);
+      }
+    }
+    return count;
+  };
+
+  const isHiddenByCollapsedAncestor = (message: MessageResponse): boolean => {
+    let parentId = message.reply_to_message_id ?? null;
+    const visited = new Set<string>();
+
+    while (parentId && !visited.has(parentId)) {
+      if (collapsedReplyRoots.has(parentId)) return true;
+      visited.add(parentId);
+      const parent = messageById.get(parentId);
+      if (!parent) break;
+      parentId = parent.reply_to_message_id ?? null;
+    }
+    return false;
+  };
+
   const jumpToMessage = (messageId: string | null | undefined) => {
     if (!messageId) return;
+    setCollapsedReplyRoots((current) => {
+      if (current.size === 0) return current;
+      const next = new Set(current);
+      let changed = false;
+      let cursorId: string | null = messageId;
+      const visited = new Set<string>();
+      while (cursorId && !visited.has(cursorId)) {
+        visited.add(cursorId);
+        const message = messageById.get(cursorId);
+        const parentId = message?.reply_to_message_id ?? null;
+        if (!parentId) break;
+        if (next.delete(parentId)) {
+          changed = true;
+        }
+        cursorId = parentId;
+      }
+      return changed ? next : current;
+    });
     const node = messageRefs.current[messageId];
     if (!node) return;
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   const activeReplyTarget = replyingTo ? messageById.get(replyingTo.id) ?? replyingTo : null;
+  const visibleMessages = messages.filter((message) => !isHiddenByCollapsedAncestor(message));
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background relative z-0">
@@ -272,13 +338,16 @@ export default function ChannelView() {
                 <p className="text-muted-foreground text-sm">This is the start of the channel history.</p>
               </div>
             ) : (
-              messages.map((msg, i) => {
+              visibleMessages.map((msg, i) => {
                 const isMe = msg.sender_user_id === user?.id;
-                const prevMsg = messages[i - 1];
+                const prevMsg = visibleMessages[i - 1];
                 const showHeader = !prevMsg || prevMsg.sender_user_id !== msg.sender_user_id || new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() > 300000;
                 const repliedMessage = msg.reply_to_message_id ? messageById.get(msg.reply_to_message_id) : undefined;
                 const replyDepth = Math.min(getReplyDepth(msg), MAX_REPLY_INDENT_DEPTH);
                 const replyIndent = replyDepth > 0 ? { marginLeft: `${replyDepth * 20}px` } : undefined;
+                const nestedReplyCount = getDescendantReplyCount(msg.id);
+                const canCollapseReplies = nestedReplyCount > 0;
+                const isRepliesCollapsed = collapsedReplyRoots.has(msg.id);
 
                 return (
                   <div
@@ -299,6 +368,28 @@ export default function ChannelView() {
                     )}
                     
                     <div className="flex-1 min-w-0">
+                      {canCollapseReplies && (
+                        <button
+                          type="button"
+                          className="mb-1 inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                          onClick={() =>
+                            setCollapsedReplyRoots((current) => {
+                              const next = new Set(current);
+                              if (next.has(msg.id)) {
+                                next.delete(msg.id);
+                              } else {
+                                next.add(msg.id);
+                              }
+                              return next;
+                            })
+                          }
+                          aria-expanded={!isRepliesCollapsed}
+                          aria-label={`${isRepliesCollapsed ? "Show" : "Hide"} replies for message #${msg.seq_id}`}
+                        >
+                          {isRepliesCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          <span>{isRepliesCollapsed ? "Show" : "Hide"} {nestedReplyCount} repl{nestedReplyCount === 1 ? "y" : "ies"}</span>
+                        </button>
+                      )}
                       {showHeader && (
                         <div className="flex items-baseline gap-2 mb-1">
                           <span className="font-semibold text-foreground text-sm">
@@ -334,7 +425,7 @@ export default function ChannelView() {
                           <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground">
                             <SmilePlus className="w-4 h-4" />
                           </Button>
-                          {canCompose && !msg.deleted_at && (
+                          {(canCompose || canReplyAsMember) && !msg.deleted_at && (
                             <Button
                               size="icon"
                               variant="ghost"
@@ -363,7 +454,7 @@ export default function ChannelView() {
       </div>
 
       {/* Compose Box */}
-      {canCompose && (
+      {(canCompose || (canReplyAsMember && !!activeReplyTarget)) && (
         <div className="p-4 bg-background border-t border-border flex-shrink-0">
           <div className="max-w-4xl mx-auto bg-secondary rounded-2xl border border-border/50 shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all p-2 relative">
             {activeReplyTarget && (
@@ -398,7 +489,7 @@ export default function ChannelView() {
                 value={content}
                 onChange={e => setContent(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Message ${channel.name}...`}
+                placeholder={canCompose ? `Message ${channel.name}...` : "Write a reply..."}
                 className="flex-1 bg-transparent border-none focus:ring-0 resize-none max-h-48 min-h-[44px] py-3 text-sm text-foreground placeholder:text-muted-foreground"
                 rows={1}
               />
@@ -407,7 +498,7 @@ export default function ChannelView() {
                 size="icon" 
                 className={`h-10 w-10 rounded-xl flex-shrink-0 mb-1 transition-all ${content.trim() ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:scale-105' : 'bg-muted text-muted-foreground'}`}
                 onClick={handleSend}
-                disabled={!content.trim() || sendMessage.isPending}
+                disabled={!content.trim() || sendMessage.isPending || (canReplyAsMember && !activeReplyTarget)}
               >
                 <Send className="w-4 h-4 translate-x-0.5 -translate-y-0.5" />
               </Button>

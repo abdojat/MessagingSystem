@@ -59,7 +59,10 @@ class MessageService:
             raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": sender_id})
         role = membership.role if membership else None
-        if not can_publish(role):
+        is_member_reply = role == MembershipRole.member and (
+            req.reply_to_message_id is not None or req.reply_to_seq_id is not None
+        )
+        if not can_publish(role) and not is_member_reply:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         if req.client_msg_id is not None:
@@ -288,6 +291,8 @@ class MessageService:
                 Message.channel_id == channel_id,
                 Message.deleted_at.is_(None),
                 Message.seq_id > seen_seq,
+                Message.reply_to_message_id.is_(None),
+                Message.reply_to_seq_id.is_(None),
             )
         )
         state.unread_count = int(unread_rows.scalar_one() or 0)
