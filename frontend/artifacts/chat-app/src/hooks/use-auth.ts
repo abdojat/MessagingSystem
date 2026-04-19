@@ -113,10 +113,11 @@ export function useLogout() {
   });
 }
 
-export function useSessions() {
+export function useSessions(enabled = true) {
   return useQuery({
     queryKey: ['/auth/sessions'],
-    queryFn: () => apiClient<{items: SessionResponse[]}>('/auth/sessions').then(res => res.items)
+    queryFn: () => apiClient<{items: SessionResponse[]}>('/auth/sessions').then(res => res.items),
+    enabled,
   });
 }
 
