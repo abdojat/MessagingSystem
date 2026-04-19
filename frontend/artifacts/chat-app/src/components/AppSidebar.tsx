@@ -269,11 +269,6 @@ export function AppSidebar() {
                 <div className="text-xs text-muted-foreground truncate">@{user?.username}</div>
               </div>
             </Link>
-            <Link href="/settings/sessions">
-              <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-sidebar-foreground">
-                <Settings className="w-4 h-4" />
-              </Button>
-            </Link>
             <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => logout.mutate()}>
               <LogOut className="w-4 h-4" />
             </Button>

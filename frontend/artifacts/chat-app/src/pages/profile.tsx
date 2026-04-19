@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import {
@@ -26,6 +26,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Textarea } from "../components/ui/textarea";
 import { apiClient } from "../lib/apiClient";
+import { getApiBaseUrl } from "../lib/runtimeConfig";
 import { useAuthStore } from "../store/authStore";
 import type { MeResponse, UpdateMeRequest } from "../types/api";
 
@@ -39,8 +40,20 @@ type ProfileChecklistItem = {
 type ProfileFormState = {
   display_name: string;
   email: string;
-  avatar_url: string;
   bio: string;
+};
+
+type UploadCreateResponse = {
+  file_id: string;
+  upload_url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  public_url?: string | null;
+};
+
+type UploadContentResponse = {
+  file_id: string;
+  public_url: string;
 };
 
 function normalizeFormValue(value: string): string | null {
@@ -198,13 +211,14 @@ export default function ProfilePage() {
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitializing = useAuthStore((state) => state.isInitializing);
+  const accessToken = useAuthStore((state) => state.accessToken);
   const updateUser = useAuthStore((state) => state.updateUser);
   const { data: sessions = [], isLoading: isSessionsLoading } = useSessions(isAuthenticated);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [formState, setFormState] = useState<ProfileFormState>({
     display_name: user?.display_name ?? "",
     email: user?.email ?? "",
-    avatar_url: user?.avatar_url ?? "",
     bio: user?.bio ?? "",
   });
 
@@ -213,10 +227,13 @@ export default function ProfilePage() {
     setFormState({
       display_name: user.display_name ?? "",
       email: user.email ?? "",
-      avatar_url: user.avatar_url ?? "",
       bio: user.bio ?? "",
     });
-  }, [user?.id, user?.updated_at, user?.display_name, user?.email, user?.avatar_url, user?.bio]);
+  }, [user?.id, user?.updated_at, user?.display_name, user?.email, user?.bio]);
+
+  useEffect(() => {
+    setAvatarFile(null);
+  }, [user?.avatar_url, user?.updated_at]);
 
   const refreshProfile = useMutation({
     mutationFn: () => apiClient<MeResponse>("/me"),
@@ -241,7 +258,6 @@ export default function ProfilePage() {
     const payload: UpdateMeRequest = {};
     const nextDisplayName = normalizeFormValue(formState.display_name);
     const nextEmail = normalizeFormValue(formState.email);
-    const nextAvatarUrl = normalizeFormValue(formState.avatar_url);
     const nextBio = normalizeFormValue(formState.bio);
 
     if ((currentUser.display_name?.trim() || null) !== nextDisplayName) {
@@ -249,9 +265,6 @@ export default function ProfilePage() {
     }
     if ((currentUser.email?.trim() || null) !== nextEmail) {
       payload.email = nextEmail;
-    }
-    if ((currentUser.avatar_url?.trim() || null) !== nextAvatarUrl) {
-      payload.avatar_url = nextAvatarUrl;
     }
     if ((currentUser.bio?.trim() || null) !== nextBio) {
       payload.bio = nextBio;
@@ -283,6 +296,64 @@ export default function ProfilePage() {
     },
   });
 
+  const uploadAvatar = useMutation({
+    mutationFn: async (file: File): Promise<string> => {
+      if (!accessToken) {
+        throw new Error("You need to be signed in before uploading a profile image.");
+      }
+
+      const created = await apiClient<UploadCreateResponse>("/uploads", {
+        method: "POST",
+        body: JSON.stringify({
+          filename: file.name,
+          content_type: file.type || "application/octet-stream",
+          size_bytes: file.size,
+        }),
+      });
+
+      const apiBaseUrl = getApiBaseUrl();
+      const uploadUrl = /^https?:\/\//i.test(created.upload_url)
+        ? created.upload_url
+        : /^https?:\/\//i.test(apiBaseUrl)
+          ? `${new URL(apiBaseUrl).origin}${created.upload_url.startsWith("/") ? created.upload_url : `/${created.upload_url}`}`
+          : created.upload_url;
+
+      const uploadHeaders = new Headers(created.headers || {});
+      uploadHeaders.set("Authorization", `Bearer ${accessToken}`);
+      if (!uploadHeaders.has("Content-Type")) {
+        uploadHeaders.set("Content-Type", file.type || "application/octet-stream");
+      }
+
+      const putResponse = await fetch(uploadUrl, {
+        method: created.method || "PUT",
+        headers: uploadHeaders,
+        body: file,
+      });
+
+      if (!putResponse.ok) {
+        let message = "Could not upload avatar image.";
+        try {
+          const error = (await putResponse.json()) as { detail?: { message?: string } | string };
+          if (typeof error.detail === "string") {
+            message = error.detail;
+          } else if (error.detail?.message) {
+            message = error.detail.message;
+          }
+        } catch {
+          // Keep default message.
+        }
+        throw new Error(message);
+      }
+
+      const uploaded = (await putResponse.json()) as UploadContentResponse;
+      const nextAvatarUrl = normalizeFormValue(uploaded.public_url || created.public_url || "");
+      if (!nextAvatarUrl) {
+        throw new Error("Upload succeeded but no avatar URL was returned.");
+      }
+      return nextAvatarUrl;
+    },
+  });
+
   if (isInitializing) {
     return <ProfileSkeleton />;
   }
@@ -292,7 +363,17 @@ export default function ProfilePage() {
   }
 
   const updatePayload = buildUpdatePayload(user);
-  const hasProfileChanges = Object.keys(updatePayload).length > 0;
+  const hasProfileChanges = Object.keys(updatePayload).length > 0 || Boolean(avatarFile);
+
+  const avatarPreviewUrl = useMemo(() => {
+    if (avatarFile) return URL.createObjectURL(avatarFile);
+    return user.avatar_url || undefined;
+  }, [avatarFile, user.avatar_url]);
+
+  useEffect(() => {
+    if (!avatarFile || !avatarPreviewUrl) return;
+    return () => URL.revokeObjectURL(avatarPreviewUrl);
+  }, [avatarFile, avatarPreviewUrl]);
 
   const displayName = user.display_name?.trim() || user.username;
   const initials =
@@ -410,14 +491,27 @@ export default function ProfilePage() {
     setFormState({
       display_name: user.display_name ?? "",
       email: user.email ?? "",
-      avatar_url: user.avatar_url ?? "",
       bio: user.bio ?? "",
     });
+    setAvatarFile(null);
   };
 
-  const handleSaveProfile = (event: FormEvent<HTMLFormElement>) => {
+  const handleSaveProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const payload = buildUpdatePayload(user);
+    if (avatarFile) {
+      try {
+        payload.avatar_url = await uploadAvatar.mutateAsync(avatarFile);
+      } catch (error) {
+        toast({
+          title: "Avatar upload failed",
+          description: getErrorMessage(error, "We couldn't upload your profile image."),
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     if (!Object.keys(payload).length) {
       toast({
         title: "No changes to save",
@@ -436,7 +530,7 @@ export default function ProfilePage() {
             <Link href="/app" className="text-primary text-sm font-medium hover:underline">&larr; Back to App</Link>
             <h1 className="mt-2 text-3xl font-bold tracking-tight">Profile</h1>
             <p className="mt-1 text-muted-foreground">
-              Review your account details, monitor profile health, and run quick profile actions.
+              Review your account details, monitor profile health.
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               {lastSyncedAt
@@ -451,7 +545,7 @@ export default function ProfilePage() {
             <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-center gap-4">
                 <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
-                  <AvatarImage src={user.avatar_url || undefined} />
+                  <AvatarImage src={avatarPreviewUrl} />
                   <AvatarFallback className="text-2xl font-bold">{initials}</AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
@@ -526,7 +620,6 @@ export default function ProfilePage() {
               <TabsList className="mb-4 w-full justify-start overflow-x-auto">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="security">Security</TabsTrigger>
-                <TabsTrigger value="actions">Quick Actions</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview" className="mt-0">
@@ -661,17 +754,21 @@ export default function ProfilePage() {
                         />
                       </div>
                       <div>
-                        <label htmlFor="avatar-url" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                          Avatar URL
+                        <label htmlFor="avatar-file" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                          Profile picture
                         </label>
                         <Input
-                          id="avatar-url"
-                          type="url"
-                          value={formState.avatar_url}
-                          onChange={(event) => handleFormChange("avatar_url", event.target.value)}
-                          placeholder="https://example.com/avatar.png"
-                          maxLength={2048}
+                          id="avatar-file"
+                          type="file"
+                          accept="image/*"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0] ?? null;
+                            setAvatarFile(file);
+                          }}
                         />
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {avatarFile ? `Selected: ${avatarFile.name}` : "Upload an image to use as your avatar."}
+                        </p>
                       </div>
                       <div>
                         <label htmlFor="bio" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
@@ -687,14 +784,14 @@ export default function ProfilePage() {
                         />
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Button type="submit" disabled={updateProfile.isPending || !hasProfileChanges}>
-                          {updateProfile.isPending ? "Saving..." : "Save Changes"}
+                        <Button type="submit" disabled={updateProfile.isPending || uploadAvatar.isPending || !hasProfileChanges}>
+                          {updateProfile.isPending || uploadAvatar.isPending ? "Saving..." : "Save Changes"}
                         </Button>
                         <Button
                           type="button"
                           variant="outline"
                           onClick={handleResetForm}
-                          disabled={updateProfile.isPending || !hasProfileChanges}
+                          disabled={updateProfile.isPending || uploadAvatar.isPending || !hasProfileChanges}
                         >
                           Reset
                         </Button>
@@ -702,43 +799,6 @@ export default function ProfilePage() {
                     </form>
                   </Card>
                 </div>
-              </TabsContent>
-
-              <TabsContent value="actions" className="mt-0">
-                <Card className="rounded-2xl p-5">
-                  <h3 className="text-lg font-semibold">Quick profile actions</h3>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    These shortcuts speed up support workflows and identity sharing across the app.
-                  </p>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <Button variant="outline" onClick={() => void handleCopy("User ID", user.id)}>
-                      <Copy className="mr-2 h-4 w-4" />
-                      Copy User ID
-                    </Button>
-                    <Button variant="outline" onClick={() => void handleCopy("Username", user.username)}>
-                      <Copy className="mr-2 h-4 w-4" />
-                      Copy Username
-                    </Button>
-                    <Button variant="outline" onClick={() => void handleCopy("Email", user.email)}>
-                      <Copy className="mr-2 h-4 w-4" />
-                      Copy Email
-                    </Button>
-                    <Button variant="outline" onClick={handleDownloadProfile}>
-                      <Download className="mr-2 h-4 w-4" />
-                      Download Snapshot
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => refreshProfile.mutate()}
-                      disabled={refreshProfile.isPending}
-                      className="sm:col-span-2"
-                    >
-                      <RefreshCcw className={`mr-2 h-4 w-4 ${refreshProfile.isPending ? "animate-spin" : ""}`} />
-                      {refreshProfile.isPending ? "Refreshing..." : "Refresh from Server"}
-                    </Button>
-                  </div>
-                </Card>
               </TabsContent>
             </Tabs>
           </div>
