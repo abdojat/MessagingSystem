@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useChannel, useJoinChannel, useLeaveChannel } from "@/hooks/use-channels";
 import { useAuthStore } from "@/store/authStore";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
+import { resolveApiMediaUrl } from "@/lib/mediaUrl";
 
 function formatDateTime(value?: string | null) {
   if (!value) return "Not available";
@@ -128,6 +129,7 @@ export default function ChannelDetailsPage() {
 
   const isMember = ["owner", "admin", "member"].includes(channel.my_role || "");
   const canLeave = isMember && channel.my_role !== "owner";
+  const channelAvatarUrl = resolveApiMediaUrl(channel.avatar_url);
 
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
@@ -172,8 +174,8 @@ export default function ChannelDetailsPage() {
             <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-center gap-4">
                 <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10 text-primary">
-                  {channel.avatar_url ? (
-                    <img src={channel.avatar_url} alt={channel.name} className="h-full w-full rounded-3xl object-cover" />
+                  {channelAvatarUrl ? (
+                    <img src={channelAvatarUrl} alt={channel.name} className="h-full w-full rounded-3xl object-cover" />
                   ) : (
                     <Hash className="h-10 w-10" />
                   )}

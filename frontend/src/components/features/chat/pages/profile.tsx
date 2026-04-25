@@ -33,6 +33,7 @@ import { getApiBaseUrl } from "@/services/api/runtime";
 import { useAuthStore } from "@/store/authStore";
 import type { MeResponse, UpdateMeRequest } from "@/types/api";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
+import { resolveApiMediaUrl } from "@/lib/mediaUrl";
 
 type ProfileChecklistItem = {
   id: string;
@@ -377,7 +378,7 @@ export default function ProfilePage() {
 
   const avatarPreviewUrl = useMemo(() => {
     if (avatarFile) return URL.createObjectURL(avatarFile);
-    return user.avatar_url || undefined;
+    return resolveApiMediaUrl(user.avatar_url);
   }, [avatarFile, user.avatar_url]);
 
   useEffect(() => {

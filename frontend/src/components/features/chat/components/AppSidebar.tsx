@@ -15,6 +15,7 @@ import { CreateChannelDialog } from "./CreateChannelDialog";
 import { ChannelResponse } from "@/types/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
+import { resolveApiMediaUrl } from "@/lib/mediaUrl";
 
 function getChannelActivityAt(channel: ChannelResponse) {
   const timestamp = channel.last_message_at ?? channel.created_at ?? "";
@@ -42,6 +43,8 @@ function ChannelListItem({
   href: string;
   isActive: boolean;
 }) {
+  const channelAvatarUrl = resolveApiMediaUrl(channel.avatar_url);
+
   return (
     <Link
       href={href}
@@ -58,8 +61,8 @@ function ChannelListItem({
             : "bg-sidebar-accent-foreground/10 text-sidebar-foreground/60 group-hover:text-sidebar-foreground"
         }`}
       >
-        {channel.avatar_url ? (
-          <img src={channel.avatar_url} alt={channel.name} className="w-full h-full rounded-lg object-cover" />
+        {channelAvatarUrl ? (
+          <img src={channelAvatarUrl} alt={channel.name} className="w-full h-full rounded-lg object-cover" />
         ) : (
           <Hash className="w-4 h-4" />
         )}
@@ -139,6 +142,7 @@ export function AppSidebar() {
   const localePath = useLocalePath();
   const logout = useLogout();
   const user = useAuthStore(s => s.user);
+  const userAvatarUrl = resolveApiMediaUrl(user?.avatar_url);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isMyChannelsOpen, setIsMyChannelsOpen] = useState(true);
@@ -266,7 +270,7 @@ export function AppSidebar() {
           <div className="flex items-center gap-3">
             <Link href={localePath("/app/profile")} className="flex min-w-0 flex-1 items-center gap-3 rounded-xl transition-colors hover:bg-sidebar-accent/70 px-2 py-1.5 -mx-2">
               <Avatar className="w-10 h-10 border-2 border-primary/20">
-                <AvatarImage src={user?.avatar_url || undefined} />
+                <AvatarImage src={userAvatarUrl} />
                 <AvatarFallback className="bg-sidebar-accent text-sidebar-foreground">{user?.username?.[0]?.toUpperCase() || "U"}</AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">

@@ -12,6 +12,7 @@ import { useAuthStore } from "@/store/authStore";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { MessageResponse } from "@/types/api";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
+import { resolveApiMediaUrl } from "@/lib/mediaUrl";
 
 function ChannelViewSkeleton() {
   return (
@@ -149,6 +150,9 @@ export default function ChannelView() {
   }
   if (!channel) return <div className="flex-1 flex items-center justify-center text-muted-foreground">Channel not found</div>;
 
+  const channelAvatarUrl = resolveApiMediaUrl(channel.avatar_url);
+  const userAvatarUrl = resolveApiMediaUrl(user?.avatar_url);
+
   const handleSend = (e?: React.FormEvent) => {
     e?.preventDefault();
     const currentReplyTarget = replyingTo ? messages.find((item) => item.id === replyingTo.id) ?? replyingTo : null;
@@ -271,7 +275,7 @@ export default function ChannelView() {
       <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center justify-between px-6 flex-shrink-0 z-10">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-            {channel.avatar_url ? <img src={channel.avatar_url} className="w-full h-full rounded-xl object-cover" /> : <Hash className="w-5 h-5" />}
+            {channelAvatarUrl ? <img src={channelAvatarUrl} className="w-full h-full rounded-xl object-cover" /> : <Hash className="w-5 h-5" />}
           </div>
           <div>
             <h2 className="font-bold text-foreground leading-tight">{channel.name}</h2>
@@ -365,7 +369,7 @@ export default function ChannelView() {
                   >
                     {showHeader ? (
                       <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
-                        <AvatarImage src={isMe ? user?.avatar_url || undefined : undefined} />
+                        <AvatarImage src={isMe ? userAvatarUrl : undefined} />
                         <AvatarFallback>{isMe ? user?.username?.[0]?.toUpperCase() : '#'}</AvatarFallback>
                       </Avatar>
                     ) : (

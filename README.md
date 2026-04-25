@@ -8,6 +8,11 @@ cp .env.example .env
 docker compose up --build
 ```
 
+Data persistence:
+- Uploaded files are stored in Docker volume `uploads_data` (mounted at `/data/uploads` in `backend`).
+- They persist across `docker compose stop/start` and `docker compose down/up`.
+- `docker compose down -v` removes volumes (`pg_data`, `rabbit_data`, `uploads_data`) and deletes stored files.
+
 API docs:
 - `http://localhost:8000/docs`
 - Versioned API prefix: `/v1`
@@ -34,7 +39,7 @@ docker compose run --rm backend sh -lc "alembic upgrade head"
 - `API_V1_PREFIX` (default `/v1`)
 - `OUTBOX_POLL_INTERVAL`
 - `WORKER_ONLINE_SCAN_INTERVAL`
-- Frontend runtime env via compose: `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000/v1`)
+- Frontend API base URL: `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000/v1`, applied at frontend image build time)
 
 ## Key Endpoints (`/v1`)
 
