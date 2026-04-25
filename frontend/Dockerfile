@@ -2,14 +2,18 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 RUN corepack enable
+ENV PNPM_HOME=/pnpm
+ENV PATH=${PNPM_HOME}:${PATH}
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.base.json .npmrc ./
-COPY artifacts/chat-app/package.json artifacts/chat-app/vite.config.ts artifacts/chat-app/tsconfig.json artifacts/chat-app/index.html ./artifacts/chat-app/
-COPY lib/api-client-react/package.json lib/api-client-react/tsconfig.json ./lib/api-client-react/
-COPY lib/api-zod/package.json lib/api-zod/tsconfig.json ./lib/api-zod/
-COPY lib/api-spec/package.json lib/api-spec/orval.config.ts lib/api-spec/openapi.yaml ./lib/api-spec/
+COPY package.json ./
 
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm install --no-frozen-lockfile \
+      --fetch-retries=10 \
+      --fetch-retry-factor=2 \
+      --fetch-retry-mintimeout=10000 \
+      --fetch-retry-maxtimeout=120000
 
 COPY . .
 
@@ -20,10 +24,17 @@ ENV BASE_PATH=/
 
 RUN pnpm build
 
-FROM nginx:1.27-alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/artifacts/chat-app/dist/public /usr/share/nginx/html
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
 
 EXPOSE 3000
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "server.js"]
