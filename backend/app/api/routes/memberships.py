@@ -6,6 +6,8 @@ from app.api.deps import AMQPDep, CurrentUserDep, DBDep
 from app.core.errors import AppError, to_http_exception
 from app.db.models import MembershipRole
 from app.schemas.channels import (
+    AdminPermissionsUpdateRequest,
+    AdminPermissionsUpdateResponse,
     ChannelMembershipItem,
     ChannelMembershipListResponse,
     InviteListItem,
@@ -18,6 +20,7 @@ from app.schemas.channels import (
     MembershipActionResponse,
 )
 from app.services.channel_service import ChannelService
+from app.services.rbac import normalize_admin_permissions
 
 router = APIRouter(tags=["memberships"])
 
@@ -84,6 +87,7 @@ async def list_members(
                 approved_at=m.approved_at,
                 updated_at=m.updated_at,
                 invited_by_user_id=m.invited_by_user_id,
+                admin_permissions=normalize_admin_permissions(m.admin_permissions) if m.role == MembershipRole.admin else None,
             )
             for m, u in rows
         ],
@@ -128,6 +132,7 @@ async def list_pending_requests(
                 approved_at=m.approved_at,
                 updated_at=m.updated_at,
                 invited_by_user_id=m.invited_by_user_id,
+                admin_permissions=normalize_admin_permissions(m.admin_permissions) if m.role == MembershipRole.admin else None,
             )
             for m, u in rows
         ],
@@ -252,6 +257,26 @@ async def demote_member(channel_id: UUID, user_id: UUID, db: DBDep, user: Curren
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
+
+
+@router.patch("/channels/{channel_id}/members/{user_id}/permissions", response_model=AdminPermissionsUpdateResponse)
+async def update_admin_permissions(
+    channel_id: UUID,
+    user_id: UUID,
+    req: AdminPermissionsUpdateRequest,
+    db: DBDep,
+    user: CurrentUserDep,
+) -> AdminPermissionsUpdateResponse:
+    try:
+        membership = await ChannelService.update_admin_permissions(db, channel_id, user.id, user_id, req)
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
+    return AdminPermissionsUpdateResponse(
+        channel_id=membership.channel_id,
+        user_id=membership.user_id,
+        role=membership.role,
+        admin_permissions=normalize_admin_permissions(membership.admin_permissions),
+    )
 
 
 @router.delete("/channels/{channel_id}/members/{user_id}")

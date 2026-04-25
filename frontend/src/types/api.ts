@@ -45,6 +45,16 @@ export interface ChannelPermissions {
   can_delete_channel: boolean;
 }
 
+export interface AdminPermissions {
+  can_publish: boolean;
+  can_invite: boolean;
+  can_approve: boolean;
+  can_manage_members: boolean;
+  can_edit_channel: boolean;
+}
+
+export type MembershipRole = "owner" | "admin" | "member" | "pending" | "none";
+
 export interface AttachmentItem {
   file_id: string;
   filename?: string;
@@ -77,6 +87,7 @@ export interface MessageResponse {
 }
 
 export interface ChannelResponse {
+  channel_slug?: string;
   id: string;
   owner_user_id: string;
   name: string;
@@ -90,11 +101,52 @@ export interface ChannelResponse {
   my_last_seen_seq_id?: number | null;
   last_message?: MessageResponse | null;
   last_message_at?: string | null;
-  my_role: "owner" | "admin" | "member" | "pending" | "none";
+  my_role: MembershipRole;
   permissions: ChannelPermissions;
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
+}
+
+export interface ChannelPatchRequest {
+  name?: string;
+  description?: string | null;
+  avatar_url?: string | null;
+  visibility?: "public" | "private";
+  join_mode?: "open" | "approval_required" | "invite_only";
+}
+
+export interface ChannelMembershipItem {
+  user_id: string;
+  username: string;
+  email?: string | null;
+  role: MembershipRole;
+  created_at: string;
+  approved_at?: string | null;
+  updated_at?: string | null;
+  invited_by_user_id?: string | null;
+  admin_permissions?: AdminPermissions | null;
+}
+
+export interface AdminPermissionsUpdateRequest {
+  can_publish?: boolean;
+  can_invite?: boolean;
+  can_approve?: boolean;
+  can_manage_members?: boolean;
+  can_edit_channel?: boolean;
+}
+
+export interface AdminPermissionsUpdateResponse {
+  channel_id: string;
+  user_id: string;
+  role: MembershipRole;
+  admin_permissions: AdminPermissions;
+}
+
+export interface ChannelMembershipListResponse {
+  items: ChannelMembershipItem[];
+  next_cursor?: string | null;
+  has_more: boolean;
 }
 
 export interface SessionResponse {

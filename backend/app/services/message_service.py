@@ -62,7 +62,7 @@ class MessageService:
         is_member_reply = role == MembershipRole.member and (
             req.reply_to_message_id is not None or req.reply_to_seq_id is not None
         )
-        if not can_publish(role) and not is_member_reply:
+        if not can_publish(role, membership.admin_permissions if membership else None) and not is_member_reply:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         if req.client_msg_id is not None:

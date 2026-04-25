@@ -263,7 +263,7 @@ paths:
     patch:
       tags: [channels]
       security: [ { bearerAuth: [] } ]
-      summary: Patch channel (owner only)
+      summary: Patch channel (owner or admin with can_edit_channel)
       parameters: [ { $ref: '#/components/parameters/ChannelId' } ]
       requestBody: { required: true }
       responses:

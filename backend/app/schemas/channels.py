@@ -63,6 +63,14 @@ class ChannelPermissions(BaseModel):
     can_delete_channel: bool
 
 
+class AdminPermissions(BaseModel):
+    can_publish: bool
+    can_invite: bool
+    can_approve: bool
+    can_manage_members: bool
+    can_edit_channel: bool
+
+
 class ChannelBasePayload(BaseModel):
     id: UUID
     owner_user_id: UUID
@@ -195,6 +203,28 @@ class ChannelMembershipItem(BaseModel):
     approved_at: datetime | None
     updated_at: datetime | None = None
     invited_by_user_id: UUID | None = None
+    admin_permissions: AdminPermissions | None = None
+
+
+class AdminPermissionsUpdateRequest(BaseModel):
+    can_publish: bool | None = None
+    can_invite: bool | None = None
+    can_approve: bool | None = None
+    can_manage_members: bool | None = None
+    can_edit_channel: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty(self) -> "AdminPermissionsUpdateRequest":
+        if len(self.model_fields_set) == 0:
+            raise ValueError("provide at least one permission field")
+        return self
+
+
+class AdminPermissionsUpdateResponse(BaseModel):
+    channel_id: UUID
+    user_id: UUID
+    role: MembershipRole
+    admin_permissions: AdminPermissions
 
 
 class ChannelMembershipListResponse(BaseModel):

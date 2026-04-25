@@ -1,11 +1,23 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api/client';
-import { ChannelResponse } from '../types/api';
+import {
+  AdminPermissionsUpdateRequest,
+  AdminPermissionsUpdateResponse,
+  ChannelMembershipListResponse,
+  ChannelPatchRequest,
+  ChannelResponse,
+} from '../types/api';
 
 type ChannelScope = 'my' | 'discover';
 
 interface UseChannelsOptions {
   scope?: ChannelScope;
+  q?: string;
+  enabled?: boolean;
+}
+
+interface UseChannelMembersOptions {
+  role?: 'owner' | 'admin' | 'member' | 'pending';
   q?: string;
   enabled?: boolean;
 }
@@ -81,6 +93,91 @@ export function useLeaveChannel() {
       queryClient.invalidateQueries({ queryKey: ['/channels'] });
       queryClient.invalidateQueries({ queryKey: ['/channels', channelId] });
       queryClient.removeQueries({ queryKey: ['/channels', channelId, 'messages'] });
+    }
+  });
+}
+
+export function useUpdateChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ channelId, data }: { channelId: string; data: ChannelPatchRequest }) =>
+      apiClient<ChannelResponse>(`/channels/${channelId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['/channels'] });
+      queryClient.invalidateQueries({ queryKey: ['/channels', vars.channelId] });
+    }
+  });
+}
+
+export function useChannelMembers(channelId: string, options: UseChannelMembersOptions = {}) {
+  const role = options.role;
+  const q = options.q?.trim() ?? '';
+  const enabled = options.enabled ?? true;
+
+  return useQuery({
+    queryKey: ['/channels', channelId, 'members', { role: role ?? null, q }],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (role) params.set('role', role);
+      if (q) params.set('q', q);
+      return apiClient<ChannelMembershipListResponse>(`/channels/${channelId}/members?${params.toString()}`);
+    },
+    enabled: !!channelId && enabled,
+  });
+}
+
+function useMemberMutation(endpointBuilder: (channelId: string, userId: string) => string, method: 'POST' | 'DELETE' = 'POST') {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ channelId, userId }: { channelId: string; userId: string }) =>
+      apiClient(endpointBuilder(channelId, userId), { method }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['/channels'] });
+      queryClient.invalidateQueries({ queryKey: ['/channels', vars.channelId] });
+      queryClient.invalidateQueries({ queryKey: ['/channels', vars.channelId, 'members'] });
+    }
+  });
+}
+
+export function useApproveMember() {
+  return useMemberMutation((channelId, userId) => `/channels/${channelId}/members/${userId}/approve`);
+}
+
+export function usePromoteMember() {
+  return useMemberMutation((channelId, userId) => `/channels/${channelId}/members/${userId}/promote`);
+}
+
+export function useDemoteMember() {
+  return useMemberMutation((channelId, userId) => `/channels/${channelId}/members/${userId}/demote`);
+}
+
+export function useRemoveMember() {
+  return useMemberMutation((channelId, userId) => `/channels/${channelId}/members/${userId}`, 'DELETE');
+}
+
+export function useUpdateAdminPermissions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      channelId,
+      userId,
+      data,
+    }: {
+      channelId: string;
+      userId: string;
+      data: AdminPermissionsUpdateRequest;
+    }) =>
+      apiClient<AdminPermissionsUpdateResponse>(`/channels/${channelId}/members/${userId}/permissions`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['/channels'] });
+      queryClient.invalidateQueries({ queryKey: ['/channels', vars.channelId] });
+      queryClient.invalidateQueries({ queryKey: ['/channels', vars.channelId, 'members'] });
     }
   });
 }
