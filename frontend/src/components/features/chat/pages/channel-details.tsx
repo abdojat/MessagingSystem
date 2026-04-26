@@ -316,17 +316,14 @@ export default function ChannelDetailsPage() {
   const managedMembers = (membersQuery.data?.items ?? []).filter((item) => item.role !== "pending");
   const pendingMembers = (membersQuery.data?.items ?? []).filter((item) => item.role === "pending");
 
-  const hasEditChanges = useMemo(() => {
-    const trimmedName = editForm.name.trim();
-    const trimmedDescription = editForm.description.trim();
-    return (
-      trimmedName !== (channel.name ?? "") ||
-      trimmedDescription !== (channel.description ?? "") ||
-      Boolean(avatarFile) ||
-      editForm.visibility !== channel.visibility ||
-      editForm.joinMode !== channel.join_mode
-    );
-  }, [avatarFile, channel, editForm]);
+  const trimmedName = editForm.name.trim();
+  const trimmedDescription = editForm.description.trim();
+  const hasEditChanges =
+    trimmedName !== (channel.name ?? "") ||
+    trimmedDescription !== (channel.description ?? "") ||
+    Boolean(avatarFile) ||
+    editForm.visibility !== channel.visibility ||
+    editForm.joinMode !== channel.join_mode;
 
   function runMemberAction(
     key: string,
