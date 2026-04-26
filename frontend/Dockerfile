@@ -1,19 +1,14 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-RUN corepack enable
-ENV PNPM_HOME=/pnpm
-ENV PATH=${PNPM_HOME}:${PATH}
+COPY package.json package-lock.json ./
 
-COPY package.json ./
-
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
-    pnpm config set store-dir /pnpm/store && \
-    pnpm install --no-frozen-lockfile \
-      --fetch-retries=10 \
-      --fetch-retry-factor=2 \
-      --fetch-retry-mintimeout=10000 \
-      --fetch-retry-maxtimeout=120000
+RUN --mount=type=cache,id=npm-cache,target=/root/.npm \
+    npm config set fetch-retries 10 && \
+    npm config set fetch-retry-factor 2 && \
+    npm config set fetch-retry-mintimeout 10000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm ci --no-audit --no-fund
 
 COPY . .
 
@@ -22,7 +17,7 @@ ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
 ENV PORT=3000
 ENV BASE_PATH=/
 
-RUN pnpm build
+RUN npm run build
 
 FROM node:22-alpine AS runner
 WORKDIR /app

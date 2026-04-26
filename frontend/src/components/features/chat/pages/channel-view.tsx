@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useChannel, useJoinChannel } from "@/hooks/use-channels";
+import { useChannel, useChannelMembers, useJoinChannel } from "@/hooks/use-channels";
 import { useMarkSeen, useMessages, useSendMessage } from "@/hooks/use-messages";
 import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
@@ -98,6 +98,7 @@ export default function ChannelView() {
   const isMember = ['owner', 'admin', 'member'].includes(channel?.my_role || '');
   const canCompose = ['owner', 'admin'].includes(channel?.my_role || '');
   const canReplyAsMember = isMember && !canCompose;
+  const membersQuery = useChannelMembers(channel?.id || '', { enabled: isMember });
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -178,6 +179,7 @@ export default function ChannelView() {
 
   const messageById = new Map(messages.map((message) => [message.id, message]));
   const replyChildrenById = new Map<string, MessageResponse[]>();
+  const memberUsernameById = new Map((membersQuery.data?.items ?? []).map((member) => [member.user_id, member.username]));
   for (const message of messages) {
     const parentId = message.reply_to_message_id;
     if (!parentId) continue;
@@ -189,10 +191,15 @@ export default function ChannelView() {
     }
   }
 
+  const resolveSenderName = (senderUserId: string | undefined) => {
+    if (!senderUserId) return "Member";
+    if (senderUserId === user?.id) return user?.display_name || user?.username || "You";
+    return memberUsernameById.get(senderUserId) || `Member ${senderUserId.slice(0, 8)}`;
+  };
+
   const resolveSenderLabel = (message: MessageResponse | undefined) => {
     if (!message) return "Message";
-    if (message.sender_user_id === user?.id) return "You";
-    return `Member ${message.sender_user_id.slice(0, 8)}`;
+    return resolveSenderName(message.sender_user_id);
   };
 
   const getReplyDepth = (message: MessageResponse): number => {
@@ -370,7 +377,7 @@ export default function ChannelView() {
                     {showHeader ? (
                       <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
                         <AvatarImage src={isMe ? userAvatarUrl : undefined} />
-                        <AvatarFallback>{isMe ? user?.username?.[0]?.toUpperCase() : '#'}</AvatarFallback>
+                        <AvatarFallback>{resolveSenderName(msg.sender_user_id)?.[0]?.toUpperCase() || '#'}</AvatarFallback>
                       </Avatar>
                     ) : (
                       <div className="w-10 flex-shrink-0" />
@@ -402,7 +409,7 @@ export default function ChannelView() {
                       {showHeader && (
                         <div className="flex items-baseline gap-2 mb-1">
                           <span className="font-semibold text-foreground text-sm">
-                            {isMe ? (user?.display_name || user?.username || 'You') : `Member ${msg.sender_user_id.slice(0, 8)}`}
+                            {resolveSenderName(msg.sender_user_id)}
                           </span>
                           <span className="text-[11px] text-muted-foreground">{format(new Date(msg.created_at), 'h:mm a')}</span>
                         </div>

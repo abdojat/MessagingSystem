@@ -7,8 +7,9 @@ ENV PIP_DEFAULT_TIMEOUT=180 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
 
-COPY backend/pyproject.toml /app/pyproject.toml
-RUN pip install --no-cache-dir --retries 10 --timeout 180 .
+COPY backend/pyproject.toml /tmp/pyproject.toml
+RUN python -c "import pathlib, tomllib; data = tomllib.loads(pathlib.Path('/tmp/pyproject.toml').read_text(encoding='utf-8')); deps = data.get('project', {}).get('dependencies', []); pathlib.Path('/tmp/requirements.txt').write_text('\n'.join(deps) + '\n', encoding='utf-8')" && \
+    pip install --no-cache-dir --retries 10 --timeout 180 -r /tmp/requirements.txt
 
 COPY backend /app
 
