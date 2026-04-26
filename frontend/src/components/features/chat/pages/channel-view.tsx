@@ -3,16 +3,18 @@
 import { useParams, useRouter } from "next/navigation";
 import { useChannel, useChannelMembers, useJoinChannel } from "@/hooks/use-channels";
 import { useMarkSeen, useMessages, useSendMessage } from "@/hooks/use-messages";
-import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight, Copy, ArrowUpRight } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthStore } from "@/store/authStore";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/hooks/use-toast";
 import type { MessageResponse } from "@/types/api";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 function ChannelViewSkeleton() {
   return (
@@ -71,6 +73,31 @@ function getMessageSnippet(message: MessageResponse | undefined): string {
   return "Structured message";
 }
 
+async function copyToClipboard(value: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  if (typeof document === "undefined") {
+    throw new Error("Clipboard is not available in this environment.");
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "absolute";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("Copy action was blocked by the browser.");
+  }
+}
+
 export default function ChannelView() {
   const params = useParams<{ channelId?: string | string[] }>();
   const channelId = Array.isArray(params?.channelId) ? params.channelId[0] : params?.channelId;
@@ -92,12 +119,14 @@ export default function ChannelView() {
   const [collapsedReplyRoots, setCollapsedReplyRoots] = useState<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const lastMarkedSeenSeqRef = useRef<number | null>(null);
   const user = useAuthStore(s => s.user);
   const isMember = ['owner', 'admin', 'member'].includes(channel?.my_role || '');
   const canCompose = ['owner', 'admin'].includes(channel?.my_role || '');
   const canReplyAsMember = isMember && !canCompose;
+  const canUseComposer = canCompose || canReplyAsMember;
   const membersQuery = useChannelMembers(channel?.id || '', { enabled: isMember });
 
   useEffect(() => {
@@ -273,6 +302,68 @@ export default function ChannelView() {
     node.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
+  const toggleCollapsedReplies = (messageId: string) => {
+    setCollapsedReplyRoots((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
+    });
+  };
+
+  const focusComposer = () => {
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  const addEmojiToComposer = (emoji: string, message: MessageResponse) => {
+    if (!canUseComposer) {
+      toast({
+        title: "Cannot react right now",
+        description: "Join this channel to send a message or reply.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!canCompose && !replyingTo && !message.deleted_at) {
+      setReplyingTo(message);
+    }
+    setContent((previous) => `${previous}${previous ? " " : ""}${emoji}`);
+    focusComposer();
+  };
+
+  const copyMessageText = async (message: MessageResponse) => {
+    const text = (message.content_text || "").trim();
+    if (message.deleted_at || message.content_type !== "text" || !text) {
+      toast({
+        title: "Nothing to copy",
+        description: "Only text content can be copied from this message.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await copyToClipboard(text);
+      toast({
+        title: "Message copied",
+        description: "The message text is now in your clipboard.",
+      });
+    } catch (error) {
+      const description = error instanceof Error && error.message
+        ? error.message
+        : "Clipboard access was blocked by the browser.";
+      toast({
+        title: "Copy failed",
+        description,
+        variant: "destructive",
+      });
+    }
+  };
+
   const activeReplyTarget = replyingTo ? messageById.get(replyingTo.id) ?? replyingTo : null;
   const visibleMessages = messages.filter((message) => !isHiddenByCollapsedAncestor(message));
 
@@ -388,17 +479,7 @@ export default function ChannelView() {
                         <button
                           type="button"
                           className="mb-1 inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                          onClick={() =>
-                            setCollapsedReplyRoots((current) => {
-                              const next = new Set(current);
-                              if (next.has(msg.id)) {
-                                next.delete(msg.id);
-                              } else {
-                                next.add(msg.id);
-                              }
-                              return next;
-                            })
-                          }
+                          onClick={() => toggleCollapsedReplies(msg.id)}
                           aria-expanded={!isRepliesCollapsed}
                           aria-label={`${isRepliesCollapsed ? "Show" : "Hide"} replies for message #${msg.seq_id}`}
                         >
@@ -438,7 +519,13 @@ export default function ChannelView() {
                         
                         {/* Hover Actions */}
                         <div className="absolute -top-3 right-0 opacity-0 group-hover:opacity-100 transition-opacity bg-card border border-border rounded-lg shadow-lg flex items-center p-0.5 z-10 translate-x-2">
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => addEmojiToComposer("🙂", msg)}
+                            aria-label={`Add smile emoji for message #${msg.seq_id}`}
+                          >
                             <SmilePlus className="w-4 h-4" />
                           </Button>
                           {(canCompose || canReplyAsMember) && !msg.deleted_at && (
@@ -452,11 +539,49 @@ export default function ChannelView() {
                               <Reply className="w-4 h-4" />
                             </Button>
                           )}
-                          {isMe && (
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground">
-                              <MoreVertical className="w-4 h-4" />
-                            </Button>
-                          )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" aria-label={`Open options for message #${msg.seq_id}`}>
+                                <MoreVertical className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-52">
+                              {(canCompose || canReplyAsMember) && !msg.deleted_at && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setReplyingTo(msg);
+                                    focusComposer();
+                                  }}
+                                >
+                                  <Reply className="mr-2 h-4 w-4" />
+                                  Reply
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  void copyMessageText(msg);
+                                }}
+                                disabled={Boolean(msg.deleted_at) || msg.content_type !== "text" || !((msg.content_text || "").trim().length > 0)}
+                              >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy text
+                              </DropdownMenuItem>
+                              {msg.reply_to_message_id && (
+                                <DropdownMenuItem onClick={() => jumpToMessage(msg.reply_to_message_id)}>
+                                  <ArrowUpRight className="mr-2 h-4 w-4" />
+                                  Jump to replied message
+                                </DropdownMenuItem>
+                              )}
+                              {canCollapseReplies && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => toggleCollapsedReplies(msg.id)}>
+                                    {isRepliesCollapsed ? "Show replies" : "Hide replies"}
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </div>
                     </div>
@@ -502,6 +627,7 @@ export default function ChannelView() {
               </Button>
               
               <textarea
+                ref={composerRef}
                 value={content}
                 onChange={e => setContent(e.target.value)}
                 onKeyDown={handleKeyDown}
