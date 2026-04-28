@@ -10,7 +10,7 @@ from app.schemas.messages import MessageResponse
 
 class ChannelCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    channel_slug: str = Field(min_length=1, max_length=64)
+    channel_slug: str | None = Field(default=None, min_length=1, max_length=64)
     description: str | None = Field(default=None, max_length=1000)
     avatar_url: str | None = Field(default=None, max_length=2048)
     visibility: ChannelVisibility
@@ -18,7 +18,9 @@ class ChannelCreateRequest(BaseModel):
 
     @field_validator("channel_slug")
     @classmethod
-    def validate_channel_slug(cls, value: str) -> str:
+    def validate_channel_slug(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip().lower()
         if not normalized:
             raise ValueError("channel_slug is required")

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.core.encryption import decrypt_json_payload, decrypt_message, encrypt_json_payload, encrypt_message
 from app.core.utils import utcnow
 from app.db.models import (
     Channel,
@@ -29,7 +30,52 @@ from app.services.rbac import can_publish, can_read
 
 class MessageService:
     @staticmethod
+    def _decrypt_message_content(message: Message) -> tuple[str | None, dict | None]:
+        if message.content_type == ContentType.text:
+            if message.content_text is None:
+                return None, None
+            return decrypt_message(message.content_text), None
+        if message.content_type == ContentType.json:
+            return None, decrypt_json_payload(message.content_json)
+        raise AppError("unsupported content type", 500, code="DECRYPTION_FAILED")
+
+    @staticmethod
+    def _encrypt_payload(req: PublishMessageRequest | MessagePatchRequest) -> tuple[str | None, dict | None]:
+        if req.content_text is not None:
+            return encrypt_message(req.content_text), None
+        if req.content_json is not None:
+            return None, encrypt_json_payload(req.content_json)
+        raise AppError("message content is required", 400, code="VALIDATION_ERROR")
+
+    @staticmethod
     def _serialize_message(message: Message) -> dict:
+        is_deleted = message.deleted_at is not None
+        content_text = None
+        content_json = None
+        if not is_deleted:
+            content_text, content_json = MessageService._decrypt_message_content(message)
+        return {
+            "id": str(message.id),
+            "channel_id": str(message.channel_id),
+            "sender_user_id": str(message.sender_user_id),
+            "seq_id": int(message.seq_id),
+            "content_type": message.content_type.value,
+            "content_text": content_text,
+            "content_json": content_json,
+            "reply_to_message_id": str(message.reply_to_message_id) if message.reply_to_message_id else None,
+            "reply_to_seq_id": message.reply_to_seq_id,
+            "attachments": None if is_deleted else message.attachments,
+            "is_pinned": bool(message.is_pinned),
+            "client_msg_id": str(message.client_msg_id) if message.client_msg_id else None,
+            "created_at": message.created_at.isoformat() if message.created_at else utcnow().isoformat(),
+            "updated_at": message.updated_at.isoformat() if message.updated_at else None,
+            "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+            "deleted_at": message.deleted_at.isoformat() if message.deleted_at else None,
+            "reactions_summary": {"counts": {}, "my_reaction": []},
+        }
+
+    @staticmethod
+    def _serialize_message_for_outbox(message: Message) -> dict:
         is_deleted = message.deleted_at is not None
         return {
             "id": str(message.id),
@@ -88,14 +134,15 @@ class MessageService:
         seq_id = int(channel.last_seq_id)
         await db.flush()
 
+        encrypted_text, encrypted_json = MessageService._encrypt_payload(req)
         content_type = ContentType.text if req.content_text is not None else ContentType.json
         message = Message(
             channel_id=channel_id,
             sender_user_id=sender_id,
             seq_id=seq_id,
             content_type=content_type,
-            content_text=req.content_text,
-            content_json=req.content_json,
+            content_text=encrypted_text,
+            content_json=encrypted_json,
             reply_to_message_id=reply_to_message_id,
             reply_to_seq_id=reply_to_seq_id,
             attachments=attachments,
@@ -104,7 +151,7 @@ class MessageService:
         db.add(message)
         await db.flush()
 
-        payload = {"type": "message", **MessageService._serialize_message(message)}
+        payload = {"type": "message", **MessageService._serialize_message_for_outbox(message)}
         await enqueue_message_outbox(db, message.id, channel_id, payload)
         await log_event(
             db,
@@ -342,13 +389,16 @@ class MessageService:
         if message.sender_user_id != actor_user_id and role not in {MembershipRole.owner, MembershipRole.admin}:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
+        encrypted_text, encrypted_json = MessageService._encrypt_payload(req)
         message.content_type = ContentType.text if req.content_text is not None else ContentType.json
-        message.content_text = req.content_text
-        message.content_json = req.content_json
+        message.content_text = encrypted_text
+        message.content_json = encrypted_json
         message.edited_at = utcnow()
         message.updated_at = utcnow()
         await db.flush()
-        await enqueue_message_outbox(db, message.id, channel_id, {"type": "message_updated", **MessageService._serialize_message(message)})
+        await enqueue_message_outbox(
+            db, message.id, channel_id, {"type": "message_updated", **MessageService._serialize_message_for_outbox(message)}
+        )
         await db.commit()
         await db.refresh(message)
         return message
@@ -372,7 +422,9 @@ class MessageService:
             message.content_text = None
             message.content_json = None
             await db.flush()
-            await enqueue_message_outbox(db, message.id, channel_id, {"type": "message_updated", **MessageService._serialize_message(message)})
+            await enqueue_message_outbox(
+                db, message.id, channel_id, {"type": "message_updated", **MessageService._serialize_message_for_outbox(message)}
+            )
             await db.commit()
             await db.refresh(message)
         return message
@@ -480,7 +532,7 @@ class MessageService:
             db,
             message.id,
             channel_id,
-            {"type": "message_updated", **MessageService._serialize_message(message)},
+            {"type": "message_updated", **MessageService._serialize_message_for_outbox(message)},
         )
         await db.commit()
 
@@ -500,7 +552,7 @@ class MessageService:
                 db,
                 message.id,
                 channel_id,
-                {"type": "message_updated", **MessageService._serialize_message(message)},
+                {"type": "message_updated", **MessageService._serialize_message_for_outbox(message)},
             )
         await db.commit()
 

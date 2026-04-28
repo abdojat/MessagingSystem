@@ -1,5 +1,6 @@
 import uuid
 import base64
+import re
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -8,6 +9,7 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.encryption import decrypt_json_payload, decrypt_message
 from app.core.utils import make_invite_token, sha256_hex, utcnow
 from app.db.models import (
     Channel,
@@ -47,6 +49,35 @@ ROLE_WEIGHT = {
 
 
 class ChannelService:
+    @staticmethod
+    def _slugify(raw: str) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", "-", raw.strip().lower()).strip("-")
+        normalized = re.sub(r"-{2,}", "-", normalized)
+        return normalized[:64] or "channel"
+
+    @staticmethod
+    async def _next_available_slug(db: AsyncSession, base_slug: str) -> str:
+        base = base_slug[:64] or "channel"
+        candidate = base
+        suffix = 2
+        while True:
+            exists_row = await db.execute(select(Channel.id).where(Channel.channel_slug == candidate).limit(1))
+            if exists_row.scalar_one_or_none() is None:
+                return candidate
+            suffix_token = f"-{suffix}"
+            candidate = f"{base[: max(1, 64 - len(suffix_token))]}{suffix_token}"
+            suffix += 1
+
+    @staticmethod
+    def _decrypted_message_payload(message: Message) -> tuple[str | None, dict | None]:
+        if message.deleted_at is not None:
+            return None, None
+        if message.content_type.value == "text":
+            return decrypt_message(message.content_text) if message.content_text is not None else None, None
+        if message.content_type.value == "json":
+            return None, decrypt_json_payload(message.content_json)
+        raise AppError("unsupported content type", 500, code="DECRYPTION_FAILED")
+
     @staticmethod
     async def get_membership(db: AsyncSession, channel_id: UUID, user_id: UUID) -> ChannelMembership | None:
         return await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
@@ -102,10 +133,13 @@ class ChannelService:
 
     @staticmethod
     async def create_channel(db: AsyncSession, owner_user_id: UUID, req: ChannelCreateRequest, amqp: aio_pika.RobustConnection) -> Channel:
+        provided_slug = req.channel_slug.strip().lower() if req.channel_slug else ""
+        slug_base = provided_slug if provided_slug else ChannelService._slugify(req.name)
+        slug = await ChannelService._next_available_slug(db, slug_base)
         channel = Channel(
             owner_user_id=owner_user_id,
             name=req.name,
-            channel_slug=req.channel_slug,
+            channel_slug=slug,
             description=req.description,
             avatar_url=req.avatar_url,
             visibility=req.visibility,
@@ -293,14 +327,15 @@ class ChannelService:
             .order_by(Message.channel_id.asc())
         )
         for last_message in last_rows.scalars().all():
+            content_text, content_json = ChannelService._decrypted_message_payload(last_message)
             payloads[last_message.channel_id]["last_message"] = {
                 "id": last_message.id,
                 "channel_id": last_message.channel_id,
                 "sender_user_id": last_message.sender_user_id,
                 "seq_id": last_message.seq_id,
                 "content_type": last_message.content_type.value,
-                "content_text": last_message.content_text,
-                "content_json": last_message.content_json,
+                "content_text": content_text,
+                "content_json": content_json,
                 "reply_to_message_id": last_message.reply_to_message_id,
                 "reply_to_seq_id": last_message.reply_to_seq_id,
                 "attachments": last_message.attachments,
@@ -1330,14 +1365,15 @@ class ChannelService:
         )
         last_message = last_msg_result.scalar_one_or_none()
         if last_message:
+            content_text, content_json = ChannelService._decrypted_message_payload(last_message)
             payload["last_message"] = {
                 "id": last_message.id,
                 "channel_id": last_message.channel_id,
                 "sender_user_id": last_message.sender_user_id,
                 "seq_id": last_message.seq_id,
                 "content_type": last_message.content_type.value,
-                "content_text": last_message.content_text,
-                "content_json": last_message.content_json,
+                "content_text": content_text,
+                "content_json": content_json,
                 "reply_to_message_id": last_message.reply_to_message_id,
                 "reply_to_seq_id": last_message.reply_to_seq_id,
                 "attachments": last_message.attachments,

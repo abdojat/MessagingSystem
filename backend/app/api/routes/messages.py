@@ -33,14 +33,18 @@ router = APIRouter(tags=["messages"])
 
 def _to_message_response(message) -> MessageResponse:
     is_deleted = message.deleted_at is not None
+    content_text = None
+    content_json = None
+    if not is_deleted:
+        content_text, content_json = MessageService._decrypt_message_content(message)
     return MessageResponse(
         id=message.id,
         channel_id=message.channel_id,
         sender_user_id=message.sender_user_id,
         seq_id=message.seq_id,
         content_type=message.content_type.value,
-        content_text=None if is_deleted else message.content_text,
-        content_json=None if is_deleted else message.content_json,
+        content_text=content_text,
+        content_json=content_json,
         reply_to_message_id=message.reply_to_message_id,
         reply_to_seq_id=message.reply_to_seq_id,
         attachments=None if is_deleted else message.attachments,

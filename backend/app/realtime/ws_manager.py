@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.errors import AppError
+from app.core.encryption import decrypt_json_payload, decrypt_message
 from app.core.utils import utcnow
 from app.db.models import Channel, ChannelMembership, MembershipRole, Message
 from app.mq.publisher import bind_user_channel
@@ -128,14 +129,23 @@ class WSManager:
 
     def _message_payload(self, m: Message) -> dict[str, Any]:
         is_deleted = m.deleted_at is not None
+        content_text = None
+        content_json = None
+        if not is_deleted:
+            if m.content_type.value == "text":
+                content_text = decrypt_message(m.content_text) if m.content_text is not None else None
+            elif m.content_type.value == "json":
+                content_json = decrypt_json_payload(m.content_json)
+            else:
+                raise AppError("unsupported content type", 500, code="DECRYPTION_FAILED")
         return {
             "id": str(m.id),
             "channel_id": str(m.channel_id),
             "sender_user_id": str(m.sender_user_id),
             "seq_id": m.seq_id,
             "content_type": m.content_type.value,
-            "content_text": None if is_deleted else m.content_text,
-            "content_json": None if is_deleted else m.content_json,
+            "content_text": content_text,
+            "content_json": content_json,
             "reply_to_message_id": str(m.reply_to_message_id) if m.reply_to_message_id else None,
             "reply_to_seq_id": m.reply_to_seq_id,
             "attachments": None if is_deleted else m.attachments,
@@ -338,6 +348,11 @@ class WSManager:
                     event = json.loads(payload_raw)
                 except Exception:
                     continue
+                try:
+                    event = self._decrypt_event_payload(event)
+                except AppError as exc:
+                    logger.warning("failed to decrypt realtime event: %s", exc.code)
+                    continue
                 channel_id = str(event.get("channel_id") or "")
                 subs = self._subscriptions.get(id(websocket), set())
                 if channel_id and subs and channel_id not in subs:
@@ -347,3 +362,25 @@ class WSManager:
         finally:
             await pubsub.unsubscribe(channel_name)
             await pubsub.close()
+
+    def _decrypt_event_payload(self, event: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(event, dict):
+            return event
+        event_type = str(event.get("type") or "")
+        if event_type not in {"message", "message_updated"}:
+            return event
+        if event.get("deleted_at") is not None:
+            event["content_text"] = None
+            event["content_json"] = None
+            return event
+        content_type = event.get("content_type")
+        if content_type == "text":
+            encrypted = event.get("content_text")
+            event["content_text"] = decrypt_message(str(encrypted)) if encrypted is not None else None
+            event["content_json"] = None
+            return event
+        if content_type == "json":
+            event["content_text"] = None
+            event["content_json"] = decrypt_json_payload(event.get("content_json"))
+            return event
+        raise AppError("unsupported content type", 500, code="DECRYPTION_FAILED")

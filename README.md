@@ -37,6 +37,8 @@ docker compose run --rm backend sh -lc "alembic upgrade head"
 - `UPLOAD_MAX_SIZE_BYTES` (supports up to `1073741824` bytes / 1GB)
 - `UPLOADS_BASE_DIR` (docker volume path)
 - `API_V1_PREFIX` (default `/v1`)
+- `MESSAGE_ENCRYPTION_ENABLED` (default `true`; keep enabled outside local debugging)
+- `MESSAGE_ENCRYPTION_KEY` (Fernet key; required in non-dev environments)
 - `OUTBOX_POLL_INTERVAL`
 - `WORKER_ONLINE_SCAN_INTERVAL`
 - Frontend API base URL: `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000/v1`, applied at frontend image build time)
@@ -176,6 +178,7 @@ Users:
 
 Channels:
 - `GET /channels`: `limit` default `50` max `200`, `cursor`, optional `q`, `visibility`, `scope=my|discover` (default `my`).
+- `POST /channels`: `channel_slug` is optional; if omitted backend generates a URL-safe slug from `name` and resolves collisions with numeric suffixes.
 - `my` scope lists only channels where caller has membership.
 - `discover` scope lists public channels not yet joined.
 - Stable order: `last_message_at desc nulls last, created_at desc, id desc`.
@@ -224,3 +227,43 @@ Errors:
 - Unified error payload: `{code,message,details}`.
 - Core codes: `VALIDATION_ERROR`, `AUTH_INVALID`, `AUTH_EXPIRED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `INTERNAL_ERROR`.
 - Domain codes include `INVITE_EXPIRED`, `INVITE_REVOKED`, `INVITE_INVALID`, `PAGINATION_INVALID`, and join/invite rule codes.
+
+## Message Encryption
+
+- Message payload encryption is application-layer using `cryptography.fernet` (authenticated encryption).
+- At rest:
+  - text messages are stored as encrypted token in `messages.content_text`
+  - json messages are stored as encrypted token in `messages.content_json._enc_v1`
+- In transit inside backend internals:
+  - outbox payload for `message` and `message_updated` carries encrypted content, not plaintext.
+- API and WebSocket responses decrypt content only for already authorized users.
+- Key config:
+  - set `MESSAGE_ENCRYPTION_KEY` in `.env`
+  - generate key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+  - in non-dev environments, missing/invalid key fails startup/requests with config error.
+  - in `dev/test/local`, empty key uses a documented fallback key for local convenience only.
+
+### Verify DB ciphertext manually
+
+```bash
+docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
+```
+
+Expected:
+- `content_text` should look like Fernet tokens (typically starts with `gAAAA`), not plaintext.
+- json payload should be stored under `_enc_v1`, not raw business JSON.
+
+## Tests (Minimal P0 Coverage)
+
+Added backend tests cover:
+- encryption round trip + ciphertext at rest + outbox not plaintext
+- authz check for unauthorized publish/read on protected channel
+- channel creation without `channel_slug`, server slug generation, slug collision handling
+- event logging for channel creation and message publishing
+
+Run:
+```bash
+cd backend
+python -m pip install -e .
+python -m pytest -q
+```

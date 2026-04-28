@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     upload_max_size_bytes: int = 25 * 1024 * 1024
     uploads_base_dir: str = "/data/uploads"
     api_v1_prefix: str = "/v1"
+    message_encryption_enabled: bool = True
+    message_encryption_key: str = ""
 
     @field_validator("cors_origins", mode="before")
     @classmethod
