@@ -583,6 +583,15 @@ export default function ChannelDetailsPage() {
                       <p className="text-xs text-muted-foreground">
                         {avatarFile ? `Selected: ${avatarFile.name}` : "Choose an image file to update the channel avatar."}
                       </p>
+                      {avatarFile && avatarPreviewUrl ? (
+                        <div>
+                          <img
+                            src={avatarPreviewUrl}
+                            alt="Selected channel avatar preview"
+                            className="h-16 w-16 rounded-xl border border-border/70 object-cover"
+                          />
+                        </div>
+                      ) : null}
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="grid gap-2">

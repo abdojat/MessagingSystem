@@ -775,6 +775,15 @@ export default function ProfilePage() {
                         <p className="mt-1 text-xs text-muted-foreground">
                           {avatarFile ? `Selected: ${avatarFile.name}` : "Upload an image to use as your avatar."}
                         </p>
+                        {avatarFile && avatarPreviewUrl ? (
+                          <div className="mt-2">
+                            <img
+                              src={avatarPreviewUrl}
+                              alt="Selected profile avatar preview"
+                              className="h-16 w-16 rounded-full border border-border/70 object-cover"
+                            />
+                          </div>
+                        ) : null}
                       </div>
                       <div>
                         <label htmlFor="bio" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
