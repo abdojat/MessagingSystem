@@ -142,6 +142,31 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
                 unread_count: seenState.unread_count ?? 0,
               }));
             }
+          } else if (data.type === 'reaction_updated') {
+            const reactionEvent = payload as {
+              channel_id: string;
+              message_id: string;
+              reactions_summary: {
+                counts: Record<string, number>;
+                my_reaction: string[];
+              };
+            };
+
+            queryClient.setQueryData(
+              ['/channels', reactionEvent.channel_id, 'messages'],
+              (old: MessageResponse[] | undefined) =>
+                old?.map((message) =>
+                  message.id === reactionEvent.message_id
+                    ? {
+                        ...message,
+                        reactions_summary: {
+                          counts: reactionEvent.reactions_summary?.counts ?? {},
+                          my_reaction: reactionEvent.reactions_summary?.my_reaction ?? [],
+                        },
+                      }
+                    : message
+                )
+            );
           } else if (data.type === 'channel_updated' || data.type === 'membership_update') {
             queryClient.invalidateQueries({ queryKey: ['/channels'] });
           }

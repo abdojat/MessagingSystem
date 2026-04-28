@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useChannel, useChannelMembers, useJoinChannel } from "@/hooks/use-channels";
-import { useMarkSeen, useMessages, useSendMessage } from "@/hooks/use-messages";
+import { useMarkSeen, useMessages, useSendMessage, useToggleReaction } from "@/hooks/use-messages";
 import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight, Copy, ArrowUpRight } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { format } from "date-fns";
@@ -55,9 +55,9 @@ function ChannelViewSkeleton() {
     </div>
   );
 }
-
 const MAX_REPLY_INDENT_DEPTH = 4;
 const MAX_REPLY_CHAIN_DEPTH = 12;
+const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E}", "\u{1F389}", "\u{1F44E}"] as const;
 
 function getMessageSnippet(message: MessageResponse | undefined): string {
   if (!message) return "Original message is not loaded in this view.";
@@ -112,6 +112,7 @@ export default function ChannelView() {
   const { data: messages = [], isLoading: isMessagesLoading } = useMessages(channelId || '');
   const joinChannel = useJoinChannel();
   const sendMessage = useSendMessage();
+  const toggleReaction = useToggleReaction();
   const markSeen = useMarkSeen();
   
   const [content, setContent] = useState("");
@@ -318,21 +319,18 @@ export default function ChannelView() {
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
-  const addEmojiToComposer = (emoji: string, message: MessageResponse) => {
+  const toggleMessageReaction = (emoji: string, message: MessageResponse) => {
     if (!canUseComposer) {
       toast({
         title: "Cannot react right now",
-        description: "Join this channel to send a message or reply.",
+        description: "Join this channel to react to messages.",
         variant: "destructive",
       });
       return;
     }
-
-    if (!canCompose && !replyingTo && !message.deleted_at) {
-      setReplyingTo(message);
-    }
-    setContent((previous) => `${previous}${previous ? " " : ""}${emoji}`);
-    focusComposer();
+    if (!channelId || message.deleted_at) return;
+    const hasMyReaction = (message.reactions_summary?.my_reaction ?? []).includes(emoji);
+    toggleReaction.mutate({ channelId, messageId: message.id, emoji, remove: hasMyReaction });
   };
 
   const copyMessageText = async (message: MessageResponse) => {
@@ -381,7 +379,7 @@ export default function ChannelView() {
               <span>{channel.member_count || 0} members</span>
               {channel.description && (
                 <>
-                  <span>•</span>
+                  <span>&bull;</span>
                   <span className="truncate max-w-[200px]">{channel.description}</span>
                 </>
               )}
@@ -516,18 +514,60 @@ export default function ChannelView() {
                               ? msg.content_text
                               : JSON.stringify(msg.content_json ?? {}, null, 2)}
                         </div>
+                        {!msg.deleted_at && Object.keys(msg.reactions_summary?.counts ?? {}).length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {Object.entries(msg.reactions_summary.counts)
+                              .sort((a, b) => a[0].localeCompare(b[0]))
+                              .map(([emoji, count]) => {
+                                const isMine = (msg.reactions_summary?.my_reaction ?? []).includes(emoji);
+                                return (
+                                  <button
+                                    key={`${msg.id}-reaction-${emoji}`}
+                                    type="button"
+                                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors ${
+                                      isMine
+                                        ? "border-primary/50 bg-primary/10 text-primary"
+                                        : "border-border/70 bg-background/80 text-foreground/80 hover:bg-accent"
+                                    }`}
+                                    onClick={() => toggleMessageReaction(emoji, msg)}
+                                    aria-label={`${isMine ? "Remove" : "Add"} reaction ${emoji} on message #${msg.seq_id}`}
+                                  >
+                                    <span>{emoji}</span>
+                                    <span>{count}</span>
+                                  </button>
+                                );
+                              })}
+                          </div>
+                        )}
                         
                         {/* Hover Actions */}
                         <div className="absolute -top-3 right-0 opacity-0 group-hover:opacity-100 transition-opacity bg-card border border-border rounded-lg shadow-lg flex items-center p-0.5 z-10 translate-x-2">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                            onClick={() => addEmojiToComposer("🙂", msg)}
-                            aria-label={`Add smile emoji for message #${msg.seq_id}`}
-                          >
-                            <SmilePlus className="w-4 h-4" />
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                aria-label={`Add reaction to message #${msg.seq_id}`}
+                              >
+                                <SmilePlus className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-auto min-w-0 p-1">
+                              <div className="flex items-center gap-1">
+                                {QUICK_REACTIONS.map((emoji) => (
+                                  <DropdownMenuItem
+                                    key={`${msg.id}-${emoji}`}
+                                    className="h-8 w-8 p-0 flex items-center justify-center text-base"
+                                    onSelect={() => toggleMessageReaction(emoji, msg)}
+                                    aria-label={`React with ${emoji}`}
+                                  >
+                                    {emoji}
+                                  </DropdownMenuItem>
+                                ))}
+                              </div>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                           {(canCompose || canReplyAsMember) && !msg.deleted_at && (
                             <Button
                               size="icon"
@@ -548,7 +588,7 @@ export default function ChannelView() {
                             <DropdownMenuContent align="end" className="w-52">
                               {(canCompose || canReplyAsMember) && !msg.deleted_at && (
                                 <DropdownMenuItem
-                                  onClick={() => {
+                                  onSelect={() => {
                                     setReplyingTo(msg);
                                     focusComposer();
                                   }}
@@ -558,7 +598,7 @@ export default function ChannelView() {
                                 </DropdownMenuItem>
                               )}
                               <DropdownMenuItem
-                                onClick={() => {
+                                onSelect={() => {
                                   void copyMessageText(msg);
                                 }}
                                 disabled={Boolean(msg.deleted_at) || msg.content_type !== "text" || !((msg.content_text || "").trim().length > 0)}
@@ -567,7 +607,7 @@ export default function ChannelView() {
                                 Copy text
                               </DropdownMenuItem>
                               {msg.reply_to_message_id && (
-                                <DropdownMenuItem onClick={() => jumpToMessage(msg.reply_to_message_id)}>
+                                <DropdownMenuItem onSelect={() => jumpToMessage(msg.reply_to_message_id)}>
                                   <ArrowUpRight className="mr-2 h-4 w-4" />
                                   Jump to replied message
                                 </DropdownMenuItem>
@@ -575,7 +615,7 @@ export default function ChannelView() {
                               {canCollapseReplies && (
                                 <>
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuItem onClick={() => toggleCollapsedReplies(msg.id)}>
+                                  <DropdownMenuItem onSelect={() => toggleCollapsedReplies(msg.id)}>
                                     {isRepliesCollapsed ? "Show replies" : "Hide replies"}
                                   </DropdownMenuItem>
                                 </>

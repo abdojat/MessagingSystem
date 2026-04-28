@@ -86,6 +86,11 @@ export interface MessageResponse {
   };
 }
 
+export interface ReactionSummaryResponse {
+  counts: Record<string, number>;
+  my_reaction: string[];
+}
+
 export interface ChannelResponse {
   channel_slug?: string;
   id: string;
