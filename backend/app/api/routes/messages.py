@@ -27,6 +27,7 @@ from app.schemas.messages import (
 )
 from app.services.message_service import MessageService
 from app.services.rate_limit_service import RateLimitService
+from app.services.event_service import log_event
 
 router = APIRouter(tags=["messages"])
 
@@ -59,7 +60,18 @@ def _to_message_response(message) -> MessageResponse:
 
 
 async def _to_message_response_with_reactions(db: DBDep, user_id: UUID, message) -> MessageResponse:
-    response = _to_message_response(message)
+    try:
+        response = _to_message_response(message)
+    except AppError:
+        await log_event(
+            db,
+            "message.decryption_failed",
+            {"channel_id": str(message.channel_id), "message_id": str(message.id)},
+            channel_id=message.channel_id,
+            actor_user_id=user_id,
+        )
+        await db.commit()
+        raise
     response.reactions_summary = await MessageService._reaction_summary(db, message.id, user_id)
     return response
 

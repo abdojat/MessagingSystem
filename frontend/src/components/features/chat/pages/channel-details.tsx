@@ -11,6 +11,7 @@ import {
   Hash,
   Info,
   Lock,
+  RefreshCw,
   Shield,
   ShieldPlus,
   UserMinus,
@@ -44,6 +45,7 @@ import {
   useUpdateAdminPermissions,
   useUpdateChannel,
 } from "@/hooks/use-channels";
+import { useChannelEvents } from "@/hooks/use-events";
 import { toast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api/client";
 import { getApiBaseUrl } from "@/services/api/runtime";
@@ -51,6 +53,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
 import type { AdminPermissions, ChannelMembershipItem, ChannelPatchRequest } from "@/types/api";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 type UploadCreateResponse = {
   file_id: string;
@@ -244,6 +247,7 @@ export default function ChannelDetailsPage() {
 
   const canManageMembers = channel?.permissions.can_manage_members ?? false;
   const membersQuery = useChannelMembers(channel?.id || "", { enabled: canManageMembers });
+  const eventsQuery = useChannelEvents(channel?.id || "", 30, canManageMembers);
 
   useEffect(() => {
     if (!isInitializing && !isAuthenticated) {
@@ -545,6 +549,65 @@ export default function ChannelDetailsPage() {
               </div>
             </Card>
           </div>
+
+          {canManageMembers ? (
+            <div className="border-t border-border/60 p-6">
+              <Card className="rounded-2xl p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold">Event log</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">Recent security and system events for this channel.</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => eventsQuery.refetch()}
+                    disabled={eventsQuery.isFetching}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    {eventsQuery.isFetching ? "Refreshing..." : "Refresh"}
+                  </Button>
+                </div>
+                {eventsQuery.isLoading ? (
+                  <div className="mt-4 space-y-2">
+                    <Skeleton className="h-10 w-full rounded-lg" />
+                    <Skeleton className="h-10 w-full rounded-lg" />
+                  </div>
+                ) : eventsQuery.isError ? (
+                  <p className="mt-4 text-sm text-destructive">Could not load event log. Please try again.</p>
+                ) : (eventsQuery.data?.items?.length ?? 0) === 0 ? (
+                  <p className="mt-4 text-sm text-muted-foreground">No events recorded yet for this channel.</p>
+                ) : (
+                  <div className="mt-4">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Time</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Actor</TableHead>
+                          <TableHead>Channel</TableHead>
+                          <TableHead>Details</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {eventsQuery.data?.items.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell>{formatDateTime(item.created_at)}</TableCell>
+                            <TableCell className="font-medium">{item.event_type}</TableCell>
+                            <TableCell className="font-mono text-xs">{item.actor_user_id || "-"}</TableCell>
+                            <TableCell className="font-mono text-xs">{item.channel_id || "-"}</TableCell>
+                            <TableCell className="max-w-[320px] truncate text-xs text-muted-foreground">
+                              {JSON.stringify(item.payload ?? {})}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </Card>
+            </div>
+          ) : null}
 
           {(canEditChannel || canManageMembers) ? (
             <div className="grid gap-4 border-t border-border/60 p-6 lg:grid-cols-2">

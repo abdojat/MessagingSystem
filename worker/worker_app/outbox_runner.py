@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from datetime import timedelta
+from uuid import uuid4
 
 import aio_pika
 from sqlalchemy import text
@@ -25,6 +26,7 @@ async def run_outbox_publisher(amqp: aio_pika.RobustConnection) -> None:
                     text(
                         """
                         SELECT id, payload, routing_key, attempts
+                             , channel_id
                         FROM outbox
                         WHERE (status = 'pending' OR status = 'failed')
                           AND (next_retry_at IS NULL OR next_retry_at <= now())
@@ -79,6 +81,26 @@ async def run_outbox_publisher(amqp: aio_pika.RobustConnection) -> None:
                                 """
                             ),
                             {"id": outbox_id, "err": str(exc)[:1000], "delay": delay},
+                        )
+                        await db.execute(
+                            text(
+                                """
+                                INSERT INTO events (id, channel_id, actor_user_id, event_type, payload, created_at)
+                                VALUES (:event_id, :channel_id, NULL, 'broker.publish_failed', :payload::jsonb, now())
+                                """
+                            ),
+                            {
+                                "event_id": str(uuid4()),
+                                "channel_id": rec.get("channel_id"),
+                                "payload": json.dumps(
+                                    {
+                                        "outbox_id": str(outbox_id),
+                                        "routing_key": rec["routing_key"],
+                                        "attempt": attempts + 1,
+                                        "retry_in_seconds": delay,
+                                    }
+                                ),
+                            },
                         )
                 await db.commit()
         except Exception:

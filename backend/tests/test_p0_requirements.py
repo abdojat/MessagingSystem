@@ -104,3 +104,11 @@ async def test_message_encryption_round_trip_and_authz_and_event(db_session, mon
 
     events = (await db_session.execute(select(Event).where(Event.event_type == "message.published"))).scalars().all()
     assert len(events) == 1
+    unauthorized_publish_events = (
+        await db_session.execute(select(Event).where(Event.event_type == "security.unauthorized_publish"))
+    ).scalars().all()
+    unauthorized_read_events = (
+        await db_session.execute(select(Event).where(Event.event_type == "security.unauthorized_read"))
+    ).scalars().all()
+    assert len(unauthorized_publish_events) == 1
+    assert len(unauthorized_read_events) == 1

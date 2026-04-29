@@ -209,7 +209,12 @@ export default function ChannelView() {
 
   const messageById = new Map(messages.map((message) => [message.id, message]));
   const replyChildrenById = new Map<string, MessageResponse[]>();
-  const memberUsernameById = new Map((membersQuery.data?.items ?? []).map((member) => [member.user_id, member.username]));
+  const memberNameById = new Map(
+    (membersQuery.data?.items ?? []).map((member) => [
+      member.user_id,
+      member.display_name || member.username,
+    ])
+  );
   for (const message of messages) {
     const parentId = message.reply_to_message_id;
     if (!parentId) continue;
@@ -221,15 +226,19 @@ export default function ChannelView() {
     }
   }
 
-  const resolveSenderName = (senderUserId: string | undefined) => {
+  const resolveSenderName = (senderUserId: string | undefined, message?: MessageResponse) => {
     if (!senderUserId) return "Member";
     if (senderUserId === user?.id) return user?.display_name || user?.username || "You";
-    return memberUsernameById.get(senderUserId) || `Member ${senderUserId.slice(0, 8)}`;
+    const messageDisplayName = message?.sender_display_name?.trim();
+    if (messageDisplayName) return messageDisplayName;
+    const messageUsername = message?.sender_username?.trim();
+    if (messageUsername) return messageUsername;
+    return memberNameById.get(senderUserId) || `Member ${senderUserId.slice(0, 8)}`;
   };
 
   const resolveSenderLabel = (message: MessageResponse | undefined) => {
     if (!message) return "Message";
-    return resolveSenderName(message.sender_user_id);
+    return resolveSenderName(message.sender_user_id, message);
   };
 
   const getReplyDepth = (message: MessageResponse): number => {
@@ -466,7 +475,7 @@ export default function ChannelView() {
                     {showHeader ? (
                       <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
                         <AvatarImage src={isMe ? userAvatarUrl : undefined} />
-                        <AvatarFallback>{resolveSenderName(msg.sender_user_id)?.[0]?.toUpperCase() || '#'}</AvatarFallback>
+                        <AvatarFallback>{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || '#'}</AvatarFallback>
                       </Avatar>
                     ) : (
                       <div className="w-10 flex-shrink-0" />
@@ -488,7 +497,7 @@ export default function ChannelView() {
                       {showHeader && (
                         <div className="flex items-baseline gap-2 mb-1">
                           <span className="font-semibold text-foreground text-sm">
-                            {resolveSenderName(msg.sender_user_id)}
+                            {resolveSenderName(msg.sender_user_id, msg)}
                           </span>
                           <span className="text-[11px] text-muted-foreground">{format(new Date(msg.created_at), 'h:mm a')}</span>
                         </div>

@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core import encryption
@@ -10,7 +11,7 @@ from app.core.config import get_settings
 from app.db.models import Base
 
 os.environ.setdefault("ENVIRONMENT", "test")
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@postgres:5432/channels")
 os.environ.setdefault("MESSAGE_ENCRYPTION_ENABLED", "true")
 os.environ.setdefault("MESSAGE_ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 os.environ.setdefault("JWT_SECRET", "test-secret")
@@ -24,10 +25,18 @@ def _clear_settings_cache() -> None:
 
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    database_url = os.environ.get("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@postgres:5432/channels")
+    engine = create_async_engine(database_url, future=True)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as exc:
+        await engine.dispose()
+        pytest.skip(f"PostgreSQL test database is not reachable for DATABASE_URL={database_url!r}: {exc}")
     session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with session_maker() as session:
+        # Isolate test cases while reusing a migrated schema.
+        await session.execute(text("TRUNCATE TABLE outbox, events, user_channel_state, pinned_messages, message_reactions, messages, channel_invites, channel_memberships, channel_counters, channels, user_sessions, users RESTART IDENTITY CASCADE"))
+        await session.commit()
         yield session
     await engine.dispose()

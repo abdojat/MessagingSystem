@@ -67,6 +67,8 @@ export interface MessageResponse {
   id: string;
   channel_id: string;
   sender_user_id: string;
+  sender_username?: string;
+  sender_display_name?: string | null;
   seq_id: number;
   content_type: "text" | "json";
   content_text?: string | null;
@@ -124,6 +126,7 @@ export interface ChannelPatchRequest {
 export interface ChannelMembershipItem {
   user_id: string;
   username: string;
+  display_name?: string | null;
   email?: string | null;
   role: MembershipRole;
   created_at: string;
@@ -176,4 +179,19 @@ export interface InviteDetailsResponse {
   expires_at?: string | null;
   invited_email?: string | null;
   invited_user_id?: string | null;
+}
+
+export interface EventResponse {
+  id: string;
+  channel_id?: string | null;
+  actor_user_id?: string | null;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface EventListResponse {
+  items: EventResponse[];
+  next_cursor?: string | null;
+  has_more: boolean;
 }

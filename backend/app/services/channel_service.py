@@ -165,6 +165,14 @@ class ChannelService:
             channel_id=channel.id,
             actor_user_id=owner_user_id,
         )
+        if slug != slug_base:
+            await log_event(
+                db,
+                "channel.slug_collision_resolved",
+                {"requested_slug": slug_base, "resolved_slug": slug},
+                channel_id=channel.id,
+                actor_user_id=owner_user_id,
+            )
         await db.commit()
         await db.refresh(channel)
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 import hashlib
+import logging
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, delete, func, or_, select
@@ -27,8 +28,27 @@ from app.services.event_service import log_event
 from app.services.outbox_service import enqueue_channel_event_outbox, enqueue_message_outbox
 from app.services.rbac import can_publish, can_read
 
+logger = logging.getLogger(__name__)
+
 
 class MessageService:
+    @staticmethod
+    async def _safe_log_event(
+        db: AsyncSession,
+        event_type: str,
+        payload: dict,
+        channel_id: UUID | None = None,
+        actor_user_id: UUID | None = None,
+        commit: bool = False,
+    ) -> None:
+        try:
+            await log_event(db, event_type, payload, channel_id=channel_id, actor_user_id=actor_user_id)
+            if commit:
+                await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.warning("failed to log event %s", event_type, exc_info=True)
+
     @staticmethod
     def _decrypt_message_content(message: Message) -> tuple[str | None, dict | None]:
         if message.content_type == ContentType.text:
@@ -109,6 +129,14 @@ class MessageService:
             req.reply_to_message_id is not None or req.reply_to_seq_id is not None
         )
         if not can_publish(role, membership.admin_permissions if membership else None) and not is_member_reply:
+            await MessageService._safe_log_event(
+                db,
+                "security.unauthorized_publish",
+                {"channel_id": str(channel_id), "reason": "insufficient_permissions"},
+                channel_id=channel_id,
+                actor_user_id=sender_id,
+                commit=True,
+            )
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         if req.client_msg_id is not None:
@@ -134,7 +162,17 @@ class MessageService:
         seq_id = int(channel.last_seq_id)
         await db.flush()
 
-        encrypted_text, encrypted_json = MessageService._encrypt_payload(req)
+        try:
+            encrypted_text, encrypted_json = MessageService._encrypt_payload(req)
+        except AppError:
+            await MessageService._safe_log_event(
+                db,
+                "message.encryption_failed",
+                {"channel_id": str(channel_id)},
+                channel_id=channel_id,
+                actor_user_id=sender_id,
+            )
+            raise
         content_type = ContentType.text if req.content_text is not None else ContentType.json
         message = Message(
             channel_id=channel_id,
@@ -371,6 +409,14 @@ class MessageService:
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
         role = membership.role if membership else None
         if not can_read(role):
+            await MessageService._safe_log_event(
+                db,
+                "security.unauthorized_read",
+                {"channel_id": str(channel_id), "reason": "insufficient_permissions"},
+                channel_id=channel_id,
+                actor_user_id=user_id,
+                commit=True,
+            )
             raise AppError("forbidden", 403, code="FORBIDDEN")
         return role
 
@@ -389,7 +435,17 @@ class MessageService:
         if message.sender_user_id != actor_user_id and role not in {MembershipRole.owner, MembershipRole.admin}:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
-        encrypted_text, encrypted_json = MessageService._encrypt_payload(req)
+        try:
+            encrypted_text, encrypted_json = MessageService._encrypt_payload(req)
+        except AppError:
+            await MessageService._safe_log_event(
+                db,
+                "message.encryption_failed",
+                {"channel_id": str(channel_id), "message_id": str(message_id)},
+                channel_id=channel_id,
+                actor_user_id=actor_user_id,
+            )
+            raise
         message.content_type = ContentType.text if req.content_text is not None else ContentType.json
         message.content_text = encrypted_text
         message.content_json = encrypted_json
