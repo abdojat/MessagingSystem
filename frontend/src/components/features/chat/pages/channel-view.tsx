@@ -128,7 +128,9 @@ export default function ChannelView() {
   const canCompose = ['owner', 'admin'].includes(channel?.my_role || '');
   const canReplyAsMember = isMember && !canCompose;
   const canUseComposer = canCompose || canReplyAsMember;
-  const membersQuery = useChannelMembers(channel?.id || '', { enabled: isMember });
+  const membersQuery = useChannelMembers(channel?.id || '', {
+    enabled: isMember && Boolean(channel?.permissions.can_manage_members),
+  });
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -212,7 +214,13 @@ export default function ChannelView() {
   const memberNameById = new Map(
     (membersQuery.data?.items ?? []).map((member) => [
       member.user_id,
-      member.display_name || member.username,
+      member.display_name?.trim() || member.username,
+    ])
+  );
+  const memberAvatarById = new Map(
+    (membersQuery.data?.items ?? []).map((member) => [
+      member.user_id,
+      resolveApiMediaUrl(member.avatar_url),
     ])
   );
   for (const message of messages) {
@@ -228,17 +236,27 @@ export default function ChannelView() {
 
   const resolveSenderName = (senderUserId: string | undefined, message?: MessageResponse) => {
     if (!senderUserId) return "Member";
-    if (senderUserId === user?.id) return user?.display_name || user?.username || "You";
+    if (senderUserId === user?.id) return user?.display_name?.trim() || user?.username || "You";
     const messageDisplayName = message?.sender_display_name?.trim();
     if (messageDisplayName) return messageDisplayName;
+    const memberName = memberNameById.get(senderUserId);
+    if (memberName) return memberName;
     const messageUsername = message?.sender_username?.trim();
     if (messageUsername) return messageUsername;
-    return memberNameById.get(senderUserId) || `Member ${senderUserId.slice(0, 8)}`;
+    return `Member ${senderUserId.slice(0, 8)}`;
   };
 
   const resolveSenderLabel = (message: MessageResponse | undefined) => {
     if (!message) return "Message";
     return resolveSenderName(message.sender_user_id, message);
+  };
+
+  const resolveSenderAvatarUrl = (senderUserId: string | undefined, message?: MessageResponse) => {
+    if (!senderUserId) return undefined;
+    if (senderUserId === user?.id) return userAvatarUrl;
+    const messageAvatarUrl = resolveApiMediaUrl(message?.sender_avatar_url);
+    if (messageAvatarUrl) return messageAvatarUrl;
+    return memberAvatarById.get(senderUserId);
   };
 
   const getReplyDepth = (message: MessageResponse): number => {
@@ -474,7 +492,7 @@ export default function ChannelView() {
                   >
                     {showHeader ? (
                       <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
-                        <AvatarImage src={isMe ? userAvatarUrl : undefined} />
+                        <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
                         <AvatarFallback>{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || '#'}</AvatarFallback>
                       </Avatar>
                     ) : (

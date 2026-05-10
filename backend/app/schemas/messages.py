@@ -28,6 +28,9 @@ class MessageResponse(BaseModel):
     id: UUID
     channel_id: UUID
     sender_user_id: UUID
+    sender_username: str | None = None
+    sender_display_name: str | None = None
+    sender_avatar_url: str | None = None
     seq_id: int
     content_type: Literal["text", "json"]
     content_text: str | None

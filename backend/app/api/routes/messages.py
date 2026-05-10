@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from app.api.deps import CurrentUserDep, DBDep, RedisDep
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
-from app.db.models import Upload
+from app.db.models import Upload, User
 from app.schemas.messages import (
     MessageAroundResponse,
     MessageListResponse,
@@ -32,7 +32,13 @@ from app.services.event_service import log_event
 router = APIRouter(tags=["messages"])
 
 
-def _to_message_response(message) -> MessageResponse:
+def _to_message_response(
+    message,
+    *,
+    sender_username: str | None = None,
+    sender_display_name: str | None = None,
+    sender_avatar_url: str | None = None,
+) -> MessageResponse:
     is_deleted = message.deleted_at is not None
     content_text = None
     content_json = None
@@ -42,6 +48,9 @@ def _to_message_response(message) -> MessageResponse:
         id=message.id,
         channel_id=message.channel_id,
         sender_user_id=message.sender_user_id,
+        sender_username=sender_username,
+        sender_display_name=sender_display_name,
+        sender_avatar_url=sender_avatar_url,
         seq_id=message.seq_id,
         content_type=message.content_type.value,
         content_text=content_text,
@@ -59,9 +68,27 @@ def _to_message_response(message) -> MessageResponse:
     )
 
 
-async def _to_message_response_with_reactions(db: DBDep, user_id: UUID, message) -> MessageResponse:
+async def _to_message_response_with_reactions(
+    db: DBDep,
+    user_id: UUID,
+    message,
+    sender_cache: dict[UUID, User | None] | None = None,
+) -> MessageResponse:
+    sender: User | None
+    if sender_cache is not None and message.sender_user_id in sender_cache:
+        sender = sender_cache[message.sender_user_id]
+    else:
+        sender = await db.get(User, message.sender_user_id)
+        if sender_cache is not None:
+            sender_cache[message.sender_user_id] = sender
+
     try:
-        response = _to_message_response(message)
+        response = _to_message_response(
+            message,
+            sender_username=sender.username if sender else None,
+            sender_display_name=sender.display_name if sender else None,
+            sender_avatar_url=sender.avatar_url if sender else None,
+        )
     except AppError:
         await log_event(
             db,
@@ -163,8 +190,9 @@ async def list_messages(
         )
     except AppError as exc:
         raise to_http_exception(exc) from exc
+    sender_cache: dict[UUID, User | None] = {}
     return MessageListResponse(
-        items=[await _to_message_response_with_reactions(db, user.id, m) for m in messages],
+        items=[await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in messages],
         next_before_seq_id=next_before,
         next_after_seq_id=next_after,
         has_more=has_more,
@@ -194,9 +222,10 @@ async def list_messages_around(
         items = await MessageService.messages_around(db, channel_id, user.id, seq_id, limit_before, limit_after)
     except AppError as exc:
         raise to_http_exception(exc) from exc
+    sender_cache: dict[UUID, User | None] = {}
     return MessageAroundResponse(
         seq_id=seq_id,
-        items=[await _to_message_response_with_reactions(db, user.id, m) for m in items],
+        items=[await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in items],
     )
 
 
@@ -311,7 +340,8 @@ async def list_pins(
         messages = await MessageService.list_pins(db, channel_id, user.id, limit)
     except AppError as exc:
         raise to_http_exception(exc) from exc
-    items = [await _to_message_response_with_reactions(db, user.id, m) for m in messages]
+    sender_cache: dict[UUID, User | None] = {}
+    items = [await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in messages]
     return PinListResponse(items=items)
 
 
@@ -374,9 +404,10 @@ async def sync(req: SyncRequest, db: DBDep, user: CurrentUserDep) -> SyncRespons
         payload = await MessageService.sync(db, user.id, req)
     except AppError as exc:
         raise to_http_exception(exc) from exc
+    sender_cache: dict[UUID, User | None] = {}
     return SyncResponse(
         server_time=payload["server_time"],
         channel_updates=payload["channel_updates"],
         membership_updates=payload["membership_updates"],
-        messages=[await _to_message_response_with_reactions(db, user.id, m) for m in payload["messages"]],
+        messages=[await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in payload["messages"]],
     )

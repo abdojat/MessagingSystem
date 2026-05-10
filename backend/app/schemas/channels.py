@@ -199,6 +199,8 @@ class InvitePreviewResponse(BaseModel):
 class ChannelMembershipItem(BaseModel):
     user_id: UUID
     username: str
+    display_name: str | None = None
+    avatar_url: str | None = None
     email: EmailStr | None
     role: MembershipRole
     created_at: datetime

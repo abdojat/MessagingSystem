@@ -69,6 +69,7 @@ export interface MessageResponse {
   sender_user_id: string;
   sender_username?: string;
   sender_display_name?: string | null;
+  sender_avatar_url?: string | null;
   seq_id: number;
   content_type: "text" | "json";
   content_text?: string | null;
@@ -127,6 +128,7 @@ export interface ChannelMembershipItem {
   user_id: string;
   username: string;
   display_name?: string | null;
+  avatar_url?: string | null;
   email?: string | null;
   role: MembershipRole;
   created_at: string;

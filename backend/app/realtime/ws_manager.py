@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.errors import AppError
 from app.core.encryption import decrypt_json_payload, decrypt_message
 from app.core.utils import utcnow
-from app.db.models import Channel, ChannelMembership, MembershipRole, Message
+from app.db.models import Channel, ChannelMembership, MembershipRole, Message, User
 from app.mq.publisher import bind_user_channel
 from app.realtime.protocol import (
     WSResumePayload,
@@ -106,6 +106,7 @@ class WSManager:
     async def _send_history(self, websocket: WebSocket, user_id: UUID, channel_ids: list[str], from_seq_id: int | None = None) -> None:
         async with self._session_factory() as db:
             sync_items: list[dict[str, Any]] = []
+            sender_cache: dict[UUID, User | None] = {}
             for channel_id_raw in channel_ids:
                 channel_id = UUID(channel_id_raw)
                 stmt = select(Message).where(Message.channel_id == channel_id, Message.deleted_at.is_(None))
@@ -114,7 +115,8 @@ class WSManager:
                 stmt = stmt.order_by(Message.seq_id.asc()).limit(100)
                 rows = await db.execute(stmt)
                 items = rows.scalars().all()
-                sync_items.extend(self._message_payload(m) for m in items)
+                for message in items:
+                    sync_items.append(await self._message_payload(db, message, sender_cache))
             await websocket.send_json(
                 build_envelope(
                     "sync",
@@ -127,7 +129,12 @@ class WSManager:
                 )
             )
 
-    def _message_payload(self, m: Message) -> dict[str, Any]:
+    async def _message_payload(
+        self,
+        db: AsyncSession,
+        m: Message,
+        sender_cache: dict[UUID, User | None] | None = None,
+    ) -> dict[str, Any]:
         is_deleted = m.deleted_at is not None
         content_text = None
         content_json = None
@@ -138,10 +145,22 @@ class WSManager:
                 content_json = decrypt_json_payload(m.content_json)
             else:
                 raise AppError("unsupported content type", 500, code="DECRYPTION_FAILED")
+
+        sender: User | None
+        if sender_cache is not None and m.sender_user_id in sender_cache:
+            sender = sender_cache[m.sender_user_id]
+        else:
+            sender = await db.get(User, m.sender_user_id)
+            if sender_cache is not None:
+                sender_cache[m.sender_user_id] = sender
+
         return {
             "id": str(m.id),
             "channel_id": str(m.channel_id),
             "sender_user_id": str(m.sender_user_id),
+            "sender_username": sender.username if sender else None,
+            "sender_display_name": sender.display_name if sender else None,
+            "sender_avatar_url": sender.avatar_url if sender else None,
             "seq_id": m.seq_id,
             "content_type": m.content_type.value,
             "content_text": content_text,
@@ -297,6 +316,7 @@ class WSManager:
         allowed = set(await self._member_channel_ids(user_id))
         async with self._session_factory() as db:
             items: list[dict[str, Any]] = []
+            sender_cache: dict[UUID, User | None] = {}
             remaining = limit
             for cursor in req.channels:
                 if str(cursor.channel_id) not in allowed:
@@ -315,7 +335,7 @@ class WSManager:
                 )
                 rows = await db.execute(stmt)
                 for message in rows.scalars().all():
-                    items.append(self._message_payload(message))
+                    items.append(await self._message_payload(db, message, sender_cache))
                     remaining -= 1
                     if remaining <= 0:
                         break

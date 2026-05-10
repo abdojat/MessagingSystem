@@ -20,6 +20,7 @@ from app.db.models import (
     MessageReaction,
     PinnedMessage,
     Upload,
+    User,
     UserChannelState,
     Event,
 )
@@ -68,7 +69,13 @@ class MessageService:
         raise AppError("message content is required", 400, code="VALIDATION_ERROR")
 
     @staticmethod
-    def _serialize_message(message: Message) -> dict:
+    def _serialize_message(
+        message: Message,
+        *,
+        sender_username: str | None = None,
+        sender_display_name: str | None = None,
+        sender_avatar_url: str | None = None,
+    ) -> dict:
         is_deleted = message.deleted_at is not None
         content_text = None
         content_json = None
@@ -78,6 +85,9 @@ class MessageService:
             "id": str(message.id),
             "channel_id": str(message.channel_id),
             "sender_user_id": str(message.sender_user_id),
+            "sender_username": sender_username,
+            "sender_display_name": sender_display_name,
+            "sender_avatar_url": sender_avatar_url,
             "seq_id": int(message.seq_id),
             "content_type": message.content_type.value,
             "content_text": content_text,
@@ -95,12 +105,21 @@ class MessageService:
         }
 
     @staticmethod
-    def _serialize_message_for_outbox(message: Message) -> dict:
+    def _serialize_message_for_outbox(
+        message: Message,
+        *,
+        sender_username: str | None = None,
+        sender_display_name: str | None = None,
+        sender_avatar_url: str | None = None,
+    ) -> dict:
         is_deleted = message.deleted_at is not None
         return {
             "id": str(message.id),
             "channel_id": str(message.channel_id),
             "sender_user_id": str(message.sender_user_id),
+            "sender_username": sender_username,
+            "sender_display_name": sender_display_name,
+            "sender_avatar_url": sender_avatar_url,
             "seq_id": int(message.seq_id),
             "content_type": message.content_type.value,
             "content_text": None if is_deleted else message.content_text,
@@ -116,6 +135,16 @@ class MessageService:
             "deleted_at": message.deleted_at.isoformat() if message.deleted_at else None,
             "reactions_summary": {"counts": {}, "my_reaction": []},
         }
+
+    @staticmethod
+    async def _load_sender_profile(
+        db: AsyncSession,
+        sender_user_id: UUID,
+    ) -> tuple[str | None, str | None, str | None]:
+        sender = await db.get(User, sender_user_id)
+        if sender is None:
+            return None, None, None
+        return sender.username, sender.display_name, sender.avatar_url
 
     @staticmethod
     async def publish_message(db: AsyncSession, channel_id: UUID, sender_id: UUID, req: PublishMessageRequest) -> Message:
@@ -189,7 +218,16 @@ class MessageService:
         db.add(message)
         await db.flush()
 
-        payload = {"type": "message", **MessageService._serialize_message_for_outbox(message)}
+        sender_username, sender_display_name, sender_avatar_url = await MessageService._load_sender_profile(db, sender_id)
+        payload = {
+            "type": "message",
+            **MessageService._serialize_message_for_outbox(
+                message,
+                sender_username=sender_username,
+                sender_display_name=sender_display_name,
+                sender_avatar_url=sender_avatar_url,
+            ),
+        }
         await enqueue_message_outbox(db, message.id, channel_id, payload)
         await log_event(
             db,
@@ -452,8 +490,23 @@ class MessageService:
         message.edited_at = utcnow()
         message.updated_at = utcnow()
         await db.flush()
+        sender_username, sender_display_name, sender_avatar_url = await MessageService._load_sender_profile(
+            db,
+            message.sender_user_id,
+        )
         await enqueue_message_outbox(
-            db, message.id, channel_id, {"type": "message_updated", **MessageService._serialize_message_for_outbox(message)}
+            db,
+            message.id,
+            channel_id,
+            {
+                "type": "message_updated",
+                **MessageService._serialize_message_for_outbox(
+                    message,
+                    sender_username=sender_username,
+                    sender_display_name=sender_display_name,
+                    sender_avatar_url=sender_avatar_url,
+                ),
+            },
         )
         await db.commit()
         await db.refresh(message)
@@ -478,8 +531,23 @@ class MessageService:
             message.content_text = None
             message.content_json = None
             await db.flush()
+            sender_username, sender_display_name, sender_avatar_url = await MessageService._load_sender_profile(
+                db,
+                message.sender_user_id,
+            )
             await enqueue_message_outbox(
-                db, message.id, channel_id, {"type": "message_updated", **MessageService._serialize_message_for_outbox(message)}
+                db,
+                message.id,
+                channel_id,
+                {
+                    "type": "message_updated",
+                    **MessageService._serialize_message_for_outbox(
+                        message,
+                        sender_username=sender_username,
+                        sender_display_name=sender_display_name,
+                        sender_avatar_url=sender_avatar_url,
+                    ),
+                },
             )
             await db.commit()
             await db.refresh(message)
@@ -584,11 +652,23 @@ class MessageService:
             db.add(PinnedMessage(channel_id=channel_id, message_id=message_id, pinned_by_user_id=actor_user_id))
         message.is_pinned = True
         await db.flush()
+        sender_username, sender_display_name, sender_avatar_url = await MessageService._load_sender_profile(
+            db,
+            message.sender_user_id,
+        )
         await enqueue_message_outbox(
             db,
             message.id,
             channel_id,
-            {"type": "message_updated", **MessageService._serialize_message_for_outbox(message)},
+            {
+                "type": "message_updated",
+                **MessageService._serialize_message_for_outbox(
+                    message,
+                    sender_username=sender_username,
+                    sender_display_name=sender_display_name,
+                    sender_avatar_url=sender_avatar_url,
+                ),
+            },
         )
         await db.commit()
 
@@ -604,11 +684,23 @@ class MessageService:
         if message and message.channel_id == channel_id:
             message.is_pinned = False
             await db.flush()
+            sender_username, sender_display_name, sender_avatar_url = await MessageService._load_sender_profile(
+                db,
+                message.sender_user_id,
+            )
             await enqueue_message_outbox(
                 db,
                 message.id,
                 channel_id,
-                {"type": "message_updated", **MessageService._serialize_message_for_outbox(message)},
+                {
+                    "type": "message_updated",
+                    **MessageService._serialize_message_for_outbox(
+                        message,
+                        sender_username=sender_username,
+                        sender_display_name=sender_display_name,
+                        sender_avatar_url=sender_avatar_url,
+                    ),
+                },
             )
         await db.commit()
 

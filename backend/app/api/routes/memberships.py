@@ -81,6 +81,8 @@ async def list_members(
             ChannelMembershipItem(
                 user_id=u.id,
                 username=u.username,
+                display_name=u.display_name,
+                avatar_url=u.avatar_url,
                 email=u.email,
                 role=m.role,
                 created_at=m.created_at,
@@ -126,6 +128,8 @@ async def list_pending_requests(
             ChannelMembershipItem(
                 user_id=u.id,
                 username=u.username,
+                display_name=u.display_name,
+                avatar_url=u.avatar_url,
                 email=u.email,
                 role=m.role,
                 created_at=m.created_at,

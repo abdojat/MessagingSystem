@@ -334,12 +334,23 @@ class ChannelService:
             )
             .order_by(Message.channel_id.asc())
         )
-        for last_message in last_rows.scalars().all():
+        last_messages = last_rows.scalars().all()
+        sender_ids = {message.sender_user_id for message in last_messages}
+        sender_profiles: dict[UUID, User] = {}
+        if sender_ids:
+            sender_rows = await db.execute(select(User).where(User.id.in_(sender_ids)))
+            sender_profiles = {sender.id: sender for sender in sender_rows.scalars().all()}
+
+        for last_message in last_messages:
+            sender = sender_profiles.get(last_message.sender_user_id)
             content_text, content_json = ChannelService._decrypted_message_payload(last_message)
             payloads[last_message.channel_id]["last_message"] = {
                 "id": last_message.id,
                 "channel_id": last_message.channel_id,
                 "sender_user_id": last_message.sender_user_id,
+                "sender_username": sender.username if sender else None,
+                "sender_display_name": sender.display_name if sender else None,
+                "sender_avatar_url": sender.avatar_url if sender else None,
                 "seq_id": last_message.seq_id,
                 "content_type": last_message.content_type.value,
                 "content_text": content_text,
@@ -1137,7 +1148,7 @@ class ChannelService:
             stmt = stmt.where(ChannelMembership.role == role)
         if q:
             pattern = f"%{q.strip()}%"
-            stmt = stmt.where(or_(User.username.ilike(pattern), User.email.ilike(pattern)))
+            stmt = stmt.where(or_(User.username.ilike(pattern), User.display_name.ilike(pattern), User.email.ilike(pattern)))
         if cursor:
             cursor_role_weight, cursor_username, cursor_user_id = ChannelService._decode_member_cursor(cursor)
             stmt = stmt.where(
@@ -1373,11 +1384,15 @@ class ChannelService:
         )
         last_message = last_msg_result.scalar_one_or_none()
         if last_message:
+            sender = await db.get(User, last_message.sender_user_id)
             content_text, content_json = ChannelService._decrypted_message_payload(last_message)
             payload["last_message"] = {
                 "id": last_message.id,
                 "channel_id": last_message.channel_id,
                 "sender_user_id": last_message.sender_user_id,
+                "sender_username": sender.username if sender else None,
+                "sender_display_name": sender.display_name if sender else None,
+                "sender_avatar_url": sender.avatar_url if sender else None,
                 "seq_id": last_message.seq_id,
                 "content_type": last_message.content_type.value,
                 "content_text": content_text,
