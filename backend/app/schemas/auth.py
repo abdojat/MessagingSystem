@@ -3,21 +3,18 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.core.identifiers import validate_username as validate_username_value
+
 
 class RegisterRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=64)
+    username: str = Field(min_length=3, max_length=50)
     email: EmailStr | None = None
     password: str = Field(min_length=8, max_length=256)
 
     @field_validator("username")
     @classmethod
     def validate_username_no_spaces(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("username is required")
-        if any(ch.isspace() for ch in normalized):
-            raise ValueError("username must not contain spaces")
-        return normalized
+        return validate_username_value(value)
 
 
 class LoginRequest(BaseModel):

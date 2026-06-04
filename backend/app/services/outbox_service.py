@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.identifiers import normalize_channel_slug, normalize_username
 from app.db.models import Channel, Outbox, OutboxStatus, User
 
 
@@ -11,7 +12,7 @@ async def _get_channel_slug(db: AsyncSession, channel_id: UUID) -> str:
     channel_slug = row.scalar_one_or_none()
     if channel_slug is None:
         raise ValueError(f"channel not found for outbox routing: {channel_id}")
-    return str(channel_slug)
+    return normalize_channel_slug(str(channel_slug))
 
 
 async def _get_username(db: AsyncSession, user_id: UUID) -> str:
@@ -19,7 +20,7 @@ async def _get_username(db: AsyncSession, user_id: UUID) -> str:
     username = row.scalar_one_or_none()
     if username is None:
         raise ValueError(f"user not found for outbox routing: {user_id}")
-    return str(username)
+    return normalize_username(str(username))
 
 
 async def enqueue_message_outbox(

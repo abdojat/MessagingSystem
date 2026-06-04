@@ -42,6 +42,10 @@ Important:
 Development note:
 - In `dev/test/local`, empty `MESSAGE_ENCRYPTION_KEY` uses a fallback key.
 - For demo/prod-like runs, set a real key explicitly.
+- Generate one with:
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
 ## Migrations
 ```bash
@@ -79,6 +83,7 @@ Notes:
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
 The script verifies register/login, channel creation, join, publish, read, and event log entries.
+It uses the `/sync` API for the subscriber check, which keeps the smoke test lightweight without requiring a live WebSocket client.
 
 ## Manual Demo Flow
 1. User A register/login.

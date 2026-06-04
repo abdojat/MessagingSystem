@@ -9,6 +9,7 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.identifiers import SAFE_IDENTIFIER_MAX_LENGTH, normalize_channel_slug, normalize_username
 from app.core.encryption import decrypt_json_payload, decrypt_message
 from app.core.utils import make_invite_token, sha256_hex, utcnow
 from app.db.models import (
@@ -53,11 +54,16 @@ class ChannelService:
     def _slugify(raw: str) -> str:
         normalized = re.sub(r"[^a-z0-9]+", "-", raw.strip().lower()).strip("-")
         normalized = re.sub(r"-{2,}", "-", normalized)
-        return normalized[:64] or "channel"
+        if not normalized:
+            return "channel"
+        if len(normalized) < 3:
+            normalized = f"{normalized}-channel"
+        normalized = normalized[:SAFE_IDENTIFIER_MAX_LENGTH].strip("-")
+        return normalized or "channel"
 
     @staticmethod
     async def _next_available_slug(db: AsyncSession, base_slug: str) -> str:
-        base = base_slug[:64] or "channel"
+        base = base_slug[:SAFE_IDENTIFIER_MAX_LENGTH] or "channel"
         candidate = base
         suffix = 2
         while True:
@@ -65,7 +71,7 @@ class ChannelService:
             if exists_row.scalar_one_or_none() is None:
                 return candidate
             suffix_token = f"-{suffix}"
-            candidate = f"{base[: max(1, 64 - len(suffix_token))]}{suffix_token}"
+            candidate = f"{base[: max(1, SAFE_IDENTIFIER_MAX_LENGTH - len(suffix_token))]}{suffix_token}"
             suffix += 1
 
     @staticmethod
@@ -133,7 +139,7 @@ class ChannelService:
 
     @staticmethod
     async def create_channel(db: AsyncSession, owner_user_id: UUID, req: ChannelCreateRequest, amqp: aio_pika.RobustConnection) -> Channel:
-        provided_slug = req.channel_slug.strip().lower() if req.channel_slug else ""
+        provided_slug = normalize_channel_slug(req.channel_slug) if req.channel_slug else ""
         slug_base = provided_slug if provided_slug else ChannelService._slugify(req.name)
         slug = await ChannelService._next_available_slug(db, slug_base)
         channel = Channel(
@@ -1235,12 +1241,12 @@ class ChannelService:
         user = await db.get(User, user_id)
         if user is None:
             raise AppError("user not found", 404, code="USER_NOT_FOUND")
-        return user.username
+        return normalize_username(user.username)
 
     @staticmethod
     async def _require_channel_slug(db: AsyncSession, channel_id: UUID) -> str:
         channel = await ChannelService.get_channel_or_404(db, channel_id)
-        return channel.channel_slug
+        return normalize_channel_slug(channel.channel_slug)
 
     @staticmethod
     async def _validate_invite(db: AsyncSession, channel_id: UUID, token: str, user_id: UUID) -> ChannelInvite:

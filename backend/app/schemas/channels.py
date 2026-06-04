@@ -4,13 +4,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from app.core.identifiers import validate_channel_slug as validate_channel_slug_value
 from app.db.models import ChannelJoinMode, ChannelVisibility, MembershipRole
 from app.schemas.messages import MessageResponse
 
 
 class ChannelCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    channel_slug: str | None = Field(default=None, min_length=1, max_length=64)
+    channel_slug: str | None = Field(default=None, min_length=1, max_length=50)
     description: str | None = Field(default=None, max_length=1000)
     avatar_url: str | None = Field(default=None, max_length=2048)
     visibility: ChannelVisibility
@@ -21,17 +22,12 @@ class ChannelCreateRequest(BaseModel):
     def validate_channel_slug(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        normalized = value.strip().lower()
-        if not normalized:
-            raise ValueError("channel_slug is required")
-        if any(ch.isspace() for ch in normalized):
-            raise ValueError("channel_slug must not contain spaces")
-        return normalized
+        return validate_channel_slug_value(value)
 
 
 class ChannelPatchRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
-    channel_slug: str | None = Field(default=None, min_length=1, max_length=64)
+    channel_slug: str | None = Field(default=None, min_length=1, max_length=50)
     description: str | None = Field(default=None, max_length=1000)
     avatar_url: str | None = Field(default=None, max_length=2048)
     visibility: ChannelVisibility | None = None
@@ -42,12 +38,7 @@ class ChannelPatchRequest(BaseModel):
     def validate_channel_slug(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        normalized = value.strip().lower()
-        if not normalized:
-            raise ValueError("channel_slug must not be empty")
-        if any(ch.isspace() for ch in normalized):
-            raise ValueError("channel_slug must not contain spaces")
-        return normalized
+        return validate_channel_slug_value(value)
 
     @model_validator(mode="after")
     def validate_non_empty(self) -> "ChannelPatchRequest":

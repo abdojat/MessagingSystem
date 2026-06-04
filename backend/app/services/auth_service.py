@@ -5,6 +5,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.identifiers import normalize_username
 from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from app.core.utils import sha256_hex, utcnow
 from app.db.models import User, UserSession
@@ -14,10 +15,8 @@ from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
 class AuthService:
     @staticmethod
     async def register(db: AsyncSession, req: RegisterRequest) -> User:
-        username = req.username.strip()
+        username = normalize_username(req.username)
         email = req.email.strip().lower() if req.email is not None else None
-        if any(ch.isspace() for ch in username):
-            raise AppError("username must not contain spaces", 400, code="VALIDATION_ERROR", details={"field": "username"})
 
         existing_username = await db.execute(select(User.id).where(User.username == username))
         if existing_username.scalar_one_or_none() is not None:

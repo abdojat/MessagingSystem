@@ -20,6 +20,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.core.identifiers import SAFE_IDENTIFIER_PATTERN
+
 
 class Base(DeclarativeBase):
     pass
@@ -70,7 +72,7 @@ class User(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("position(' ' in username) = 0", name="ck_users_username_no_spaces"),
+        CheckConstraint(f"username ~ '{SAFE_IDENTIFIER_PATTERN}'", name="ck_users_username_safe_identifier"),
     )
 
 
@@ -107,7 +109,7 @@ class Channel(Base):
     last_seq_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
 
     __table_args__ = (
-        CheckConstraint("position(' ' in channel_slug) = 0", name="ck_channels_slug_no_spaces"),
+        CheckConstraint(f"channel_slug ~ '{SAFE_IDENTIFIER_PATTERN}'", name="ck_channels_slug_safe_identifier"),
     )
 
 

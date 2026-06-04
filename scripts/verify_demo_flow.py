@@ -100,19 +100,25 @@ def main() -> int:
             payload={"content_text": plaintext},
         )
 
-        print("5) User B retrieves messages and verifies plaintext")
-        listed = _req(client, "GET", f"/channels/{channel_id}/messages?limit=20&order=desc", token=user_b.access_token)
-        items = listed.get("items", [])
+        print("5) User B syncs and verifies plaintext")
+        synced = _req(
+            client,
+            "POST",
+            "/sync",
+            token=user_b.access_token,
+            payload={"channels": [{"channel_id": channel_id, "last_seen_seq_id": 0}], "since": None, "limit": 50},
+        )
+        items = synced.get("messages", [])
         if not items:
-            raise RuntimeError("No messages returned for User B")
-        received = items[0].get("content_text")
+            raise RuntimeError("No messages returned for User B sync")
+        received = next((item.get("content_text") for item in items if item.get("content_text") == plaintext), None)
         if received != plaintext:
             raise RuntimeError(f"Message mismatch: expected '{plaintext}', got '{received}'")
 
         print("6) User A checks event log has core events")
         events = _req(client, "GET", f"/channels/{channel_id}/events?limit=50", token=user_a.access_token)
         event_types = {e.get("event_type") for e in events.get("items", [])}
-        required = {"channel.created", "message.published"}
+        required = {"channel.created", "membership.joined", "message.published"}
         missing = sorted(required - event_types)
         if missing:
             raise RuntimeError(f"Missing expected event types: {missing}")
