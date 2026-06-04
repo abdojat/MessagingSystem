@@ -399,9 +399,9 @@ flowchart LR
 ### Recommended Minimal Security
 
 - Keep auth working, but remove obvious holes.
-- Fix upload authorization.
-- Remove secrets from tracked files.
-- Constrain slugs/usernames to safe RabbitMQ topic characters.
+- Keep upload authorization documented and covered by tests.
+- Keep `.env` untracked and `.env.example` authoritative.
+- Keep the safe identifier policy documented and covered by tests.
 - If possible, move to httpOnly cookies for the final version.
 
 ## 8. Database and Persistence Review
@@ -529,7 +529,7 @@ The frontend is real and fairly complete.
 
 - Keep the two current backend tests.
 - Add one RabbitMQ/WebSocket integration test.
-- Add one test for the upload authorization fix.
+- Keep the upload authorization regression coverage in the backend tests.
 - Add one frontend smoke test for login -> create channel -> publish -> see event log.
 - Keep the demo verifier script as the supervisor-facing manual check.
 
@@ -624,8 +624,7 @@ The frontend is real and fairly complete.
 | Task | Why it matters | Difficulty | Files/modules likely involved | Suggested direction |
 |---|---|---:|---|---|
 | Add a stronger broker/WebSocket integration test | The project's main selling point still deserves direct proof | Medium | [`backend/tests/`](backend/tests), [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) | Add at least one RabbitMQ/WebSocket integration test and one end-to-end smoke test |
-| Harden routing-key-safe slugs and usernames | RabbitMQ topic semantics can route incorrectly if slugs contain `.` `*` `#` | Medium | [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py), [`backend/app/services/channel_service.py`](backend/app/services/channel_service.py), [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) | Whitelist safe characters or map human slugs to internal broker-safe identifiers |
-| Remove secrets from tracked files | Checked-in secrets are unacceptable | Low | [`.env`](.env), `README.md` | Replace with environment-only secrets and keep only `.env.example` in the repo |
+| Keep safe identifier policy documented and covered by tests | Routing-key safety is already implemented, but it still needs to stay explicit and regression-tested | Low | [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py), [`backend/app/schemas/auth.py`](backend/app/schemas/auth.py), [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) | Keep the safe identifier policy documented and covered by the existing validation tests |
 | Keep browser-side token storage clearly labeled as demo-grade | Prevents overclaiming security | Medium | frontend auth hooks/store/docs | If you cannot move to httpOnly cookies, clearly mark it as demo-only and harden UI inputs/SOP |
 
 ### Should Finish Next
