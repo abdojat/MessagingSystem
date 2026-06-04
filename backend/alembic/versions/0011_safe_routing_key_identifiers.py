@@ -1,15 +1,15 @@
 """enforce safe routing-key identifiers
 
-Revision ID: 0011_safe_routing_key_identifiers
-Revises: 0010_admin_can_edit_channel_permission
+Revision ID: 0011_safe_routing_ids
+Revises: 0010_admin_edit_channel_perm
 Create Date: 2026-06-04
 """
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "0011_safe_routing_key_identifiers"
-down_revision = "0010_admin_can_edit_channel_permission"
+revision = "0011_safe_routing_ids"
+down_revision = "0010_admin_edit_channel_perm"
 branch_labels = None
 depends_on = None
 

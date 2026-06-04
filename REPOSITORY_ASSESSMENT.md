@@ -26,7 +26,7 @@ Biggest strengths:
 Biggest risks:
 - Security is not strong enough for a serious deployment.
 - Frontend auth tokens are browser-managed, which is acceptable for a demo but not production-grade.
-- Runtime verification still depends on the full Docker stack, so compose-level smoke testing remains the best proof.
+- Runtime verification still depends on the full Docker stack, but the demo verifier now exercises the live WebSocket delivery path instead of only REST sync.
 - There is no Merkle tree or anomaly detection feature in the codebase.
 
 Most urgent missing pieces:
@@ -152,11 +152,11 @@ flowchart LR
 | 3. Automatic delivery to subscribers | Mostly complete | [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) `_consume_user`; [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py) `_redis_forward_loop`; membership binding in channel service | Live subscription state is captured at connect time; join-after-connect remains an edge case | High | Emit membership-change websocket updates that refresh subscription state or require explicit client resubscribe after join/accept |
 | 4. Channel management interface/API | Complete | [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`, `list_channels`, `get_channel`, `patch_channel`, `delete_channel`, `channel_stats` | Duplicate root routes are also exposed by [`backend/app/main.py`](backend/app/main.py) | Medium | Keep only one public API surface or document the duplicate compatibility routes |
 | 5. Subscriber management interface/API | Complete | [`backend/app/api/routes/memberships.py`](backend/app/api/routes/memberships.py) `join_channel`, `leave_channel`, `list_members`, `list_pending_requests`, `create_invite`, `accept_invite`, `approve_member`, `add_member_direct`, `promote_member`, `demote_member`, `update_admin_permissions`, `remove_member` | Complex permission matrix; not all flows are exercised by tests | Medium | Add integration tests for join/approve/invite/promote/demote/remove paths |
-| 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) `register`, `login`, `refresh`, `logout`; [`backend/app/core/security.py`](backend/app/core/security.py) `hash_password`, `create_access_token`, `create_refresh_token` | Frontend still uses browser-managed tokens, which is fine for the demo but not production-grade | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
+| 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) `register`, `login`, `refresh`, `logout`; [`backend/app/core/security.py`](backend/app/core/security.py) `hash_password`, `create_access_token`, `create_refresh_token` | Frontend still uses a JS-managed access-token cookie plus `localStorage` refresh token storage, which is fine for the demo but not production-grade | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
 | 7. Authorization/permissions | Complete | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership before returning bytes | Browser token handling remains the larger remaining security caveat | High | Keep backend authorization strong and document the client-side limitation honestly |
 | 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; encryption key must stay out of tracked files | High | Treat encryption key as an external secret only and keep the env story explicit |
 | 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events` | Event logging is not guaranteed if the logging path fails; event visibility is limited to managers | Medium | Keep the log path best-effort, but document that limitation and add a few more high-value event types |
-| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) `bind_user_channel`; [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) `run_outbox_publisher` | No DLQ; DB commit and AMQP binding are not atomic | High | Add broker integration tests and a compensating or retry path if binding fails after commit |
+| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) `bind_user_channel`; [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) `run_outbox_publisher`; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) | No DLQ; DB commit and AMQP binding are not atomic | High | Keep the live verifier and add a broker integration test or compensating retry path if binding fails after commit |
 | 11. Docker/environment setup | Complete | [`docker-compose.yml`](docker-compose.yml); [`backend/Dockerfile`](backend/Dockerfile); [`worker/Dockerfile`](worker/Dockerfile); [`frontend/Dockerfile`](frontend/Dockerfile) | There are manual steps and a few platform caveats in docs | Medium | Keep the env story explicit and keep the compose path as the canonical run path |
 | 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md); [`docs/SECURITY.md`](docs/SECURITY.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
 | 13. Testing | Mostly complete | [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) now covers authz, uploads, identifier validation, and smoke flow; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) is a manual verifier | No frontend tests, no broker integration tests, no load tests | High | Add at least one RabbitMQ/WebSocket integration test and one frontend smoke test; keep the demo verifier as a separate tool |
@@ -252,7 +252,7 @@ flowchart LR
 
 - Pydantic models are used properly in the schema layer.
 - Weak spots:
-  - slugs are only checked for spaces,
+  - slugs and usernames are normalized and constrained to the safe identifier pattern used by RabbitMQ and Redis routing,
   - filenames are not strongly sanitized,
   - upload content is not protected by an access check on download.
 
@@ -280,7 +280,7 @@ flowchart LR
 ### Secrets / Env Handling
 
 - A real `.env` is not tracked in git; only `.env.example` is versioned.
-- Refresh tokens are stored in browser-managed storage.
+- Refresh tokens are stored in browser-managed localStorage; access tokens are mirrored into a JS-managed cookie.
 - Access tokens are stored in JavaScript-managed cookies.
 - WebSocket auth token can be placed in a query string for the helper script and demo flow.
 
@@ -303,7 +303,7 @@ flowchart LR
 
 - Per-user queue fanout is workable for a demo or moderate load, but not ideal for large scale.
 - The worker polls the outbox instead of using an event-driven publisher.
-- Live delivery depends on Redis pub/sub and a single WebSocket manager process.
+- Live delivery depends on Redis pub/sub and a single WebSocket manager process. The verifier now exercises that path directly, but there is still no dedicated CI job for it.
 - There is no obvious horizontal-scaling strategy for websocket state or subscription synchronization.
 
 ## 6. Messaging-System Correctness Review
@@ -386,7 +386,7 @@ flowchart LR
 - Refresh tokens are stored in localStorage.
 - Access tokens are stored in JavaScript-managed cookies.
 - WebSocket auth token is sent as a query string.
-- Upload-content endpoint is unauthenticated.
+- Upload download is authenticated and checks ownership/membership before returning bytes.
 - A real encryption key is committed in `.env`.
 
 ### Missing Security
@@ -422,7 +422,7 @@ The schema in [`backend/app/db/models.py`](backend/app/db/models.py) is broad an
 
 ### Migrations
 
-- Alembic migrations are present from `0001` through `0010`.
+- Alembic migrations are present from `0001` through `0011`.
 - Startup also has a schema repair path in [`backend/app/db/bootstrap_schema.py`](backend/app/db/bootstrap_schema.py).
 
 ### Data Survival
@@ -523,6 +523,7 @@ The frontend is real and fairly complete.
 
 - `npm run typecheck` succeeded.
 - `python -m pytest backend\tests\test_p0_requirements.py -q` succeeded.
+- `docker compose config` succeeded.
 - `python scripts\verify_demo_flow.py --base-url http://localhost:8000/v1` was not rerun in this assessment pass.
 
 ### Practical Testing Plan
@@ -596,7 +597,26 @@ The frontend is real and fairly complete.
 | Documentation | 68 | Good docs set overall, but still missing final-report polish and deliverable packaging |
 | Overall graduation-project readiness | 73 | Functionally strong, with the main remaining gap being test depth and demo-grade auth storage |
 
-## 14. Priority Roadmap
+## 14. Final MVP Status
+
+### Complete
+
+- Authentication, password hashing, session management, membership controls, channel CRUD, message persistence, event logging, upload authorization, safe identifier validation, and server-side encryption at rest.
+
+### Mostly Complete
+
+- Distributed publish/subscribe delivery through PostgreSQL outbox, RabbitMQ, worker dispatch, Redis fanout, and WebSocket push.
+- The repo now has a stronger proof script that exercises live WebSocket delivery as part of the demo flow, but there is still no dedicated CI job for the full stack.
+
+### Demo-Grade
+
+- Frontend token handling. Access tokens are mirrored into a JavaScript-managed cookie and refresh tokens live in `localStorage`, which is acceptable for a university demo but not production-grade session security.
+
+### Future Work
+
+- Frontend smoke tests, broader broker/WebSocket integration coverage, a production-grade session strategy, and any advanced non-MVP features.
+
+## 15. Priority Roadmap
 
 ### Must Finish First
 
@@ -625,7 +645,7 @@ The frontend is real and fairly complete.
 | Add anomaly detection / AI message analysis | Nice advanced feature if your supervisor wants a stretch goal | High | New worker/service + analytics UI | Keep it lightweight: frequency spikes, unread surges, or simple anomaly scoring |
 | Add load/reliability tests | Useful for defending the design in a presentation | Medium | `scripts/`, backend integration tests | Script a small multi-user publish flood and measure latency/throughput |
 
-## 15. Questions for the Student
+## 16. Questions for the Student
 
 1. Should offline subscribers be guaranteed to receive missed messages later, or is live-only delivery acceptable?
 2. Are attachments supposed to be private to channel members, or are they intentionally public once uploaded?
@@ -634,7 +654,7 @@ The frontend is real and fairly complete.
 5. Should channel slugs and usernames be strictly limited to broker-safe characters now, even if that changes the current naming style?
 6. Do you want the final submission to emphasize RabbitMQ semantics, or the application UI and security story?
 
-## 16. Final Honest Verdict
+## 17. Final Honest Verdict
 
 ### Is the project currently acceptable for minimum submission?
 

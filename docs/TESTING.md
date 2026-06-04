@@ -28,10 +28,11 @@ Verifies:
 - Channel creation
 - Join flow
 - Publish flow
-- Authorized plaintext retrieval
+- Live WebSocket delivery to the subscriber
+- Authorized plaintext retrieval via REST `/sync`
 - Event log contains core events
 - Private upload access is enforced by the backend route/service
-Note: the verifier uses REST `/sync` for the subscriber check, so it does not replace a live WebSocket smoke test.
+Note: the verifier now checks both the live WebSocket path and REST `/sync` backfill, so it is the best single proof of the pub/sub chain in this repo.
 
 ## Manual Verification
 - Frontend login/register/channel flows.
@@ -42,4 +43,4 @@ Note: the verifier uses REST `/sync` for the subscriber check, so it does not re
 ## Current Limitations
 - Local Windows `npm run build` may fail with a local Node dependency resolution issue (`caniuse-lite/dist/unpacker/agents`); Docker frontend build succeeds and is the verified path for demo readiness.
 - No dedicated frontend lint script currently exists (`npm run lint` unsupported).
-- WebSocket delivery is best verified manually or through the existing `scripts/ws_client.py` helper rather than the demo smoke test.
+- `scripts/ws_client.py` is still useful for a standalone socket check, but the main demo verifier now exercises live WebSocket delivery as part of the end-to-end proof.

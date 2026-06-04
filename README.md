@@ -83,9 +83,8 @@ Notes:
 ```bash
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
-The script verifies register/login, channel creation, join, publish, read, and event log entries.
-It uses the `/sync` API for the subscriber check, which keeps the smoke test lightweight without requiring a live WebSocket client.
-If you want a quick live delivery check, use `scripts/ws_client.py` with a valid access token against a running backend.
+The script verifies register/login, channel creation, join, live WebSocket delivery, REST sync backfill, and event log entries.
+It is the strongest repo-level proof of the distributed publish/subscribe path currently available.
 
 ## Manual Demo Flow
 1. User A register/login.
@@ -101,6 +100,16 @@ If you want a quick live delivery check, use `scripts/ws_client.py` with a valid
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
+
+## Final MVP Status
+- Complete:
+  - Authentication, authorization, membership management, channel CRUD, encrypted message storage, event logging, upload access checks, safe identifier validation, and backend regression tests.
+- Mostly complete:
+  - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is now exercised by the demo verifier, but there is still no broad CI suite around it.
+- Demo-grade:
+  - Frontend token handling. Access tokens are kept in a JavaScript-managed cookie and refresh tokens are kept in `localStorage`, which is acceptable for a university demo but not production-grade session security.
+- Future work:
+  - Frontend automated smoke tests, richer operational observability, a cleaner production session strategy, and any advanced features beyond the MVP.
 
 ## Security Notes
 - Password hashing enabled.

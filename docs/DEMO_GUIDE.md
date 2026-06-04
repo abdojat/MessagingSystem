@@ -24,7 +24,7 @@ Expected: backend regression tests pass; the current P0 slice includes upload, r
 ```bash
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
-The script waits for API health before running flow checks and verifies the publish/sync demo path.
+The script waits for API health before running flow checks and verifies the live publish/WebSocket/sync demo path.
 
 ## 5) Manual UI Demo (Instructor)
 1. Open `http://localhost:3000`.
@@ -47,6 +47,7 @@ Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not p
 ```bash
 python scripts/ws_client.py --url ws://localhost:8000 --token <access-token>
 ```
+The verifier script is usually the better choice because it proves the whole path end to end with two users.
 
 ## Final Acceptance Checklist
 - [ ] Docker stack starts
