@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -182,6 +184,25 @@ async def test_upload_download_requires_channel_membership(db_session, monkeypat
     with pytest.raises(HTTPException) as exc_info:
         await get_upload_content(upload.id, db_session, outsider)
     assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_upload_storage_path_sanitizes_filename_and_stays_within_base_dir(db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    owner = await AuthService.register(db_session, RegisterRequest(username="owner2", email="owner2@x.com", password="password123"))
+    upload = await MessageService.create_upload(
+        db_session,
+        owner.id,
+        UploadCreateRequest(filename="../../private/secret.txt", content_type="text/plain", size_bytes=5),
+    )
+
+    assert upload.storage_path.startswith(f"{owner.id}/")
+    assert ".." not in upload.storage_path
+
+    target = (Path(tmp_path) / upload.storage_path).resolve()
+    assert str(target).startswith(str(Path(tmp_path).resolve()))
 
 
 @pytest.mark.asyncio

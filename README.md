@@ -38,6 +38,7 @@ Important:
 - `MESSAGE_ENCRYPTION_ENABLED=true`
 - `MESSAGE_ENCRYPTION_KEY` (Fernet key)
 - `NEXT_PUBLIC_API_BASE_URL`
+- Keep `.env` local only; the repository tracks `.env.example` for documentation.
 
 Development note:
 - In `dev/test/local`, empty `MESSAGE_ENCRYPTION_KEY` uses a fallback key.
@@ -84,6 +85,7 @@ python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
 The script verifies register/login, channel creation, join, publish, read, and event log entries.
 It uses the `/sync` API for the subscriber check, which keeps the smoke test lightweight without requiring a live WebSocket client.
+If you want a quick live delivery check, use `scripts/ws_client.py` with a valid access token against a running backend.
 
 ## Manual Demo Flow
 1. User A register/login.
@@ -94,7 +96,8 @@ It uses the `/sync` API for the subscriber check, which keeps the smoke test lig
 6. User B receives/reads.
 7. Show event log panel in channel details.
 8. Show unauthorized access denial on private channel.
-9. Show ciphertext at rest:
+9. Show private upload access is denied to a non-member.
+10. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
@@ -104,6 +107,8 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - JWT auth on protected routes.
 - Membership/permission authorization checks.
 - Message encryption at rest (Fernet).
+- Private uploads require authentication and channel/ownership checks before download.
+- Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.
 - Unauthorized read/publish events logged.
 - Do not commit real secrets.
 

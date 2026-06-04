@@ -1,7 +1,5 @@
 from uuid import UUID
 
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
@@ -378,7 +376,7 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
     if not await MessageService.can_access_upload(db, user.id, file_id):
         raise to_http_exception(AppError("forbidden", 403, code="FORBIDDEN"))
     settings = get_settings()
-    path = Path(settings.uploads_base_dir) / upload.storage_path
+    path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
     if not path.exists():
         raise to_http_exception(AppError("upload content not found", 404, code="NOT_FOUND"))
     return Response(content=path.read_bytes(), media_type=upload.content_type)

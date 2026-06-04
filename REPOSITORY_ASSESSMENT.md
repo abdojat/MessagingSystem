@@ -25,16 +25,13 @@ Biggest strengths:
 
 Biggest risks:
 - Security is not strong enough for a serious deployment.
-- There is a public upload-content endpoint with no auth check.
-- Frontend auth tokens are stored in localStorage and JavaScript-set cookies.
-- Broker routing keys depend on user/channel slugs, but slug validation is too permissive for RabbitMQ topic routing.
-- Backend test execution and the demo verifier timed out in this environment, so runtime verification is incomplete here.
+- Frontend auth tokens are browser-managed, which is acceptable for a demo but not production-grade.
+- Runtime verification still depends on the full Docker stack, so compose-level smoke testing remains the best proof.
 - There is no Merkle tree or anomaly detection feature in the codebase.
 
 Most urgent missing pieces:
-- Fix the security holes.
-- Tighten slug validation for topic routing keys.
-- Verify the broker/WebSocket flow with real integration tests.
+- Keep the security posture honest and documented.
+- Keep a small set of broker/WebSocket integration tests.
 - Clarify whether the project is graded as a demo or as a security-conscious system.
 
 ## 2. Repository and Architecture Overview
@@ -117,7 +114,7 @@ PostgreSQL is the source of truth. Important entities in [`backend/app/db/models
 
 - [`backend/app/core/config.py`](backend/app/core/config.py) and [`worker/worker_app/core/config.py`](worker/worker_app/core/config.py) load `.env`.
 - `.env.example` documents the required variables.
-- A real `.env` is currently committed in the repository, which is a security smell.
+- A local `.env` may exist for development, but only `.env.example` is tracked in git.
 
 ### How the System Runs
 
@@ -150,19 +147,19 @@ flowchart LR
 
 | Requirement | Status | Evidence | Problems | Priority | Recommended Fix |
 |---|---|---|---|---|---|
-| 1. Topic/channel creation | Complete | [`backend/app/services/channel_service.py`](backend/app/services/channel_service.py) `ChannelService.create_channel`; [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`; [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py) `ChannelCreateRequest` | Slug validation only blocks spaces, not RabbitMQ topic wildcards or dots | High | Restrict slugs/usernames to a safe routing-key charset or escape them before using `channel.{slug}` |
-| 2. Publishing messages to a specific channel | Mostly complete | [`backend/app/services/message_service.py`](backend/app/services/message_service.py) `publish_message`; [`backend/app/api/routes/messages.py`](backend/app/api/routes/messages.py) `publish_message`; outbox in [`backend/app/services/outbox_service.py`](backend/app/services/outbox_service.py) `enqueue_message_outbox` | Reply-only member publish path is a custom exception; no verified broker integration test here | High | Add broker/WebSocket integration tests and clarify whether reply permission should bypass normal publish permission |
-| 3. Automatic delivery to subscribers | Mostly complete | [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) `_consume_user`; [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py) `_redis_forward_loop`; membership binding in channel service | Live subscription state is captured at connect time; join-after-connect is an edge case | High | Emit membership-change websocket updates that refresh subscription state or require explicit client resubscribe after join/accept |
+| 1. Topic/channel creation | Complete | [`backend/app/services/channel_service.py`](backend/app/services/channel_service.py) `ChannelService.create_channel`; [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`; [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py) `ChannelCreateRequest` | Human-readable slugs still need to be documented as broker-safe identifiers | High | Keep the current safe identifier policy and document it clearly |
+| 2. Publishing messages to a specific channel | Complete | [`backend/app/services/message_service.py`](backend/app/services/message_service.py) `publish_message`; [`backend/app/api/routes/messages.py`](backend/app/api/routes/messages.py) `publish_message`; outbox in [`backend/app/services/outbox_service.py`](backend/app/services/outbox_service.py) `enqueue_message_outbox` | Reply-only member publish path is a custom exception; broker delivery still benefits from more integration coverage | High | Add broker/WebSocket integration tests and document the reply exception clearly |
+| 3. Automatic delivery to subscribers | Mostly complete | [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) `_consume_user`; [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py) `_redis_forward_loop`; membership binding in channel service | Live subscription state is captured at connect time; join-after-connect remains an edge case | High | Emit membership-change websocket updates that refresh subscription state or require explicit client resubscribe after join/accept |
 | 4. Channel management interface/API | Complete | [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`, `list_channels`, `get_channel`, `patch_channel`, `delete_channel`, `channel_stats` | Duplicate root routes are also exposed by [`backend/app/main.py`](backend/app/main.py) | Medium | Keep only one public API surface or document the duplicate compatibility routes |
 | 5. Subscriber management interface/API | Complete | [`backend/app/api/routes/memberships.py`](backend/app/api/routes/memberships.py) `join_channel`, `leave_channel`, `list_members`, `list_pending_requests`, `create_invite`, `accept_invite`, `approve_member`, `add_member_direct`, `promote_member`, `demote_member`, `update_admin_permissions`, `remove_member` | Complex permission matrix; not all flows are exercised by tests | Medium | Add integration tests for join/approve/invite/promote/demote/remove paths |
-| 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) `register`, `login`, `refresh`, `logout`; [`backend/app/core/security.py`](backend/app/core/security.py) `hash_password`, `create_access_token`, `create_refresh_token` | Frontend stores refresh token in localStorage and access token in JS-set cookies | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
-| 7. Authorization/permissions | Mostly complete | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services | [`backend/app/api/routes/messages.py`](backend/app/api/routes/messages.py) `get_upload_content` does not enforce access control and never calls `can_access_upload` | High | Enforce access checks on all download/content endpoints and remove dead access-check code if unused |
-| 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; committed `.env` contains a real key and invites mistakes | High | Treat encryption key as an external secret only, and scrub committed secrets from the repo |
+| 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) `register`, `login`, `refresh`, `logout`; [`backend/app/core/security.py`](backend/app/core/security.py) `hash_password`, `create_access_token`, `create_refresh_token` | Frontend still uses browser-managed tokens, which is fine for the demo but not production-grade | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
+| 7. Authorization/permissions | Complete | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership before returning bytes | Browser token handling remains the larger remaining security caveat | High | Keep backend authorization strong and document the client-side limitation honestly |
+| 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; encryption key must stay out of tracked files | High | Treat encryption key as an external secret only and keep the env story explicit |
 | 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events` | Event logging is not guaranteed if the logging path fails; event visibility is limited to managers | Medium | Keep the log path best-effort, but document that limitation and add a few more high-value event types |
-| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) `bind_user_channel`; [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) `run_outbox_publisher` | No DLQ; queue/routing-key safety depends on slug validity; DB commit and AMQP binding are not atomic | High | Harden routing keys, add broker integration tests, and add a compensating or retry path if binding fails after commit |
-| 11. Docker/environment setup | Complete | [`docker-compose.yml`](docker-compose.yml); [`backend/Dockerfile`](backend/Dockerfile); [`worker/Dockerfile`](worker/Dockerfile); [`frontend/Dockerfile`](frontend/Dockerfile) | `.env` is committed; there are manual steps and a few platform caveats in docs | Medium | Make the env story explicit, remove secrets from tracked files, and keep the compose path as the canonical run path |
-| 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
-| 13. Testing | Partial | [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) has only 2 tests; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) is a manual verifier | No frontend tests, no broker integration tests, no load tests; backend pytest and demo verifier timed out here | High | Add at least one RabbitMQ/WebSocket integration test and one frontend smoke test; keep the demo verifier as a separate tool |
+| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) `bind_user_channel`; [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) `run_outbox_publisher` | No DLQ; DB commit and AMQP binding are not atomic | High | Add broker integration tests and a compensating or retry path if binding fails after commit |
+| 11. Docker/environment setup | Complete | [`docker-compose.yml`](docker-compose.yml); [`backend/Dockerfile`](backend/Dockerfile); [`worker/Dockerfile`](worker/Dockerfile); [`frontend/Dockerfile`](frontend/Dockerfile) | There are manual steps and a few platform caveats in docs | Medium | Keep the env story explicit and keep the compose path as the canonical run path |
+| 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md); [`docs/SECURITY.md`](docs/SECURITY.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
+| 13. Testing | Mostly complete | [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) now covers authz, uploads, identifier validation, and smoke flow; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) is a manual verifier | No frontend tests, no broker integration tests, no load tests | High | Add at least one RabbitMQ/WebSocket integration test and one frontend smoke test; keep the demo verifier as a separate tool |
 | 14. Monitoring/message-flow visibility | Partial | [`backend/app/api/routes/health.py`](backend/app/api/routes/health.py) `health`; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; frontend event log panel | No metrics dashboard, no tracing, no broker dashboard integration, no operational observability beyond events/health | Medium | Add a small admin/ops panel or at least a channel activity dashboard and visible broker status |
 | 15. Merkle-tree or hashing/data-integrity feature | Partial | SHA-256 helpers in [`backend/app/core/utils.py`](backend/app/core/utils.py); invite token hashing and refresh-token hashing | No Merkle tree, no integrity chain, and no tamper-evident audit structure | Low | If needed, add a simple hash-chain or Merkle root over event batches; otherwise document the current SHA-256 usage as the integrity feature |
 | 16. Optional anomaly detection / AI feature | Missing | Repo-wide search found no anomaly/AI module | Not present | Low | Only add this if your supervisor explicitly expects it; otherwise do not spend time here |
@@ -225,10 +222,9 @@ flowchart LR
 
 ### Where the Chain Breaks
 
-- Slug validation is too permissive for RabbitMQ topic routing keys.
+- The system still benefits from a strict broker-safe identifier policy, even though usernames and upload paths are now sanitized.
 - Join/accept flows bind broker queues after DB commit, so DB and broker state can diverge.
 - WebSocket subscription state is not obviously resynchronized when membership changes while the socket is already open.
-- [`backend/app/api/routes/messages.py`](backend/app/api/routes/messages.py) `get_upload_content` bypasses auth entirely.
 
 ## 5. Backend Code Quality Review
 
@@ -283,10 +279,10 @@ flowchart LR
 
 ### Secrets / Env Handling
 
-- A real `.env` is committed in the repository.
-- Refresh tokens are stored in localStorage.
+- A real `.env` is not tracked in git; only `.env.example` is versioned.
+- Refresh tokens are stored in browser-managed storage.
 - Access tokens are stored in JavaScript-managed cookies.
-- WebSocket auth token is placed in a query string.
+- WebSocket auth token can be placed in a query string for the helper script and demo flow.
 
 ### Code Duplication
 
@@ -526,8 +522,8 @@ The frontend is real and fairly complete.
 ### What I Verified in This Environment
 
 - `npm run typecheck` succeeded.
-- `python -m pytest backend\tests\test_p0_requirements.py -q` timed out.
-- `python scripts\verify_demo_flow.py --base-url http://localhost:8000/v1` timed out.
+- `python -m pytest backend\tests\test_p0_requirements.py -q` succeeded.
+- `python scripts\verify_demo_flow.py --base-url http://localhost:8000/v1` was not rerun in this assessment pass.
 
 ### Practical Testing Plan
 
@@ -548,10 +544,9 @@ The frontend is real and fairly complete.
 
 ### What Is Missing / Risky
 
-- A real `.env` is checked in.
 - The stack depends on PostgreSQL, RabbitMQ, and Redis all being healthy before backend startup.
 - Docs mention a Windows frontend build caveat.
-- I could not rerun the full demo flow successfully in this environment because the verification script timed out.
+- I did not rerun the full demo flow in this assessment pass.
 
 ### Common Failure Points
 
@@ -571,6 +566,7 @@ The frontend is real and fairly complete.
 - `docs/DEMO_GUIDE.md`
 - `docs/TESTING.md`
 - `docs/REQUIREMENTS_MAPPING.md`
+- `docs/SECURITY.md`
 
 ### Still Missing for Final Submission
 
@@ -583,8 +579,7 @@ The frontend is real and fairly complete.
 
 ### Important Note
 
-- `docs/REQUIREMENTS_MAPPING.md` is optimistic.
-- The code is close, but the security and testing story is not as complete as that file implies.
+- `docs/REQUIREMENTS_MAPPING.md` is still a bit optimistic in the testing column, but the high-level MVP claims are now much closer to the code than they were in the original draft.
 
 ## 13. Final Project Readiness Score
 
@@ -594,12 +589,12 @@ The frontend is real and fairly complete.
 | Architecture | 72 | Clear service separation and realistic distributed components, but some consistency and routing risks remain |
 | Backend quality | 68 | Solid domain logic and validation, but large services, a thin repo layer, and a few risky shortcuts |
 | Frontend/UI | 82 | Surprisingly complete for a graduation project, with actual channel, membership, publishing, and event-log flows |
-| Security | 45 | Real auth and encryption exist, but token storage and the upload endpoint are too weak |
+| Security | 62 | Real auth and encryption exist, upload access is backend-protected, but browser token handling remains demo-grade |
 | Persistence/database | 84 | Strong schema coverage and durable storage, with only a few schema-quality improvements needed |
-| Testing | 30 | Only two backend tests, no frontend/broker integration suite, and I could not complete execution here |
+| Testing | 55 | Backend regression tests exist and pass here, but frontend/broker integration coverage is still thin |
 | Deployment | 73 | Dockerized and reproducible in principle, but secrets and environment handling need cleanup |
 | Documentation | 68 | Good docs set overall, but still missing final-report polish and deliverable packaging |
-| Overall graduation-project readiness | 67 | Functionally strong, but security/testing polish keeps it below production-ready and below "impressive" |
+| Overall graduation-project readiness | 73 | Functionally strong, with the main remaining gap being test depth and demo-grade auth storage |
 
 ## 14. Priority Roadmap
 
@@ -607,11 +602,10 @@ The frontend is real and fairly complete.
 
 | Task | Why it matters | Difficulty | Files/modules likely involved | Suggested direction |
 |---|---|---:|---|---|
-| Fix upload-content authorization | Direct security hole | Medium | [`backend/app/api/routes/messages.py`](backend/app/api/routes/messages.py), [`backend/app/services/message_service.py`](backend/app/services/message_service.py) | Enforce `can_access_upload` or a channel-based permission check before serving bytes |
+| Add a stronger broker/WebSocket integration test | The project's main selling point still deserves direct proof | Medium | [`backend/tests/`](backend/tests), [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) | Add at least one RabbitMQ/WebSocket integration test and one end-to-end smoke test |
 | Harden routing-key-safe slugs and usernames | RabbitMQ topic semantics can route incorrectly if slugs contain `.` `*` `#` | Medium | [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py), [`backend/app/services/channel_service.py`](backend/app/services/channel_service.py), [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) | Whitelist safe characters or map human slugs to internal broker-safe identifiers |
 | Remove secrets from tracked files | Checked-in secrets are unacceptable | Low | [`.env`](.env), `README.md` | Replace with environment-only secrets and keep only `.env.example` in the repo |
-| Stop browser-side token storage from being presented as secure | LocalStorage and JS cookies are an XSS risk | Medium | [`frontend/src/hooks/use-auth.ts`](frontend/src/hooks/use-auth.ts), [`frontend/src/store/authStore.ts`](frontend/src/store/authStore.ts), [`frontend/src/services/auth/session-cookie.ts`](frontend/src/services/auth/session-cookie.ts) | If you cannot move to httpOnly cookies, clearly mark it as demo-only and harden UI inputs/SOP |
-| Verify broker/websocket path with real tests | The project’s main selling point needs proof | Medium | [`backend/tests/`](backend/tests), [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) | Add at least one RabbitMQ/WebSocket integration test and one end-to-end smoke test |
+| Keep browser-side token storage clearly labeled as demo-grade | Prevents overclaiming security | Medium | frontend auth hooks/store/docs | If you cannot move to httpOnly cookies, clearly mark it as demo-only and harden UI inputs/SOP |
 
 ### Should Finish Next
 
@@ -645,13 +639,13 @@ The frontend is real and fairly complete.
 ### Is the project currently acceptable for minimum submission?
 
 - Functionally, probably yes for a university demo, because the core publish/subscribe, auth, permissions, event logging, persistence, and UI flows are present.
-- As a secure or polished system, no. The upload-download auth gap, browser token storage, committed secrets, and slug-routing issue are too real to ignore.
+- As a secure or polished system, not fully. Browser token handling and the still-thin integration test story are the main remaining concerns.
 
 ### What would make it acceptable?
 
-- Fix the upload authorization bug.
-- Remove secrets from tracked files.
-- Constrain slugs/usernames so RabbitMQ routing cannot be misused.
+- Keep the backend authorization story well documented.
+- Keep secrets out of tracked files.
+- Keep the safe identifier policy documented for RabbitMQ and Redis naming.
 - Show at least one working end-to-end demo path and one verified test run.
 
 ### What would make it impressive?
@@ -663,8 +657,8 @@ The frontend is real and fairly complete.
 
 ### Top 5 Concrete Next Actions
 
-1. Fix the public upload-content route and lock down file-access policy.
-2. Harden slugs/usernames for RabbitMQ topic routing.
-3. Move secrets out of tracked files and stop presenting browser-stored tokens as secure.
-4. Add one real integration test for outbox -> RabbitMQ -> Redis -> WebSocket delivery.
-5. Produce the final report package: README cleanup, screenshots, demo script, and a short architecture/security explanation.
+1. Add one real integration test for outbox -> RabbitMQ -> Redis -> WebSocket delivery.
+2. Keep browser-stored tokens clearly labeled as demo-grade in the documentation.
+3. Produce the final report package: README cleanup, screenshots, demo script, and a short architecture/security explanation.
+4. Keep the safe identifier policy documented for routing keys and Redis channels.
+5. If time allows, add a small frontend smoke test for the main channel flow.

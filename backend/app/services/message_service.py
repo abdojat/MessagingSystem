@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.core.identifiers import normalize_upload_filename
 from app.core.encryption import decrypt_json_payload, decrypt_message, encrypt_json_payload, encrypt_message
 from app.core.utils import utcnow
 from app.db.models import (
@@ -726,13 +727,14 @@ class MessageService:
         allowed_prefixes = ("image/", "video/", "audio/", "text/", "application/json", "application/pdf")
         if not req.content_type.startswith(allowed_prefixes):
             raise AppError("content_type not allowed", 400, code="VALIDATION_ERROR")
+        safe_filename = normalize_upload_filename(req.filename)
         upload = Upload(
             owner_user_id=actor_user_id,
             filename=req.filename,
             content_type=req.content_type,
             size_bytes=req.size_bytes,
             checksum=req.checksum,
-            storage_path=f"{actor_user_id}/{uuid4()}-{req.filename}",
+            storage_path=f"{actor_user_id}/{uuid4()}-{safe_filename}",
             public_url=None,
         )
         db.add(upload)
@@ -836,14 +838,23 @@ class MessageService:
             if digest != upload.checksum:
                 raise AppError("checksum mismatch", 400, code="VALIDATION_ERROR")
 
-        base_dir = Path(settings.uploads_base_dir)
-        full_path = base_dir / upload.storage_path
+        full_path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(content)
         upload.public_url = f"/v1/uploads/{upload.id}/content"
         await db.commit()
         await db.refresh(upload)
         return upload
+
+    @staticmethod
+    def _resolve_upload_path(base_dir_value: str, storage_path: str) -> Path:
+        base_dir = Path(base_dir_value).resolve()
+        full_path = (base_dir / storage_path).resolve()
+        try:
+            full_path.relative_to(base_dir)
+        except ValueError as exc:
+            raise AppError("upload not found", 404, code="NOT_FOUND") from exc
+        return full_path
 
     @staticmethod
     async def can_access_upload(db: AsyncSession, actor_user_id: UUID, file_id: UUID) -> bool:

@@ -18,13 +18,13 @@ docker compose run --rm backend sh -lc "alembic upgrade head"
 ```bash
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
 ```
-Expected: `2 passed`.
+Expected: backend regression tests pass; the current P0 slice includes upload, routing-key, encryption, authorization, and smoke-flow checks.
 
 ## 4) Run Demo Verifier Script
 ```bash
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
-The script now waits for API health before running flow checks.
+The script waits for API health before running flow checks and verifies the publish/sync demo path.
 
 ## 5) Manual UI Demo (Instructor)
 1. Open `http://localhost:3000`.
@@ -37,11 +37,16 @@ The script now waits for API health before running flow checks.
 8. Open channel details -> Event Log panel.
 9. Show unauthorized behavior:
    - Use a private channel where non-member read/publish is denied.
+   - Optionally show a private upload download blocked for a non-member.
 10. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
 Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not plaintext.
+11. Optional: verify live WebSocket delivery with the helper script:
+```bash
+python scripts/ws_client.py --url ws://localhost:8000 --token <access-token>
+```
 
 ## Final Acceptance Checklist
 - [ ] Docker stack starts

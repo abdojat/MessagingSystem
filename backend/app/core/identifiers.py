@@ -1,10 +1,12 @@
 import re
+from pathlib import Path
 
 from app.core.errors import AppError
 
 SAFE_IDENTIFIER_PATTERN = r"^[A-Za-z0-9_-]{3,50}$"
 SAFE_IDENTIFIER_RE = re.compile(SAFE_IDENTIFIER_PATTERN)
 SAFE_IDENTIFIER_MAX_LENGTH = 50
+SAFE_UPLOAD_FILENAME_MAX_LENGTH = 100
 
 
 def _normalize_identifier(value: str, *, field: str, lowercase: bool = False) -> str:
@@ -41,3 +43,19 @@ def normalize_username(value: str) -> str:
 
 def normalize_channel_slug(value: str) -> str:
     return _normalize_identifier(value, field="channel_slug", lowercase=True)
+
+
+def normalize_upload_filename(value: str) -> str:
+    """
+    Convert a user-supplied filename into a safe storage-path component.
+
+    The original filename is still preserved in the database for display, but the
+    storage path must never contain path separators or traversal segments.
+    """
+
+    basename = Path(value).name.strip()
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", basename)
+    cleaned = cleaned.strip("._")
+    if not cleaned:
+        cleaned = "upload"
+    return cleaned[:SAFE_UPLOAD_FILENAME_MAX_LENGTH]
