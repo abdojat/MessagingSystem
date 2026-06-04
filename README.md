@@ -83,7 +83,7 @@ Notes:
 ```bash
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
-The script verifies register/login, channel creation, join, live WebSocket delivery, REST sync backfill, and event log entries.
+The script verifies register/login, channel creation, join, live WebSocket delivery when available, REST sync backfill, event log entries, and an unauthorized upload access check.
 It is the strongest repo-level proof of the distributed publish/subscribe path currently available.
 
 ## Manual Demo Flow
@@ -105,11 +105,19 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Complete:
   - Authentication, authorization, membership management, channel CRUD, encrypted message storage, event logging, upload access checks, safe identifier validation, and backend regression tests.
 - Mostly complete:
-  - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is now exercised by the demo verifier, but there is still no broad CI suite around it.
+  - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier, but there is still no broad CI suite around it.
 - Demo-grade:
   - Frontend token handling. Access tokens are kept in a JavaScript-managed cookie and refresh tokens are kept in `localStorage`, which is acceptable for a university demo but not production-grade session security.
 - Future work:
   - Frontend automated smoke tests, richer operational observability, a cleaner production session strategy, and any advanced features beyond the MVP.
+
+## Final Submission Docs
+- [Final MVP Status](docs/FINAL_MVP_STATUS.md)
+- [Final Demo Checklist](docs/FINAL_DEMO_CHECKLIST.md)
+- [Security](docs/SECURITY.md)
+- [Testing](docs/TESTING.md)
+- [Requirements Mapping](docs/REQUIREMENTS_MAPPING.md)
+- [Repository Assessment](REPOSITORY_ASSESSMENT.md)
 
 ## Security Notes
 - Password hashing enabled.

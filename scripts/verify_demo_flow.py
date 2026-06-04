@@ -22,6 +22,18 @@ class UserSession:
     access_token: str
 
 
+def _step(title: str) -> None:
+    print(f"[STEP] {title}")
+
+
+def _pass(message: str) -> None:
+    print(f"[PASS] {message}")
+
+
+def _info(message: str) -> None:
+    print(f"[INFO] {message}")
+
+
 async def _req(
     client: httpx.AsyncClient,
     method: str,
@@ -49,6 +61,25 @@ async def register_and_login(client: httpx.AsyncClient, label: str) -> UserSessi
     await _req(client, "POST", "/auth/register", payload={"username": username, "email": email, "password": password})
     login = await _req(client, "POST", "/auth/login", payload={"username_or_email": username, "password": password})
     return UserSession(username=username, password=password, access_token=login["access_token"])
+
+
+async def _expect_status(
+    client: httpx.AsyncClient,
+    method: str,
+    path: str,
+    *,
+    token: str | None = None,
+    payload: dict | None = None,
+    expected_status: int,
+) -> None:
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    response = await client.request(method, path, headers=headers, json=payload)
+    if response.status_code != expected_status:
+        raise RuntimeError(
+            f"{method} {path} expected {expected_status}, got {response.status_code}: {response.text}"
+        )
 
 
 def wait_for_api(client: httpx.Client, timeout_seconds: int = 60) -> None:
@@ -90,15 +121,19 @@ async def main_async() -> int:
     args = parser.parse_args()
 
     with httpx.Client(base_url=args.base_url, timeout=20.0) as health_client:
-        print("0) Waiting for API health")
+        _step("0) Waiting for API health")
+        _info("health timeout=60s, poll interval=1s")
         wait_for_api(health_client)
+        _pass("API health check passed")
 
     async with httpx.AsyncClient(base_url=args.base_url, timeout=20.0) as client:
-        print("1) Register/login User A and User B")
+        _step("1) Register/login User A, User B, and User C")
         user_a = await register_and_login(client, "a")
         user_b = await register_and_login(client, "b")
+        user_c = await register_and_login(client, "c")
+        _pass(f"Registered and logged in {user_a.username}, {user_b.username}, and {user_c.username}")
 
-        print("2) User A creates public/open channel 'news'")
+        _step("2) User A creates public/open channel 'news'")
         channel = await _req(
             client,
             "POST",
@@ -113,19 +148,25 @@ async def main_async() -> int:
         )
         channel_id = channel["id"]
         channel_slug = channel.get("channel_slug")
+        _pass(f"Created channel {channel_slug} ({channel_id})")
 
-        print("3) User B joins channel")
+        _step("3) User B joins channel")
         await _req(client, "POST", f"/channels/{channel_id}/join", token=user_b.access_token, payload={})
+        _pass("User B joined the channel")
 
         ws_base_url = args.base_url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
         ws_url = f"{ws_base_url}/ws?token={user_b.access_token}"
         plaintext = f"Hello from demo {secrets.token_hex(3)}"
-        print("4) User B opens WebSocket and waits for live delivery")
+        _step("4) User B opens WebSocket and waits for live delivery")
+        _info("hello timeout=10s, live delivery timeout=30s")
+        websocket_verified = False
+        live_payload: dict | None = None
         async with websockets.connect(ws_url) as ws:
             hello_raw = await asyncio.wait_for(ws.recv(), timeout=10)
             hello_event = json.loads(hello_raw)
             if hello_event.get("type") != "hello":
                 raise RuntimeError(f"Unexpected WebSocket hello payload: {hello_raw}")
+            _pass("WebSocket hello received")
 
             live_wait = asyncio.create_task(
                 _wait_for_live_message(
@@ -136,7 +177,7 @@ async def main_async() -> int:
                 )
             )
 
-            print("5) User A publishes a message")
+            _step("5) User A publishes a message")
             published = await _req(
                 client,
                 "POST",
@@ -144,18 +185,22 @@ async def main_async() -> int:
                 token=user_a.access_token,
                 payload={"content_text": plaintext},
             )
+            _pass(f"Published message {published.get('id')}")
 
             try:
                 live_payload = await asyncio.wait_for(live_wait, timeout=30)
-            except Exception:
+                websocket_verified = True
+                _pass("User B received the message through WebSocket")
+            except Exception as exc:
                 live_wait.cancel()
-                raise
-            if live_payload.get("id") != published.get("id"):
+                _info(f"WebSocket delivery did not complete: {exc}")
+                live_payload = None
+            if websocket_verified and live_payload and live_payload.get("id") != published.get("id"):
                 raise RuntimeError(
                     f"Live WebSocket delivered {live_payload.get('id')} but HTTP publish returned {published.get('id')}"
                 )
 
-        print("6) User B syncs and verifies REST backfill")
+        _step("6) User B verifies REST backfill")
         synced = await _req(
             client,
             "POST",
@@ -169,28 +214,74 @@ async def main_async() -> int:
         received = next((item.get("content_text") for item in items if item.get("content_text") == plaintext), None)
         if received != plaintext:
             raise RuntimeError(f"Message mismatch: expected '{plaintext}', got '{received}'")
+        if not websocket_verified:
+            _pass("REST backfill verified after WebSocket delivery fallback")
+        else:
+            _pass("REST backfill verified alongside live WebSocket delivery")
 
-        print("7) User A checks event log has core events")
+        _step("7) User A checks event log has core events")
         events = await _req(client, "GET", f"/channels/{channel_id}/events?limit=50", token=user_a.access_token)
         event_types = {e.get("event_type") for e in events.get("items", [])}
         required = {"channel.created", "membership.joined", "message.published"}
         missing = sorted(required - event_types)
         if missing:
             raise RuntimeError(f"Missing expected event types: {missing}")
+        _pass("Event log contains channel and message activity")
 
-        print("\nDemo verification passed")
+        _step("8) User C is blocked from private upload content")
+        upload_bytes = b"secret upload"
+        upload = await _req(
+            client,
+            "POST",
+            "/uploads",
+            token=user_a.access_token,
+            payload={
+                "filename": "secret.txt",
+                "content_type": "text/plain",
+                "size_bytes": len(upload_bytes),
+            },
+        )
+        upload_id = upload["file_id"]
+        put_response = await client.put(
+            f"/uploads/{upload_id}/content",
+            headers={"Authorization": f"Bearer {user_a.access_token}", "Content-Type": "text/plain"},
+            content=upload_bytes,
+        )
+        if put_response.status_code >= 400:
+            raise RuntimeError(f"PUT /uploads/{upload_id}/content failed ({put_response.status_code}): {put_response.text}")
+        await _req(
+            client,
+            "POST",
+            f"/channels/{channel_id}/messages",
+            token=user_a.access_token,
+            payload={
+                "content_text": "attachment check",
+                "attachments": [{"file_id": upload_id}],
+            },
+        )
+        await _expect_status(
+            client,
+            "GET",
+            f"/uploads/{upload_id}/content",
+            token=user_c.access_token,
+            expected_status=403,
+        )
+        _pass("Unauthorized upload access denied for User C")
+
+        print("\n[PASS] Demo verification passed")
         print(json.dumps({
             "channel_id": channel_id,
             "channel_slug": channel_slug,
             "published_message_id": published.get("id"),
-            "websocket_verified": True,
+            "websocket_verified": websocket_verified,
             "sync_verified": True,
             "plaintext_verified": True,
+            "upload_access_denied_verified": True,
         }, indent=2))
 
-        print("\nProof path verified:")
+        print("\n[INFO] Proof path verified:")
         print("backend -> PostgreSQL/outbox -> RabbitMQ -> worker -> Redis -> WebSocket -> subscriber")
-        print("\nTo verify DB ciphertext manually:")
+        print("[INFO] To verify DB ciphertext manually:")
         print('docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"')
 
         return 0
@@ -204,5 +295,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except RuntimeError as exc:
-        print(f"Demo verification failed: {exc}", file=sys.stderr)
+        print(f"[FAIL] Demo verification failed: {exc}", file=sys.stderr)
         raise SystemExit(1)

@@ -18,36 +18,33 @@ docker compose run --rm backend sh -lc "alembic upgrade head"
 ```bash
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
 ```
-Expected: backend regression tests pass; the current P0 slice includes upload, routing-key, encryption, authorization, and smoke-flow checks.
+Expected: backend regression tests pass; the current P0 slice includes upload authorization, routing-key-safe identifier validation, encryption, authorization, and smoke-flow checks.
 
 ## 4) Run Demo Verifier Script
 ```bash
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
-The script waits for API health before running flow checks and verifies the live publish/WebSocket/sync demo path.
+The script waits for API health before running flow checks and verifies the live publish/WebSocket/sync demo path, plus the unauthorized upload access check.
 
 ## 5) Manual UI Demo (Instructor)
 1. Open `http://localhost:3000`.
 2. Register/login User A.
 3. Register/login User B (incognito or second browser profile).
-4. User A creates a channel.
-5. User B joins/subscribes.
-6. User A publishes a message.
-7. User B receives/reads message.
-8. Open channel details -> Event Log panel.
-9. Show unauthorized behavior:
-   - Use a private channel where non-member read/publish is denied.
-   - Optionally show a private upload download blocked for a non-member.
-10. Show ciphertext at rest:
+4. Register/login User C in a third window or separate profile.
+5. User A creates a channel.
+6. User B joins/subscribes.
+7. User A publishes a message.
+8. User B receives/reads message.
+9. Open channel details -> Event Log panel.
+10. Show unauthorized behavior:
+   - Use a private upload download blocked for User C.
+   - Optionally show a private channel where non-member read/publish is denied.
+11. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
 Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not plaintext.
-11. Optional: verify live WebSocket delivery with the helper script:
-```bash
-python scripts/ws_client.py --url ws://localhost:8000 --token <access-token>
-```
-The verifier script is usually the better choice because it proves the whole path end to end with two users.
+12. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path.
 
 ## Final Acceptance Checklist
 - [ ] Docker stack starts
@@ -61,5 +58,6 @@ The verifier script is usually the better choice because it proves the whole pat
 - [ ] User B can receive
 - [ ] Event log shows activity
 - [ ] Unauthorized access denied
+- [ ] Unauthorized upload access denied
 - [ ] DB stores ciphertext, not plaintext
 - [ ] README explains full run flow

@@ -4,10 +4,13 @@
 - API routes that expose user, channel, message, event, and upload data require JWT-based authentication.
 - Passwords are hashed with a strong password hashing algorithm in the backend.
 - Refresh tokens are stored server-side as hashes, not plain text.
+- The frontend keeps the access token in a JavaScript-managed cookie and the refresh token in `localStorage`, which is acceptable for this university demo but not production-grade session security.
+- WebSocket connections use a short-lived access token in the connection URL for the demo flow and verifier.
 
 ## Authorization
 - Channel reads and writes check membership/role permissions.
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
+- The upload route allows content only to the owner, and the download route only allows the owner or a user who is a member of a channel that references the upload.
 - Unauthorized publish/read attempts are logged as security events.
 
 ## Message Encryption
@@ -19,7 +22,7 @@
 - Do not commit real `.env` files, database passwords, JWT secrets, or encryption keys.
 - The repository keeps `.env.example` as documentation for required settings.
 - A local `.env` file may be used for development, but it should remain untracked.
-- In the current repository state, `.env` is present locally but is not tracked by git.
+- In the current repository state, `git ls-files` does not show any tracked `.env` file.
 
 ## Routing-Key and Path Safety
 - RabbitMQ routing keys and Redis channels are normalized before use.
@@ -29,5 +32,5 @@
 
 ## Known Limitations
 - This project is a university MVP, not a production-hardened identity or secret-management platform.
-- The frontend stores the access token in a JavaScript-managed cookie and the refresh token in `localStorage`; that is acceptable for the demo flow, but it is not production-grade session security.
-- The frontend also places the access token on WebSocket connection URLs for the demo verifier and client flow, so the system should not be presented as if it were using httpOnly Secure SameSite cookies.
+- The frontend token storage and WebSocket token transport are demo-oriented and should not be presented as production-grade session security.
+- The project does not claim end-to-end encryption; it uses server-side encryption at rest.

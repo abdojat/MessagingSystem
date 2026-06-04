@@ -45,4 +45,4 @@ Channel events are stored in `events` and exposed via `GET /v1/channels/{id}/eve
 Frontend channel details page includes an Event Log panel (loading/error/empty/populated states).
 
 ## Official Requirement Status
-All five official requirements are implemented and verified (see `docs/REQUIREMENTS_MAPPING.md`).
+All five official requirements are implemented, with backend regression tests and a demo verifier script that exercise the main flow (see `docs/REQUIREMENTS_MAPPING.md`).

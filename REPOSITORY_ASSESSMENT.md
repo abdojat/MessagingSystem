@@ -26,7 +26,7 @@ Biggest strengths:
 Biggest risks:
 - Security is not strong enough for a serious deployment.
 - Frontend auth tokens are browser-managed, which is acceptable for a demo but not production-grade.
-- Runtime verification still depends on the full Docker stack, but the demo verifier now exercises the live WebSocket delivery path instead of only REST sync.
+- Runtime verification still depends on the full Docker stack, even though the demo verifier now exercises the live WebSocket path when available with REST backfill fallback.
 - There is no Merkle tree or anomaly detection feature in the codebase.
 
 Most urgent missing pieces:
@@ -147,7 +147,7 @@ flowchart LR
 
 | Requirement | Status | Evidence | Problems | Priority | Recommended Fix |
 |---|---|---|---|---|---|
-| 1. Topic/channel creation | Complete | [`backend/app/services/channel_service.py`](backend/app/services/channel_service.py) `ChannelService.create_channel`; [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`; [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py) `ChannelCreateRequest` | Human-readable slugs still need to be documented as broker-safe identifiers | High | Keep the current safe identifier policy and document it clearly |
+| 1. Topic/channel creation | Complete | [`backend/app/services/channel_service.py`](backend/app/services/channel_service.py) `ChannelService.create_channel`; [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`; [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py) `ChannelCreateRequest` | Safe identifier validation exists and is backed by database constraints; docs should keep the broker-safe policy explicit | High | Keep the current safe identifier policy and document it clearly |
 | 2. Publishing messages to a specific channel | Complete | [`backend/app/services/message_service.py`](backend/app/services/message_service.py) `publish_message`; [`backend/app/api/routes/messages.py`](backend/app/api/routes/messages.py) `publish_message`; outbox in [`backend/app/services/outbox_service.py`](backend/app/services/outbox_service.py) `enqueue_message_outbox` | Reply-only member publish path is a custom exception; broker delivery still benefits from more integration coverage | High | Add broker/WebSocket integration tests and document the reply exception clearly |
 | 3. Automatic delivery to subscribers | Mostly complete | [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) `_consume_user`; [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py) `_redis_forward_loop`; membership binding in channel service | Live subscription state is captured at connect time; join-after-connect remains an edge case | High | Emit membership-change websocket updates that refresh subscription state or require explicit client resubscribe after join/accept |
 | 4. Channel management interface/API | Complete | [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`, `list_channels`, `get_channel`, `patch_channel`, `delete_channel`, `channel_stats` | Duplicate root routes are also exposed by [`backend/app/main.py`](backend/app/main.py) | Medium | Keep only one public API surface or document the duplicate compatibility routes |
@@ -253,8 +253,8 @@ flowchart LR
 - Pydantic models are used properly in the schema layer.
 - Weak spots:
   - slugs and usernames are normalized and constrained to the safe identifier pattern used by RabbitMQ and Redis routing,
-  - filenames are not strongly sanitized,
-  - upload content is not protected by an access check on download.
+  - upload filenames are normalized before storage,
+  - upload content is protected by an access check on download.
 
 ### Async Behavior
 
@@ -279,7 +279,7 @@ flowchart LR
 
 ### Secrets / Env Handling
 
-- A real `.env` is not tracked in git; only `.env.example` is versioned.
+- A real `.env` is present locally but is not tracked in git; only `.env.example` is versioned.
 - Refresh tokens are stored in browser-managed localStorage; access tokens are mirrored into a JS-managed cookie.
 - Access tokens are stored in JavaScript-managed cookies.
 - WebSocket auth token can be placed in a query string for the helper script and demo flow.
@@ -380,22 +380,20 @@ flowchart LR
 - Message encryption at rest in [`backend/app/core/encryption.py`](backend/app/core/encryption.py).
 - Rate limiting on auth and publish endpoints.
 - Unauthorized publish/read events are logged.
+- Upload downloads are authenticated and authorized; owners and members of the attached channel can access content.
 
 ### Weak Security
 
 - Refresh tokens are stored in localStorage.
 - Access tokens are stored in JavaScript-managed cookies.
 - WebSocket auth token is sent as a query string.
-- Upload download is authenticated and checks ownership/membership before returning bytes.
-- A real encryption key is committed in `.env`.
+- A real encryption key must remain outside tracked files and be provided through the environment.
 
 ### Missing Security
 
 - No strong secret-management strategy.
 - No httpOnly cookie auth flow.
 - No explicit CSRF strategy.
-- No upload-content authorization on download.
-- No routing-key-safe slug policy.
 - No key rotation or KMS integration.
 
 ### Recommended Minimal Security
@@ -522,9 +520,10 @@ The frontend is real and fairly complete.
 ### What I Verified in This Environment
 
 - `npm run typecheck` succeeded.
-- `python -m pytest backend\tests\test_p0_requirements.py -q` succeeded.
+- `python -m pytest -q` succeeded.
 - `docker compose config` succeeded.
-- `python scripts\verify_demo_flow.py --base-url http://localhost:8000/v1` was not rerun in this assessment pass.
+- `docker compose up -d --build` succeeded.
+- `python scripts\verify_demo_flow.py --base-url http://localhost:8000/v1` succeeded and proved live WebSocket delivery plus REST backfill fallback.
 
 ### Practical Testing Plan
 
@@ -547,7 +546,7 @@ The frontend is real and fairly complete.
 
 - The stack depends on PostgreSQL, RabbitMQ, and Redis all being healthy before backend startup.
 - Docs mention a Windows frontend build caveat.
-- I did not rerun the full demo flow in this assessment pass.
+- The demo flow is verified here, but it still depends on the live Docker stack.
 
 ### Common Failure Points
 
@@ -568,10 +567,12 @@ The frontend is real and fairly complete.
 - `docs/TESTING.md`
 - `docs/REQUIREMENTS_MAPPING.md`
 - `docs/SECURITY.md`
+- `docs/FINAL_MVP_STATUS.md`
+- `docs/FINAL_DEMO_CHECKLIST.md`
 
 ### Still Missing for Final Submission
 
-- Final report document.
+- Final report document if required by the university.
 - User manual polished beyond the demo guide.
 - Screenshot pack.
 - API reference or exported OpenAPI guide in a nicer format.
@@ -606,7 +607,7 @@ The frontend is real and fairly complete.
 ### Mostly Complete
 
 - Distributed publish/subscribe delivery through PostgreSQL outbox, RabbitMQ, worker dispatch, Redis fanout, and WebSocket push.
-- The repo now has a stronger proof script that exercises live WebSocket delivery as part of the demo flow, but there is still no dedicated CI job for the full stack.
+- The repo now has a stronger proof script that exercises live WebSocket delivery when available and REST backfill fallback, and it passed in this workspace, but there is still no dedicated CI job for the full stack.
 
 ### Demo-Grade
 
