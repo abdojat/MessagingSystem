@@ -37,7 +37,19 @@
 - Sanitization masks common token, password, secret, key, and AMQP credential patterns.
 - Error text is still operational data, so it should not be used to intentionally log secrets or full connection strings.
 
+## Event Integrity / Tamper-Evident Audit Log
+- Event Integrity Upgrade v1 stores a SHA-256 hash chain on event rows.
+- Channel events are chained per `channel:<channel_id>` scope; non-channel events are chained under the `system` scope.
+- New events receive `previous_hash`, `event_hash`, `hash_algorithm`, `integrity_version`, and `integrity_scope`.
+- The hash protects stable audit fields: event id, channel id, actor id, event type, created timestamp, payload, previous hash, integrity version, and scope.
+- Channel owners/admins with event-log access can call `GET /v1/channels/{id}/events/integrity` or use the Event Log UI to verify the chain.
+- Legacy events created before the upgrade may show Not initialized until `python scripts/backfill_event_integrity.py` is run.
+
+This protects against accidental or unauthorized event modification, insertion, reordering, or deletion that breaks links between remaining events being silently missed by the application verifier. Tail truncation requires an external remembered last hash to prove. It does not replace database access control, backups, monitoring, or secret management. It is not a blockchain, not external notarization, and not a full Merkle-tree proof. A database administrator with full write access could recompute a forged chain unless event hashes are anchored outside the database.
+
 ## Known Limitations
 - This project is a university MVP, not a production-hardened identity or secret-management platform.
 - The frontend token storage and WebSocket token transport are demo-oriented and should not be presented as production-grade session security.
 - The project does not claim end-to-end encryption; it uses server-side encryption at rest.
+- Event integrity is tamper-evident inside PostgreSQL, but it does not prove that the database itself was never rewritten by a fully privileged operator.
+- The verifier does not prove tail deletion unless the previous last hash was stored or witnessed outside the database.

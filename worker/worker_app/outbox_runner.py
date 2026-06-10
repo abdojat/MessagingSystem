@@ -1,7 +1,9 @@
 import asyncio
+import hashlib
 import json
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +18,57 @@ from worker_app.mq.topology import DEAD_LETTER_EXCHANGE_NAME, EXCHANGE_NAME
 logger = logging.getLogger(__name__)
 
 MAX_ERROR_LENGTH = 1000
+HASH_ALGORITHM = "sha256"
+INTEGRITY_VERSION = 1
+
+
+def _canonical_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        normalized = _as_utc_datetime(value)
+        return normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
+    if isinstance(value, dict):
+        return {str(key): _canonical_value(value[key]) for key in sorted(value.keys(), key=str)}
+    if isinstance(value, (list, tuple)):
+        return [_canonical_value(item) for item in value]
+    return value
+
+
+def _as_utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _event_integrity_scope(channel_id: Any) -> str:
+    if channel_id is None:
+        return "system"
+    return f"channel:{channel_id}"
+
+
+def _compute_event_hash(
+    *,
+    event_id: str,
+    channel_id: Any,
+    actor_user_id: Any,
+    event_type: str,
+    payload: dict[str, Any],
+    created_at: datetime,
+    previous_hash: str | None,
+    integrity_scope: str,
+) -> str:
+    canonical_payload = {
+        "id": str(event_id),
+        "channel_id": str(channel_id) if channel_id is not None else None,
+        "actor_user_id": str(actor_user_id) if actor_user_id is not None else None,
+        "event_type": event_type,
+        "created_at": _canonical_value(created_at),
+        "payload": _canonical_value(payload or {}),
+        "previous_hash": previous_hash,
+        "integrity_version": INTEGRITY_VERSION,
+        "integrity_scope": integrity_scope,
+    }
+    canonical_json = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
 def sanitize_error(exc: BaseException | str) -> str:
@@ -254,17 +307,81 @@ async def _mark_dead_lettered(db: AsyncSession, outbox_id: Any, error_text: str,
 
 
 async def _insert_delivery_event(db: AsyncSession, event_type: str, channel_id: Any, payload: dict[str, Any]) -> None:
+    event_id = str(uuid4())
+    created_at = datetime.now(timezone.utc)
+    integrity_scope = _event_integrity_scope(channel_id)
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:scope))"), {"scope": integrity_scope})
+    latest_integrity_event = (
+        await db.execute(
+            text(
+                """
+                SELECT event_hash, created_at
+                FROM events
+                WHERE integrity_scope = :scope
+                  AND event_hash IS NOT NULL
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {"scope": integrity_scope},
+        )
+    ).mappings().first()
+    previous_hash = latest_integrity_event["event_hash"] if latest_integrity_event is not None else None
+    if latest_integrity_event is not None:
+        previous_created_at = latest_integrity_event["created_at"]
+        if _as_utc_datetime(created_at) <= _as_utc_datetime(previous_created_at):
+            created_at = _as_utc_datetime(previous_created_at) + timedelta(microseconds=1)
+    event_hash = _compute_event_hash(
+        event_id=event_id,
+        channel_id=channel_id,
+        actor_user_id=None,
+        event_type=event_type,
+        payload=payload,
+        created_at=created_at,
+        previous_hash=previous_hash,
+        integrity_scope=integrity_scope,
+    )
     await db.execute(
         text(
             """
-            INSERT INTO events (id, channel_id, actor_user_id, event_type, payload, created_at)
-            VALUES (:event_id, :channel_id, NULL, :event_type, CAST(:payload AS jsonb), now())
+            INSERT INTO events (
+                id,
+                channel_id,
+                actor_user_id,
+                event_type,
+                payload,
+                created_at,
+                previous_hash,
+                event_hash,
+                hash_algorithm,
+                integrity_version,
+                integrity_scope
+            )
+            VALUES (
+                :event_id,
+                :channel_id,
+                NULL,
+                :event_type,
+                CAST(:payload AS jsonb),
+                :created_at,
+                :previous_hash,
+                :event_hash,
+                :hash_algorithm,
+                :integrity_version,
+                :integrity_scope
+            )
             """
         ),
         {
-            "event_id": str(uuid4()),
+            "event_id": event_id,
             "channel_id": channel_id,
             "event_type": event_type,
             "payload": json.dumps(payload, default=str),
+            "created_at": created_at,
+            "previous_hash": previous_hash,
+            "event_hash": event_hash,
+            "hash_algorithm": HASH_ALGORITHM,
+            "integrity_version": INTEGRITY_VERSION,
+            "integrity_scope": integrity_scope,
         },
     )

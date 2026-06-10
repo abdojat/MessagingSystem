@@ -10,6 +10,7 @@ University final-year project implementing a secure distributed channel messagin
 - Realtime: Redis + WebSocket
 - Frontend: Next.js (`frontend/`)
 - Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
+- Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
 
 ## Services
 - `postgres` (5432)
@@ -91,6 +92,14 @@ python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 The script verifies register/login, channel creation, join, live WebSocket delivery when available, REST sync backfill, event log entries, and an unauthorized upload access check.
 It is the strongest repo-level proof of the distributed publish/subscribe path currently available.
 
+Event integrity checks:
+```bash
+cd backend
+python -m pytest tests/test_event_integrity.py -q
+cd ..
+python scripts/backfill_event_integrity.py --dry-run
+```
+
 Delivery reliability checks:
 ```bash
 cd backend
@@ -107,10 +116,11 @@ docker compose exec postgres psql -U postgres -d channels -c "select status, cou
 5. User A publishes.
 6. User B receives/reads.
 7. Show event log panel in channel details.
-8. Open Delivery Monitor from the sidebar as a channel owner/admin.
-9. Show unauthorized access denial on private channel.
-10. Show private upload access is denied to a non-member.
-11. Show ciphertext at rest:
+8. Click Verify integrity and show the Audit integrity badge.
+9. Open Delivery Monitor from the sidebar as a channel owner/admin.
+10. Show unauthorized access denial on private channel.
+11. Show private upload access is denied to a non-member.
+12. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
@@ -121,6 +131,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Mostly complete:
   - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier, but there is still no broad CI suite around it.
   - Delivery reliability monitoring with retry scheduling, dead-letter status, admin APIs, and a frontend Delivery Monitor. The deterministic tests mock AMQP failures; full broker-outage CI coverage remains future work.
+  - Event audit integrity with a per-scope SHA-256 hash chain. This is tamper-evident, not external notarization; legacy rows need explicit backfill before they verify as initialized.
 - Demo-grade:
   - Frontend token handling. Access tokens are kept in a JavaScript-managed cookie and refresh tokens are kept in `localStorage`, which is acceptable for a university demo but not production-grade session security.
 - Future work:
@@ -142,6 +153,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Private uploads require authentication and channel/ownership checks before download.
 - Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.
 - Unauthorized read/publish events logged.
+- Event logs include tamper-evident hash-chain metadata for new events.
 - Do not commit real secrets.
 
 ## Documentation

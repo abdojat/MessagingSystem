@@ -17,6 +17,15 @@ Delivery reliability tests:
 - `test_admin_delivery_stats_are_scoped_to_channel_managers`
 - `test_manual_retry_resets_dead_lettered_outbox_and_logs_event`
 
+Event integrity tests:
+- `test_new_events_receive_hash_chain_metadata`
+- `test_integrity_verification_returns_valid_for_unchanged_chain`
+- `test_integrity_verification_detects_payload_tampering`
+- `test_integrity_verification_detects_event_type_tampering`
+- `test_integrity_verification_detects_previous_hash_tampering`
+- `test_integrity_verification_reports_legacy_missing_hash`
+- `test_unauthorized_user_cannot_verify_channel_event_integrity`
+
 Run in Docker (recommended):
 ```bash
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
@@ -34,6 +43,19 @@ Focused delivery reliability run:
 python -m pytest backend/tests/test_delivery_reliability.py -q
 ```
 These tests use a fake AMQP exchange to verify worker status transitions without requiring a live RabbitMQ broker. They still require PostgreSQL because the project uses PostgreSQL-specific schema behavior.
+
+Focused event integrity run:
+```bash
+cd backend
+python -m pytest tests/test_event_integrity.py -q
+```
+These tests verify hash creation, sequential chain linking, clean verification, tamper detection, missing legacy hashes, and authorization for the integrity endpoint.
+
+Legacy event backfill check:
+```bash
+python scripts/backfill_event_integrity.py --dry-run
+```
+The script groups events by `channel:<channel_id>` or `system`, computes hashes in chronological order, and reports what would be updated without committing.
 
 Frontend typecheck:
 ```bash
@@ -58,6 +80,7 @@ Verifies:
 - Live WebSocket delivery to the subscriber when available
 - REST `/sync` backfill when live delivery is unavailable
 - Event log contains core events
+- Event integrity can be checked from `GET /v1/channels/{id}/events/integrity` or the Event Log panel
 - Private upload access is denied to an unauthorized user
 - Final PASS/FAIL summary with visible step names and timeouts
 The verifier does not currently force a RabbitMQ failure or DLQ transition; use the backend delivery reliability tests and worker logs for that path.

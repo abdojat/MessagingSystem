@@ -5,6 +5,7 @@
 - Channel/topic creation, listing, updates, joins, leaves, invites, approvals, role changes, and member removal.
 - Publish/subscribe message persistence with PostgreSQL as the source of truth.
 - Event logging for the key channel, membership, message, and security flows.
+- Tamper-evident audit log integrity for new events through a per-scope SHA-256 hash chain.
 - Message encryption at rest on the server side.
 - Private upload download protection with authentication and authorization checks.
 - Safe identifier validation for usernames, channel slugs, and broker-facing routing identifiers.
@@ -12,6 +13,7 @@
 - Backend P0 regression tests for the main security and demo-flow behavior.
 - Verified during Delivery Reliability Upgrade v1: Docker-backed backend tests passed, frontend typecheck passed, Docker Compose config passed, and a temporary-database Alembic upgrade to head passed.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
+- Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 
 ## What Is Mostly Complete
 - Distributed delivery through PostgreSQL outbox, RabbitMQ, worker dispatch, Redis fanout, and WebSocket push.
@@ -26,10 +28,18 @@
 - Channel owners/admins can inspect scoped delivery stats and failed/dead-lettered rows through `/v1/admin/delivery/*` and the frontend Delivery Monitor.
 - Manual retry resets failed/dead-lettered rows to `pending` and logs `broker.manual_retry_requested`.
 
+## New Integrity Enhancement
+- New audit events store `previous_hash`, `event_hash`, `hash_algorithm`, `integrity_version`, and `integrity_scope`.
+- Channel event logs are chained per `channel:<channel_id>`; system events use a separate `system` chain.
+- The frontend Event Log card can verify channel audit integrity and show Verified, Broken, Not initialized, or Checking.
+- `scripts/backfill_event_integrity.py` can initialize legacy event rows explicitly.
+
 ## Still Not Production-Certified
 - The reliability layer improves observability and retry behavior, but it is still MVP-grade.
 - The tests mock AMQP publish failures for deterministic status-transition coverage; a full CI broker-failure scenario is still future work.
 - The DLQ mirror depends on RabbitMQ being available at the time of dead-letter handling.
+- Event integrity is tamper-evident but not externally notarized. A fully privileged database operator could recompute hashes after rewriting rows unless hashes are anchored outside PostgreSQL.
+- Legacy rows need explicit backfill before the verifier can report them as initialized.
 
 ## What Is Demo-Grade
 - Browser-managed token storage and WebSocket token transport.
@@ -51,6 +61,7 @@ cd frontend
 npm run typecheck
 cd ..
 docker compose config
+python scripts/backfill_event_integrity.py --dry-run
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
 

@@ -125,6 +125,8 @@ async def test_outbox_failure_schedules_retry_with_sanitized_error(db_session, m
     assert dead_letter_exchange.published == []
     events = (await db_session.execute(select(Event).where(Event.event_type == "broker.retry_scheduled"))).scalars().all()
     assert len(events) == 1
+    assert events[0].event_hash is not None
+    assert events[0].integrity_scope == f"channel:{channel.id}"
 
 
 @pytest.mark.asyncio
@@ -144,6 +146,8 @@ async def test_outbox_failure_after_max_attempts_dead_letters(db_session, monkey
     assert len(dead_letter_exchange.published) == 1
     events = (await db_session.execute(select(Event).where(Event.event_type == "broker.dead_lettered"))).scalars().all()
     assert len(events) == 1
+    assert events[0].event_hash is not None
+    assert events[0].integrity_scope == f"channel:{channel.id}"
 
 
 @pytest.mark.asyncio

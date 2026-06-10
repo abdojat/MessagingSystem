@@ -36,19 +36,27 @@ The script waits for API health before running flow checks and verifies the live
 7. User A publishes a message.
 8. User B receives/reads message.
 9. Open channel details -> Event Log panel.
-10. Open the sidebar Delivery Monitor as User A.
+10. Click Verify integrity and show `Audit integrity: Verified`.
+    - If the database contains pre-upgrade legacy events, run `python scripts/backfill_event_integrity.py` first or explain the Not initialized state honestly.
+11. Open the sidebar Delivery Monitor as User A.
     - Normal demo state should show published/pending counters and empty failed/dead-lettered tables.
     - If a delivery has failed in the environment, use the per-row Retry button or Retry all button to move it back to pending.
     - Worker logs show retry scheduling and dead-letter transitions when RabbitMQ publish failures occur.
-11. Show unauthorized behavior:
+12. Show unauthorized behavior:
    - Use a private upload download blocked for User C.
    - Optionally show a private channel where non-member read/publish is denied.
-12. Show ciphertext at rest:
+13. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
 Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not plaintext.
-13. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
+14. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
+
+Developer-only tamper test:
+```bash
+python scripts/backfill_event_integrity.py --dry-run
+```
+For a real tamper demonstration, modify a non-production event payload directly in PostgreSQL, then click Verify integrity again. The UI should report Broken. Do not include manual database tampering in the normal supervisor demo unless asked.
 
 Useful delivery reliability checks:
 ```bash
@@ -68,6 +76,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, status,
 - [ ] User A can publish
 - [ ] User B can receive
 - [ ] Event log shows activity
+- [ ] Event integrity check shows Verified or an honestly explained Not initialized state
 - [ ] Delivery Monitor loads for a channel owner/admin
 - [ ] Unauthorized access denied
 - [ ] Unauthorized upload access denied

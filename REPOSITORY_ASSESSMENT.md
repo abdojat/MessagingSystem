@@ -4,7 +4,7 @@ Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
 
-This report is evidence-based and references the current codebase only. No files were modified while producing the assessment.
+This report is evidence-based and references the current codebase. Last updated after Event Integrity Upgrade v1 on 2026-06-10.
 
 ## 1. Executive Summary
 
@@ -15,6 +15,7 @@ It does more than a toy chat app:
 - It persists state in PostgreSQL and uses Alembic migrations.
 - It has a RabbitMQ topic exchange, an outbox worker, Redis-based realtime fanout, and WebSocket delivery.
 - It now has explicit outbox delivery status tracking, retry scheduling, dead-letter state, RabbitMQ DLQ topology, and a frontend Delivery Monitor.
+- It now has a tamper-evident event audit hash chain with a verification API, backfill script, and frontend integrity badge/check.
 - It has a substantial Next.js frontend for login, channel management, publishing, membership control, and event logs.
 - It implements password hashing, JWT auth, role-based authorization, and Fernet message encryption at rest.
 
@@ -24,12 +25,13 @@ Biggest strengths:
 - The UI covers the whole demo flow.
 - There is genuine event logging and an outbox pattern.
 - Delivery failures are visible through admin APIs/UI instead of only worker logs.
+- Event log tampering can be detected through the hash-chain verifier when rows have initialized integrity metadata.
 
 Biggest risks:
 - Security is not strong enough for a serious deployment.
 - Frontend auth tokens are browser-managed, which is acceptable for a demo but not production-grade.
 - Runtime verification still depends on the full Docker stack, even though the demo verifier now exercises the live WebSocket path when available with REST backfill fallback.
-- There is no Merkle tree or anomaly detection feature in the codebase.
+- There is no full Merkle tree, external hash anchoring, or anomaly detection feature in the codebase.
 
 Most urgent missing pieces:
 - Keep the security posture honest and documented.
@@ -61,6 +63,8 @@ Most urgent missing pieces:
   - Publish, list, sync, seen markers, reactions, pins, uploads, and edit/delete.
 - [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py)
   - Register, login, refresh, logout, revoke sessions, logout all.
+- [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py)
+  - Canonical event hashing, per-scope hash-chain linking, and channel integrity verification.
 - [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py)
   - WebSocket auth, subscription handling, Redis forward loop, backfill, and seen handling.
 - [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py)
@@ -158,13 +162,13 @@ flowchart LR
 | 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) `register`, `login`, `refresh`, `logout`; [`backend/app/core/security.py`](backend/app/core/security.py) `hash_password`, `create_access_token`, `create_refresh_token` | Frontend still uses a JS-managed access-token cookie plus `localStorage` refresh token storage, which is fine for the demo but not production-grade | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
 | 7. Authorization/permissions | Complete | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership before returning bytes | Browser token handling remains the larger remaining security caveat | High | Keep backend authorization strong and document the client-side limitation honestly |
 | 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; encryption key must stay out of tracked files | High | Treat encryption key as an external secret only and keep the env story explicit |
-| 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events` | Event logging is not guaranteed if the logging path fails; event visibility is limited to managers | Medium | Keep the log path best-effort, but document that limitation and add a few more high-value event types |
+| 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py) hash-chain verification | Event logging is not guaranteed if the logging path fails; event visibility and integrity verification are limited to channel managers | Medium | Keep the log path best-effort, document the limitation, and backfill legacy event hashes before final demos |
 | 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) `bind_user_channel`; [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) `run_outbox_publisher`; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py); Delivery Monitor APIs/UI | DLQ/retry tracking exists, but DB commit and AMQP binding are still not atomic and the DLQ path still needs a real broker-outage integration test | High | Keep the live verifier and add a broker integration test or compensating retry path if binding fails after commit |
 | 11. Docker/environment setup | Complete | [`docker-compose.yml`](docker-compose.yml); [`backend/Dockerfile`](backend/Dockerfile); [`worker/Dockerfile`](worker/Dockerfile); [`frontend/Dockerfile`](frontend/Dockerfile) | There are manual steps and a few platform caveats in docs | Medium | Keep the env story explicit and keep the compose path as the canonical run path |
 | 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md); [`docs/SECURITY.md`](docs/SECURITY.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
 | 13. Testing | Mostly complete | [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) now covers authz, uploads, identifier validation, and smoke flow; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) is a manual verifier | No frontend tests, no broker integration tests, no load tests | High | Add at least one RabbitMQ/WebSocket integration test and one frontend smoke test; keep the demo verifier as a separate tool |
 | 14. Monitoring/message-flow visibility | Mostly complete for MVP | [`backend/app/api/routes/health.py`](backend/app/api/routes/health.py) `health`; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; frontend event log panel; `/v1/admin/delivery/*`; frontend Delivery Monitor | No metrics dashboard, tracing, or real broker dashboard integration; delivery monitor is scoped to managed channels | Medium | Add full-stack broker/DLQ integration tests and richer metrics only if needed |
-| 15. Merkle-tree or hashing/data-integrity feature | Partial | SHA-256 helpers in [`backend/app/core/utils.py`](backend/app/core/utils.py); invite token hashing and refresh-token hashing | No Merkle tree, no integrity chain, and no tamper-evident audit structure | Low | If needed, add a simple hash-chain or Merkle root over event batches; otherwise document the current SHA-256 usage as the integrity feature |
+| 15. Merkle-tree or hashing/data-integrity feature | Mostly complete for hash-chain v1 | SHA-256 event hash chain in [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py); migration `0013_event_integrity`; endpoint `GET /v1/channels/{id}/events/integrity`; script [`scripts/backfill_event_integrity.py`](scripts/backfill_event_integrity.py); frontend Event Log integrity badge/check | No full Merkle tree, no external notarization, and legacy rows need explicit backfill | Low | Keep the hash-chain explanation honest; add optional Merkle batch roots or external anchoring only if requested |
 | 16. Optional anomaly detection / AI feature | Missing | Repo-wide search found no anomaly/AI module | Not present | Low | Only add this if your supervisor explicitly expects it; otherwise do not spend time here |
 
 ## 4. Functional Flow Analysis
@@ -219,6 +223,10 @@ flowchart LR
 
 - Logging is done through [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`.
 - Exposed through [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py).
+- Event Integrity Upgrade v1 chains new audit events with SHA-256 through [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py).
+- Channel integrity verification is exposed through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
+- Worker-created delivery reliability events are hashed in [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py).
+- Legacy events need [`scripts/backfill_event_integrity.py`](scripts/backfill_event_integrity.py) before they verify as initialized.
 
 ### Error Handling
 
@@ -388,6 +396,7 @@ flowchart LR
 - Rate limiting on auth and publish endpoints.
 - Unauthorized publish/read events are logged.
 - Upload downloads are authenticated and authorized; owners and members of the attached channel can access content.
+- Event audit rows are tamper-evident through a per-scope SHA-256 hash chain with an authorized verification endpoint.
 
 ### Weak Security
 
@@ -396,12 +405,13 @@ flowchart LR
 - WebSocket auth token is sent as a query string.
 - A real encryption key must remain outside tracked files and be provided through the environment.
 
-### Missing Security
+### Missing / Limited Security
 
 - No strong secret-management strategy.
 - No httpOnly cookie auth flow.
 - No explicit CSRF strategy.
 - No key rotation or KMS integration.
+- No external notarization or off-database anchoring for event hashes.
 
 ### Recommended Minimal Security
 
@@ -427,7 +437,7 @@ The schema in [`backend/app/db/models.py`](backend/app/db/models.py) is broad an
 
 ### Migrations
 
-- Alembic migrations are present from `0001` through `0011`.
+- Alembic migrations are present from `0001` through `0013`, including delivery reliability and event integrity.
 - Startup also has a schema repair path in [`backend/app/db/bootstrap_schema.py`](backend/app/db/bootstrap_schema.py).
 
 ### Data Survival
@@ -444,6 +454,7 @@ The schema in [`backend/app/db/models.py`](backend/app/db/models.py) is broad an
 
 - Events are structured and meaningful.
 - They track channel creation, membership changes, message publishing, unauthorized access attempts, and broker failures.
+- New events include hash-chain metadata for tamper-evident verification.
 
 ### Schema Improvements
 
@@ -514,6 +525,8 @@ The frontend is real and fairly complete.
 ### Existing Tests / Tools
 
 - Backend tests: [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py)
+- Delivery reliability tests: [`backend/tests/test_delivery_reliability.py`](backend/tests/test_delivery_reliability.py)
+- Event integrity tests: [`backend/tests/test_event_integrity.py`](backend/tests/test_event_integrity.py)
 - Demo verifier: [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py)
 - WebSocket helper: [`scripts/ws_client.py`](scripts/ws_client.py)
 
@@ -527,15 +540,15 @@ The frontend is real and fairly complete.
 
 ### What I Verified in This Environment
 
-- `docker compose run --rm --build backend sh -lc "cd /app && PYTHONPATH=/app:/worker pytest -q"` passed with 30 tests.
+- `cd backend && python -m pytest -q` passed with 20 tests and 17 skips.
 - `npm run typecheck` in `frontend/` passed.
 - `docker compose config` passed.
-- A temporary PostgreSQL database migration check passed with `alembic upgrade head`, including `0012_delivery_reliability`.
-- Local host `python -m pytest -q` passed non-DB tests but skipped PostgreSQL-dependent tests because the Compose hostname `postgres` is not resolvable from the host shell.
+- `python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1` timed out after 60 seconds because no backend was listening on `localhost:8000` in this shell.
+- The new migration is `0013_event_integrity`; a live Alembic upgrade was not separately run in this pass, but `docker compose config` passed and backend tests validated the model-level schema path.
 
 ### Practical Testing Plan
 
-- Keep the two current backend tests.
+- Keep the current backend P0, delivery reliability, and event integrity tests.
 - Add one RabbitMQ/WebSocket integration test.
 - Keep the upload authorization regression coverage in the backend tests.
 - Add one frontend smoke test for login -> create channel -> publish -> see event log.
@@ -649,7 +662,7 @@ The frontend is real and fairly complete.
 | Task | Why it matters | Difficulty | Files/modules likely involved | Suggested direction |
 |---|---|---:|---|---|
 | Expand the Delivery Monitor into richer ops metrics | Makes the system more teachable if extra polish is needed | Medium | Frontend delivery page, events API, health route | Add broker health, event counts, online users, recent publishes, and live refresh |
-| Add a hash-chain or Merkle-style integrity proof | Helps the cryptography angle of the project | High | Events, messages, a new integrity service | Hash event batches or message sequences and expose a verification endpoint |
+| Add optional Merkle batch roots or external hash anchoring | Helps the cryptography angle beyond hash-chain v1 | High | Event integrity service, docs, possibly a new anchoring table | Keep v1 stable first; only add Merkle roots or off-database anchoring if the supervisor asks |
 | Add anomaly detection / AI message analysis | Nice advanced feature if your supervisor wants a stretch goal | High | New worker/service + analytics UI | Keep it lightweight: frequency spikes, unread surges, or simple anomaly scoring |
 | Add load/reliability tests | Useful for defending the design in a presentation | Medium | `scripts/`, backend integration tests | Script a small multi-user publish flood and measure latency/throughput |
 

@@ -190,12 +190,33 @@ export interface EventResponse {
   event_type: string;
   payload: Record<string, unknown>;
   created_at: string;
+  previous_hash?: string | null;
+  event_hash?: string | null;
+  hash_algorithm?: string | null;
+  integrity_version?: number | null;
+  integrity_scope?: string | null;
 }
 
 export interface EventListResponse {
   items: EventResponse[];
   next_cursor?: string | null;
   has_more: boolean;
+}
+
+export interface EventIntegrityResponse {
+  scope: string;
+  valid: boolean;
+  checked_events: number;
+  broken_event_id?: string | null;
+  reason?: string | null;
+  expected_hash?: string | null;
+  actual_hash?: string | null;
+  previous_event_id?: string | null;
+  last_valid_hash?: string | null;
+  first_event_id?: string | null;
+  last_event_id?: string | null;
+  hash_algorithm: string;
+  integrity_version: number;
 }
 
 export type DeliveryStatus =

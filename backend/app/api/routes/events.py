@@ -4,8 +4,9 @@ from fastapi import APIRouter, Query
 
 from app.api.deps import CurrentUserDep, DBDep
 from app.core.errors import AppError, to_http_exception
-from app.schemas.events import EventListResponse, EventResponse
+from app.schemas.events import EventIntegrityResponse, EventListResponse, EventResponse
 from app.services.channel_service import ChannelService
+from app.services.event_integrity_service import EventIntegrityService
 
 router = APIRouter(tags=["events"])
 
@@ -33,9 +34,28 @@ async def list_channel_events(
                 event_type=e.event_type,
                 payload=e.payload,
                 created_at=e.created_at,
+                previous_hash=e.previous_hash,
+                event_hash=e.event_hash,
+                hash_algorithm=e.hash_algorithm,
+                integrity_version=e.integrity_version,
+                integrity_scope=e.integrity_scope,
             )
             for e in events
         ],
         next_cursor=next_cursor,
         has_more=has_more,
     )
+
+
+@router.get("/channels/{channel_id}/events/integrity", response_model=EventIntegrityResponse)
+async def verify_channel_event_integrity(
+    channel_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+) -> EventIntegrityResponse:
+    try:
+        await ChannelService._assert_manage_membership_access(db, channel_id, user.id)
+        result = await EventIntegrityService.verify_channel_scope(db, channel_id)
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
+    return EventIntegrityResponse(**result)

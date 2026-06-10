@@ -10,6 +10,7 @@ Core capabilities:
 - Persistent message/event storage.
 - Security controls (JWT auth, authorization, encryption-at-rest).
 - Delivery reliability controls for outbox retry scheduling, dead-letter tracking, and admin retry.
+- Tamper-evident audit log integrity using a per-scope SHA-256 hash chain.
 
 ## Why Publish/Subscribe
 Pub/Sub decouples producers from consumers:
@@ -49,6 +50,10 @@ Channel events are stored in `events` and exposed via `GET /v1/channels/{id}/eve
 Frontend channel details page includes an Event Log panel (loading/error/empty/populated states).
 
 Delivery reliability events include `broker.retry_scheduled`, `broker.dead_lettered`, and `broker.manual_retry_requested`. Stored errors are sanitized and should not contain secrets.
+
+Event Integrity Upgrade v1 stores `previous_hash`, `event_hash`, `hash_algorithm`, `integrity_version`, and `integrity_scope` on new events. Channel events are chained under `channel:<channel_id>` and system events under `system`. Channel owners/admins can call `GET /v1/channels/{id}/events/integrity` from the frontend Event Log panel to show a Verified, Broken, Not initialized, or Checking state.
+
+This is a tamper-evident audit mechanism for the university MVP. It is not a blockchain, not end-to-end trust, and not external notarization.
 
 ## Official Requirement Status
 All five official requirements are implemented, with backend regression tests and a demo verifier script that exercise the main flow (see `docs/REQUIREMENTS_MAPPING.md`).

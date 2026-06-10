@@ -532,6 +532,18 @@ paths:
         '404': { description: channel not found }
         '422': { description: invalid cursor }
 
+  /channels/{channel_id}/events/integrity:
+    get:
+      tags: [events]
+      security: [ { bearerAuth: [] } ]
+      summary: Verify channel event-log hash-chain integrity (owner/admin)
+      parameters:
+        - { $ref: '#/components/parameters/ChannelId' }
+      responses:
+        '200': { description: EventIntegrityResponse with valid/broken status, checked event count, last hash, and first broken event id when applicable }
+        '403': { description: forbidden }
+        '404': { description: channel not found }
+
   /ws:
     get:
       tags: [messages]

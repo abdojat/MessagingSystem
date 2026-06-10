@@ -21,6 +21,7 @@
 - Frontend (Next.js)
   - User workflows: auth, channels, join/leave, publish/read, event logs.
   - Delivery Monitor for channel owners/admins to inspect and retry failed outbox delivery.
+  - Event Log integrity check for channel owners/admins.
 
 ## High-Level Architecture
 ```mermaid
@@ -85,6 +86,20 @@ sequenceDiagram
 - `broker.manual_retry_requested`
 
 Events are stored in `events` table and shown in frontend channel details.
+
+## Event Log Integrity
+Event Integrity Upgrade v1 adds a tamper-evident hash chain to the audit log.
+
+- New event columns: `previous_hash`, `event_hash`, `hash_algorithm`, `integrity_version`, and `integrity_scope`.
+- Channel-scoped events use `integrity_scope = "channel:<channel_id>"`.
+- Non-channel events use the separate `system` scope.
+- New backend events created through `log_event` and worker-created broker delivery events receive SHA-256 hashes.
+- The canonical hash payload includes stable event fields: event id, channel id, actor user id, event type, created timestamp, event payload, previous hash, integrity version, and integrity scope.
+- Canonical JSON is serialized with sorted keys and compact separators before SHA-256 hashing.
+- `GET /v1/channels/{channel_id}/events/integrity` verifies the chain for a channel and returns only summary status, counts, hashes, and the first broken event id if any.
+- The frontend Event Log card includes an Audit Integrity badge and a Verify Integrity button.
+
+This is a practical hash-chain integrity layer, not a blockchain and not external notarization. It detects later modification, insertion, reordering, and deletion that breaks links between remaining events, but tail truncation requires an external remembered last hash to prove. A database administrator who can rewrite all event rows and hashes can still forge a new chain. Existing legacy events need `python scripts/backfill_event_integrity.py` before they can verify as initialized.
 
 ## Delivery Reliability
 - PostgreSQL remains the source of truth for outbox state.

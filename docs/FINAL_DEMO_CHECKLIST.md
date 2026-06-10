@@ -22,14 +22,16 @@
 9. User A publishes a message.
 10. Show that User B receives the message live through the WebSocket-backed UI. If the live socket is unavailable in the environment, show the REST sync/backfill result instead.
 11. Open the event log and show `channel.created`, `membership.joined`, and `message.published`.
-12. Open Delivery Monitor as User A and show delivery counters plus empty or retryable failure tables.
-13. Create a private upload owned by User A, attach it to a message, and show that User C receives `403 Forbidden` when trying to download the file.
-14. If RabbitMQ management is available, show the exchange/queue activity, worker logs, or the `q.dead.messages` queue as extra proof of the broker path.
+12. Click Verify integrity and show the Audit integrity badge/check.
+13. Open Delivery Monitor as User A and show delivery counters plus empty or retryable failure tables.
+14. Create a private upload owned by User A, attach it to a message, and show that User C receives `403 Forbidden` when trying to download the file.
+15. If RabbitMQ management is available, show the exchange/queue activity, worker logs, or the `q.dead.messages` queue as extra proof of the broker path.
 
 ## Proof To Show
 - The channel exists and persists.
 - The subscriber receives the message.
 - The event log records the activity.
+- The event log integrity check reports Verified for initialized events.
 - The Delivery Monitor shows outbox delivery status for managed channels.
 - Unauthorized access is blocked.
 - The message remains stored encrypted at rest in PostgreSQL.
@@ -47,5 +49,6 @@ docker compose exec postgres psql -U postgres -d channels -c "select status, cou
 - PostgreSQL is the source of truth.
 - RabbitMQ, the worker, Redis, and WebSockets are part of the delivery path.
 - Delivery failures are tracked in PostgreSQL, retried by the worker, and dead-lettered after max attempts; the RabbitMQ DLQ is operational evidence, not the source of truth.
+- The audit log hash chain is tamper-evident, not a blockchain or external notarization system.
 - Upload downloads are protected by backend authorization checks.
 - Browser token storage is demo-grade, not production-grade.

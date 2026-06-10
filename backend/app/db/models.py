@@ -274,10 +274,17 @@ class Event(Base):
     event_type: Mapped[str] = mapped_column(String(128), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    previous_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    event_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    hash_algorithm: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    integrity_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    integrity_scope: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     __table_args__ = (
         Index("ix_events_channel_created", "channel_id", "created_at"),
         Index("ix_events_actor_created", "actor_user_id", "created_at"),
+        Index("ix_events_integrity_scope_created", "integrity_scope", "created_at", "id"),
+        Index("ix_events_event_hash", "event_hash"),
     )
 
 
