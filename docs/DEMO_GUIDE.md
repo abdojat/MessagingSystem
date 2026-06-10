@@ -25,6 +25,7 @@ Expected: backend regression tests pass; the current P0 slice includes upload au
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
 The script waits for API health before running flow checks and verifies the live publish/WebSocket/sync demo path, plus the unauthorized upload access check.
+The current verifier intentionally opens User B's WebSocket before User B joins, then sends an explicit subscribe/resync after the join. This covers the join-after-connect edge case that can otherwise make demos look flaky.
 
 ## 5) Manual UI Demo (Instructor)
 1. Open `http://localhost:3000`.
@@ -38,6 +39,10 @@ The script waits for API health before running flow checks and verifies the live
 9. Open channel details -> Event Log panel.
 10. Click Verify integrity and show `Audit integrity: Verified`.
     - If the database contains pre-upgrade legacy events, run `python scripts/backfill_event_integrity.py` first or explain the Not initialized state honestly.
+    - If the direct host command cannot reach the Docker database, use:
+      ```bash
+      docker compose run --rm -v "${PWD}/scripts:/scripts:ro" backend sh -lc "cd /app && PYTHONPATH=/app python /scripts/backfill_event_integrity.py --dry-run"
+      ```
 11. Open the sidebar Delivery Monitor as User A.
     - Normal demo state should show published/pending counters and empty failed/dead-lettered tables.
     - If a delivery has failed in the environment, use the per-row Retry button or Retry all button to move it back to pending.
@@ -55,6 +60,10 @@ Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not p
 Developer-only tamper test:
 ```bash
 python scripts/backfill_event_integrity.py --dry-run
+```
+Docker-network fallback for the same dry-run:
+```bash
+docker compose run --rm -v "${PWD}/scripts:/scripts:ro" backend sh -lc "cd /app && PYTHONPATH=/app python /scripts/backfill_event_integrity.py --dry-run"
 ```
 For a real tamper demonstration, modify a non-production event payload directly in PostgreSQL, then click Verify integrity again. The UI should report Broken. Do not include manual database tampering in the normal supervisor demo unless asked.
 

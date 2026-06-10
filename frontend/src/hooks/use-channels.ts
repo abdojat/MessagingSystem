@@ -6,7 +6,9 @@ import {
   ChannelMembershipListResponse,
   ChannelPatchRequest,
   ChannelResponse,
+  JoinOutcomeResponse,
 } from '../types/api';
+import { useWS } from '@/hooks/use-websocket';
 
 type ChannelScope = 'my' | 'discover';
 
@@ -76,11 +78,16 @@ export function useCreateChannel() {
 
 export function useJoinChannel() {
   const queryClient = useQueryClient();
+  const { emit } = useWS();
   return useMutation({
-    mutationFn: (channelId: string) => apiClient(`/channels/${channelId}/join`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: (_, channelId) => {
+    mutationFn: (channelId: string) => apiClient<JoinOutcomeResponse>(`/channels/${channelId}/join`, { method: 'POST', body: JSON.stringify({}) }),
+    onSuccess: (outcome, channelId) => {
       queryClient.invalidateQueries({ queryKey: ['/channels'] });
       queryClient.invalidateQueries({ queryKey: ['/channels', channelId] });
+      queryClient.invalidateQueries({ queryKey: ['/channels', channelId, 'messages'] });
+      if (outcome.status === 'joined' || outcome.status === 'already_member') {
+        emit('subscribe', { channel_ids: [channelId], from_seq_id: 0 });
+      }
     }
   });
 }

@@ -116,6 +116,19 @@ export interface ChannelResponse {
   deleted_at?: string | null;
 }
 
+export interface JoinOutcomeResponse {
+  status: "joined" | "pending" | "requires_invite" | "already_member";
+  role: MembershipRole;
+  message: string;
+  channel?: ChannelResponse | null;
+}
+
+export interface MembershipActionResponse {
+  channel_id: string;
+  user_id: string;
+  role: MembershipRole;
+}
+
 export interface ChannelPatchRequest {
   name?: string;
   description?: string | null;

@@ -6,6 +6,7 @@
 - Refresh tokens are stored server-side as hashes, not plain text.
 - The frontend keeps the access token in a JavaScript-managed cookie and the refresh token in `localStorage`, which is acceptable for this university demo but not production-grade session security.
 - WebSocket connections use a short-lived access token in the connection URL for the demo flow and verifier.
+- WebSocket membership refresh is demo-grade but explicit: after a user joins or receives a membership update, the frontend sends a subscribe/resync message so the open socket follows the latest authorized channel set.
 
 ## Authorization
 - Channel reads and writes check membership/role permissions.

@@ -10,6 +10,8 @@ import secrets
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from uuid import uuid4
 
 import httpx
 import websockets
@@ -32,6 +34,10 @@ def _pass(message: str) -> None:
 
 def _info(message: str) -> None:
     print(f"[INFO] {message}")
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 async def _req(
@@ -115,6 +121,28 @@ async def _wait_for_live_message(ws, *, channel_id: str, plaintext: str, timeout
         return payload
 
 
+async def _send_ws(ws, msg_type: str, payload: dict, *, request_id: str | None = None) -> str:
+    request_id = request_id or str(uuid4())
+    await ws.send(json.dumps({"type": msg_type, "request_id": request_id, "payload": payload, "ts": _iso_now()}))
+    return request_id
+
+
+async def _wait_for_ws_sync(ws, *, request_id: str, timeout_seconds: int) -> dict:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise RuntimeError("Timed out waiting for WebSocket subscribe sync acknowledgement")
+        raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+        event = json.loads(raw)
+        if str(event.get("request_id")) != request_id:
+            continue
+        if event.get("type") == "error":
+            raise RuntimeError(f"WebSocket subscribe failed: {event.get('payload')}")
+        if event.get("type") == "sync":
+            return event.get("payload") or {}
+
+
 async def main_async() -> int:
     parser = argparse.ArgumentParser(description="Verify core demo flow for pub/sub messaging system")
     parser.add_argument("--base-url", default="http://localhost:8000/v1", help="API base URL")
@@ -150,16 +178,13 @@ async def main_async() -> int:
         channel_slug = channel.get("channel_slug")
         _pass(f"Created channel {channel_slug} ({channel_id})")
 
-        _step("3) User B joins channel")
-        await _req(client, "POST", f"/channels/{channel_id}/join", token=user_b.access_token, payload={})
-        _pass("User B joined the channel")
-
         ws_base_url = args.base_url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
         ws_url = f"{ws_base_url}/ws?token={user_b.access_token}"
         plaintext = f"Hello from demo {secrets.token_hex(3)}"
-        _step("4) User B opens WebSocket and waits for live delivery")
-        _info("hello timeout=10s, live delivery timeout=30s")
+        _step("3) User B opens WebSocket before joining the channel")
+        _info("hello timeout=10s, subscribe acknowledgement timeout=10s, live delivery timeout=30s")
         websocket_verified = False
+        join_after_connect_verified = False
         live_payload: dict | None = None
         async with websockets.connect(ws_url) as ws:
             hello_raw = await asyncio.wait_for(ws.recv(), timeout=10)
@@ -167,6 +192,19 @@ async def main_async() -> int:
             if hello_event.get("type") != "hello":
                 raise RuntimeError(f"Unexpected WebSocket hello payload: {hello_raw}")
             _pass("WebSocket hello received")
+
+            _step("4) User B joins channel while the WebSocket is already open")
+            join_result = await _req(client, "POST", f"/channels/{channel_id}/join", token=user_b.access_token, payload={})
+            if join_result.get("status") not in {"joined", "already_member"}:
+                raise RuntimeError(f"User B did not join immediately: {join_result}")
+            subscribe_request_id = await _send_ws(
+                ws,
+                "subscribe",
+                {"channel_ids": [channel_id], "from_seq_id": 0},
+            )
+            await _wait_for_ws_sync(ws, request_id=subscribe_request_id, timeout_seconds=10)
+            join_after_connect_verified = True
+            _pass("User B joined and refreshed the open WebSocket subscription")
 
             live_wait = asyncio.create_task(
                 _wait_for_live_message(
@@ -228,7 +266,13 @@ async def main_async() -> int:
             raise RuntimeError(f"Missing expected event types: {missing}")
         _pass("Event log contains channel and message activity")
 
-        _step("8) User C is blocked from private upload content")
+        _step("8) User A verifies event integrity for the channel")
+        integrity = await _req(client, "GET", f"/channels/{channel_id}/events/integrity", token=user_a.access_token)
+        if integrity.get("valid") is not True:
+            raise RuntimeError(f"Event integrity was not valid for fresh demo channel: {integrity}")
+        _pass(f"Event integrity verified for {integrity.get('checked_events')} events")
+
+        _step("9) User C is blocked from private upload content")
         upload_bytes = b"secret upload"
         upload = await _req(
             client,
@@ -274,13 +318,16 @@ async def main_async() -> int:
             "channel_slug": channel_slug,
             "published_message_id": published.get("id"),
             "websocket_verified": websocket_verified,
+            "join_after_connect_verified": join_after_connect_verified,
             "sync_verified": True,
+            "event_integrity_verified": True,
             "plaintext_verified": True,
             "upload_access_denied_verified": True,
         }, indent=2))
 
         print("\n[INFO] Proof path verified:")
         print("backend -> PostgreSQL/outbox -> RabbitMQ -> worker -> Redis -> WebSocket -> subscriber")
+        print("[INFO] Join-after-connect verified with explicit WebSocket subscribe/resync")
         print("[INFO] To verify DB ciphertext manually:")
         print('docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"')
 
@@ -294,6 +341,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except RuntimeError as exc:
-        print(f"[FAIL] Demo verification failed: {exc}", file=sys.stderr)
+    except Exception as exc:
+        print(f"[FAIL] Demo verification failed ({type(exc).__name__}): {exc}", file=sys.stderr)
         raise SystemExit(1)

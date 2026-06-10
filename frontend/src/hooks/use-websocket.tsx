@@ -169,6 +169,26 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
             );
           } else if (data.type === 'channel_updated' || data.type === 'membership_update') {
             queryClient.invalidateQueries({ queryKey: ['/channels'] });
+            if (data.type === 'membership_update' && payload?.channel_id) {
+              queryClient.invalidateQueries({ queryKey: ['/channels', payload.channel_id] });
+              if (payload.user_id === user?.id) {
+                if (['owner', 'admin', 'member'].includes(payload.new_role)) {
+                  ws.current?.send(JSON.stringify({
+                    type: 'subscribe',
+                    payload: { channel_ids: [payload.channel_id], from_seq_id: 0 },
+                    ts: new Date().toISOString(),
+                  }));
+                  queryClient.invalidateQueries({ queryKey: ['/channels', payload.channel_id, 'messages'] });
+                } else {
+                  ws.current?.send(JSON.stringify({
+                    type: 'unsubscribe',
+                    payload: { channel_ids: [payload.channel_id] },
+                    ts: new Date().toISOString(),
+                  }));
+                  queryClient.removeQueries({ queryKey: ['/channels', payload.channel_id, 'messages'] });
+                }
+              }
+            }
           }
         } catch (e) {
           console.error("WS Parse error", e);

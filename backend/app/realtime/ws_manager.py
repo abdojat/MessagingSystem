@@ -7,6 +7,7 @@ from uuid import UUID
 import aio_pika
 from fastapi import WebSocket
 from redis.asyncio import Redis
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -14,7 +15,7 @@ from app.core.errors import AppError
 from app.core.encryption import decrypt_json_payload, decrypt_message
 from app.core.utils import utcnow
 from app.db.models import Channel, ChannelMembership, MembershipRole, Message, User
-from app.mq.publisher import bind_user_channel
+from app.mq.publisher import bind_user_channel, ensure_user_queue
 from app.realtime.protocol import (
     WSResumePayload,
     WSSeenPayload,
@@ -98,12 +99,20 @@ class WSManager:
         channel_slugs = await self._member_channel_slugs(user_id)
         amqp_channel = await self._amqp.channel()
         try:
+            await ensure_user_queue(amqp_channel, username)
             for channel_slug in channel_slugs:
                 await bind_user_channel(amqp_channel, username, channel_slug)
         finally:
             await amqp_channel.close()
 
-    async def _send_history(self, websocket: WebSocket, user_id: UUID, channel_ids: list[str], from_seq_id: int | None = None) -> None:
+    async def _send_history(
+        self,
+        websocket: WebSocket,
+        user_id: UUID,
+        channel_ids: list[str],
+        from_seq_id: int | None = None,
+        request_id: UUID | None = None,
+    ) -> None:
         async with self._session_factory() as db:
             sync_items: list[dict[str, Any]] = []
             sender_cache: dict[UUID, User | None] = {}
@@ -126,6 +135,7 @@ class WSManager:
                         "membership_updates": [],
                         "messages": sync_items,
                     },
+                    request_id=request_id,
                 )
             )
 
@@ -281,7 +291,7 @@ class WSManager:
         wanted = {str(cid) for cid in req.channel_ids}
         granted = sorted(list(wanted & allowed))
         self._subscriptions[id(websocket)] = set(granted)
-        await self._send_history(websocket, user_id, granted, from_seq_id=req.from_seq_id)
+        await self._send_history(websocket, user_id, granted, from_seq_id=req.from_seq_id, request_id=request_id)
 
     async def _handle_unsubscribe(self, websocket: WebSocket, payload: dict[str, Any], request_id: UUID | None) -> None:
         try:
@@ -358,8 +368,13 @@ class WSManager:
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(channel_name)
         try:
-            async for message in pubsub.listen():
-                if message["type"] != "message":
+            while True:
+                try:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                except RedisTimeoutError:
+                    continue
+                if message is None:
+                    await asyncio.sleep(0)
                     continue
                 payload_raw = message["data"]
                 if isinstance(payload_raw, bytes):

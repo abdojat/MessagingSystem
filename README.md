@@ -90,7 +90,7 @@ Notes:
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 ```
 The script verifies register/login, channel creation, join, live WebSocket delivery when available, REST sync backfill, event log entries, and an unauthorized upload access check.
-It is the strongest repo-level proof of the distributed publish/subscribe path currently available.
+It now opens User B's WebSocket before joining, explicitly subscribes after the join, verifies event integrity for the fresh demo channel, and remains the strongest repo-level proof of the distributed publish/subscribe path currently available.
 
 Event integrity checks:
 ```bash
@@ -98,6 +98,10 @@ cd backend
 python -m pytest tests/test_event_integrity.py -q
 cd ..
 python scripts/backfill_event_integrity.py --dry-run
+```
+If a host-local PostgreSQL listener or password mismatch prevents the direct command from reaching the Docker database, run the dry-run inside the Docker network:
+```bash
+docker compose run --rm -v "${PWD}/scripts:/scripts:ro" backend sh -lc "cd /app && PYTHONPATH=/app python /scripts/backfill_event_integrity.py --dry-run"
 ```
 
 Delivery reliability checks:
@@ -129,7 +133,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Complete:
   - Authentication, authorization, membership management, channel CRUD, encrypted message storage, event logging, upload access checks, safe identifier validation, and backend regression tests.
 - Mostly complete:
-  - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier, but there is still no broad CI suite around it.
+  - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier, including the join-after-connect WebSocket resubscribe path, but there is still no broad CI suite around it.
   - Delivery reliability monitoring with retry scheduling, dead-letter status, admin APIs, and a frontend Delivery Monitor. The deterministic tests mock AMQP failures; full broker-outage CI coverage remains future work.
   - Event audit integrity with a per-scope SHA-256 hash chain. This is tamper-evident, not external notarization; legacy rows need explicit backfill before they verify as initialized.
 - Demo-grade:

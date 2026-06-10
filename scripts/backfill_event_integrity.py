@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -10,6 +11,38 @@ ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
+
+def _read_dotenv_value(name: str) -> str | None:
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return None
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        if key.strip() == name:
+            return value.strip().strip('"').strip("'")
+    return None
+
+
+def _running_inside_container() -> bool:
+    return Path("/.dockerenv").exists()
+
+
+def _prepare_local_database_url() -> None:
+    if os.environ.get("DATABASE_URL"):
+        return
+    database_url = _read_dotenv_value("DATABASE_URL")
+    if not database_url:
+        database_url = "postgresql+asyncpg://postgres:postgres@postgres:5432/channels"
+    if not _running_inside_container():
+        database_url = database_url.replace("@postgres:", "@127.0.0.1:").replace("@postgres/", "@127.0.0.1/")
+    os.environ["DATABASE_URL"] = database_url
+
+
+_prepare_local_database_url()
 
 from app.db.models import Event  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402

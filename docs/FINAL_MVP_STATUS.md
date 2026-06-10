@@ -12,13 +12,14 @@
 - Docker Compose run path for PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend.
 - Backend P0 regression tests for the main security and demo-flow behavior.
 - Verified during Delivery Reliability Upgrade v1: Docker-backed backend tests passed, frontend typecheck passed, Docker Compose config passed, and a temporary-database Alembic upgrade to head passed.
+- Verified during Stabilization Pass on 2026-06-10: Docker Compose config passed, Docker stack rebuilt and was healthy, Docker-backed backend tests passed, frontend typecheck passed, Docker frontend build passed, upgraded demo verifier passed, and Docker-network event-integrity dry-run passed.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 
 ## What Is Mostly Complete
 - Distributed delivery through PostgreSQL outbox, RabbitMQ, worker dispatch, Redis fanout, and WebSocket push.
 - REST sync/backfill for users who miss realtime delivery.
-- The demo verifier exercises the live WebSocket path when it is available and otherwise still proves the message via REST backfill.
+- The demo verifier exercises the live WebSocket path, the join-after-connect subscribe/resync path, event-integrity verification, and REST backfill.
 - Dead-letter mirroring to RabbitMQ is best-effort; PostgreSQL outbox status remains the source of truth.
 
 ## New Reliability Enhancement
@@ -63,6 +64,10 @@ cd ..
 docker compose config
 python scripts/backfill_event_integrity.py --dry-run
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
+```
+If the host-local backfill command cannot authenticate to the Docker PostgreSQL port, use:
+```bash
+docker compose run --rm -v "${PWD}/scripts:/scripts:ro" backend sh -lc "cd /app && PYTHONPATH=/app python /scripts/backfill_event_integrity.py --dry-run"
 ```
 
 If the stack is not already running, start it with:

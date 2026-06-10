@@ -55,7 +55,10 @@ Legacy event backfill check:
 ```bash
 python scripts/backfill_event_integrity.py --dry-run
 ```
-The script groups events by `channel:<channel_id>` or `system`, computes hashes in chronological order, and reports what would be updated without committing.
+The script groups events by `channel:<channel_id>` or `system`, computes hashes in chronological order, and reports what would be updated without committing. When running from the host, the script translates the default Compose hostname `postgres` to `127.0.0.1`; if host PostgreSQL auth does not match the Docker database, run the same check inside the Docker network:
+```bash
+docker compose run --rm -v "${PWD}/scripts:/scripts:ro" backend sh -lc "cd /app && PYTHONPATH=/app python /scripts/backfill_event_integrity.py --dry-run"
+```
 
 Frontend typecheck:
 ```bash
@@ -75,16 +78,17 @@ python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 Verifies:
 - User A/User B/User C register+login
 - Channel creation
-- Join flow
+- Join-after-WebSocket-connect flow with explicit subscribe/resync
 - Publish flow
 - Live WebSocket delivery to the subscriber when available
 - REST `/sync` backfill when live delivery is unavailable
 - Event log contains core events
-- Event integrity can be checked from `GET /v1/channels/{id}/events/integrity` or the Event Log panel
+- Event integrity is checked from `GET /v1/channels/{id}/events/integrity` for the fresh demo channel
 - Private upload access is denied to an unauthorized user
 - Final PASS/FAIL summary with visible step names and timeouts
 The verifier does not currently force a RabbitMQ failure or DLQ transition; use the backend delivery reliability tests and worker logs for that path.
 Note: the verifier is the best single proof of the pub/sub chain in this repo, but it is still a scripted demo flow rather than a CI-level full-stack integration suite.
+Do not run the Docker backend test suite and `scripts/verify_demo_flow.py` concurrently against the same Docker database; the tests reset database state and can invalidate live verifier users mid-flow.
 
 ## Manual Verification
 - Frontend login/register/channel flows.
@@ -96,6 +100,6 @@ Note: the verifier is the best single proof of the pub/sub chain in this repo, b
 ## Current Limitations
 - Local Windows `npm run build` may fail with a local Node dependency resolution issue (`caniuse-lite/dist/unpacker/agents`); Docker frontend build succeeds and is the verified path for demo readiness.
 - No dedicated frontend lint script currently exists (`npm run lint` unsupported).
-- `scripts/ws_client.py` is still useful for a standalone socket check, but the main demo verifier now covers the end-to-end proof path with live WebSocket delivery plus REST backfill fallback.
+- `scripts/ws_client.py` is still useful for a standalone socket check, but the main demo verifier now covers the end-to-end proof path with join-after-connect resubscribe, live WebSocket delivery, event-integrity verification, and REST backfill fallback.
 - There is no dedicated CI broker/WebSocket integration test yet.
 - Delivery reliability tests cover database outbox transitions and admin APIs, but they mock AMQP publish success/failure rather than exercising a real RabbitMQ outage.
