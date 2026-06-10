@@ -53,12 +53,15 @@ These tests verify hash creation, sequential chain linking, clean verification, 
 
 Legacy event backfill check:
 ```bash
-python scripts/backfill_event_integrity.py --dry-run
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
 ```
-The script groups events by `channel:<channel_id>` or `system`, computes hashes in chronological order, and reports what would be updated without committing. When running from the host, the script translates the default Compose hostname `postgres` to `127.0.0.1`; if host PostgreSQL auth does not match the Docker database, run the same check inside the Docker network:
+The script groups events by `channel:<channel_id>` or `system`, computes hashes in chronological order, and reports what would be updated without committing. The Docker command is the canonical demo-safe path because it uses the backend container's database environment.
+
+Real backfill, only when intentionally initializing legacy rows:
 ```bash
-docker compose run --rm -v "${PWD}/scripts:/scripts:ro" backend sh -lc "cd /app && PYTHONPATH=/app python /scripts/backfill_event_integrity.py --dry-run"
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
 ```
+Host execution (`python scripts/backfill_event_integrity.py --dry-run`) may work, but it depends on local PostgreSQL credentials matching the Docker database. On failure, the script prints the canonical Docker fallback.
 
 Frontend typecheck:
 ```bash
@@ -90,6 +93,39 @@ The verifier does not currently force a RabbitMQ failure or DLQ transition; use 
 Note: the verifier is the best single proof of the pub/sub chain in this repo, but it is still a scripted demo flow rather than a CI-level full-stack integration suite.
 Do not run the Docker backend test suite and `scripts/verify_demo_flow.py` concurrently against the same Docker database; the tests reset database state and can invalidate live verifier users mid-flow.
 
+## Approval-Required Membership Verifier
+```bash
+python scripts/verify_approval_flow.py --base-url http://localhost:8000/v1
+```
+Verifies:
+- owner, pending subscriber, and outsider registration
+- private `approval_required` channel creation
+- pending join request before approval
+- subscriber WebSocket opened while pending
+- existing subscriber channel keeps the socket subscription set non-empty
+- owner approval
+- membership update over WebSocket, or explicit REST membership resync when realtime is unavailable
+- explicit WebSocket subscribe/resync after approval
+- live message delivery after approval when the worker/RabbitMQ/Redis path is healthy
+- REST `/sync` backfill for the approved subscriber
+- event log contains `membership.approved` and `message.published`
+- outsider is denied private channel messages
+
+If live delivery fails but REST backfill succeeds, the script prints that degraded result instead of hiding it.
+
+## Delivery Reliability Verifier
+```bash
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"
+```
+Verifies:
+- owner can create a channel and publish a message
+- worker moves at least one outbox row to `published`
+- a controlled `dead_lettered` outbox row appears in `/v1/admin/delivery/dead-lettered`
+- manual retry resets that controlled row to `pending`
+- outsider cannot access delivery monitor stats
+
+This is an automated supervisor proof for the normal worker path and controlled manual retry path. It is not a full RabbitMQ outage simulation. The PostgreSQL outbox remains the source of truth; the RabbitMQ DLQ is operational mirror/evidence when the worker can publish to it.
+
 ## Manual Verification
 - Frontend login/register/channel flows.
 - Event log panel rendering.
@@ -103,3 +139,4 @@ Do not run the Docker backend test suite and `scripts/verify_demo_flow.py` concu
 - `scripts/ws_client.py` is still useful for a standalone socket check, but the main demo verifier now covers the end-to-end proof path with join-after-connect resubscribe, live WebSocket delivery, event-integrity verification, and REST backfill fallback.
 - There is no dedicated CI broker/WebSocket integration test yet.
 - Delivery reliability tests cover database outbox transitions and admin APIs, but they mock AMQP publish success/failure rather than exercising a real RabbitMQ outage.
+- `scripts/verify_delivery_reliability.py` strengthens the supervisor proof with the live worker publish path and a controlled dead-letter/manual retry check, but full broker-outage CI remains future work.

@@ -12,6 +12,15 @@ BACKEND_DIR = ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+DOCKER_DRY_RUN_COMMAND = (
+    'docker compose exec backend sh -lc '
+    '"cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"'
+)
+DOCKER_BACKFILL_COMMAND = (
+    'docker compose exec backend sh -lc '
+    '"cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"'
+)
+
 
 def _read_dotenv_value(name: str) -> str | None:
     env_path = ROOT / ".env"
@@ -31,15 +40,32 @@ def _running_inside_container() -> bool:
     return Path("/.dockerenv").exists()
 
 
+def _host_adjusted_database_url(database_url: str) -> str:
+    if _running_inside_container():
+        return database_url
+    return database_url.replace("@postgres:", "@127.0.0.1:").replace("@postgres/", "@127.0.0.1/")
+
+
+def _mask_database_url(database_url: str) -> str:
+    if "://" not in database_url or "@" not in database_url:
+        return database_url
+    scheme, rest = database_url.split("://", 1)
+    credentials, host = rest.split("@", 1)
+    if ":" in credentials:
+        user, _ = credentials.split(":", 1)
+        return f"{scheme}://{user}:***@{host}"
+    return f"{scheme}://***@{host}"
+
+
 def _prepare_local_database_url() -> None:
-    if os.environ.get("DATABASE_URL"):
-        return
-    database_url = _read_dotenv_value("DATABASE_URL")
+    database_url = (
+        os.environ.get("EVENT_INTEGRITY_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or _read_dotenv_value("DATABASE_URL")
+    )
     if not database_url:
         database_url = "postgresql+asyncpg://postgres:postgres@postgres:5432/channels"
-    if not _running_inside_container():
-        database_url = database_url.replace("@postgres:", "@127.0.0.1:").replace("@postgres/", "@127.0.0.1/")
-    os.environ["DATABASE_URL"] = database_url
+    os.environ["DATABASE_URL"] = _host_adjusted_database_url(database_url)
 
 
 _prepare_local_database_url()
@@ -136,13 +162,36 @@ async def backfill_event_integrity(*, force: bool, dry_run: bool, scope_filter: 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Backfill tamper-evident hash-chain metadata for event logs.")
+    parser = argparse.ArgumentParser(
+        description="Backfill tamper-evident hash-chain metadata for event logs.",
+        epilog=(
+            "Demo-safe Docker dry-run: "
+            f"{DOCKER_DRY_RUN_COMMAND}\n"
+            "Demo-safe Docker real backfill: "
+            f"{DOCKER_BACKFILL_COMMAND}"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--force", action="store_true", help="Rebuild existing non-null integrity fields.")
     parser.add_argument("--dry-run", action="store_true", help="Report what would change without committing.")
     parser.add_argument("--scope", help="Limit to one scope, for example channel:<uuid> or system.")
     args = parser.parse_args()
 
-    stats = asyncio.run(backfill_event_integrity(force=args.force, dry_run=args.dry_run, scope_filter=args.scope))
+    try:
+        stats = asyncio.run(backfill_event_integrity(force=args.force, dry_run=args.dry_run, scope_filter=args.scope))
+    except Exception as exc:
+        print("Event integrity backfill failed.", file=sys.stderr)
+        print(f"- error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(f"- DATABASE_URL used: {_mask_database_url(os.environ.get('DATABASE_URL', ''))}", file=sys.stderr)
+        print(
+            "- hint: host execution needs PostgreSQL credentials that match the database exposed on localhost.",
+            file=sys.stderr,
+        )
+        print("- demo-safe Docker dry-run:", file=sys.stderr)
+        print(f"  {DOCKER_DRY_RUN_COMMAND}", file=sys.stderr)
+        print("- demo-safe Docker real backfill:", file=sys.stderr)
+        print(f"  {DOCKER_BACKFILL_COMMAND}", file=sys.stderr)
+        raise SystemExit(1) from exc
     mode = "dry run" if args.dry_run else "committed"
     print(f"Event integrity backfill {mode}:")
     for key, value in stats.items():

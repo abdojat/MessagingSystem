@@ -39,6 +39,9 @@
 ## Helpful Commands During The Demo
 ```bash
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
+python scripts/verify_approval_flow.py --base-url http://localhost:8000/v1
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"
 docker compose logs -f backend worker
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 docker compose exec postgres psql -U postgres -d channels -c "select status, count(*) from outbox group by status order by status;"

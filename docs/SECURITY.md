@@ -7,6 +7,7 @@
 - The frontend keeps the access token in a JavaScript-managed cookie and the refresh token in `localStorage`, which is acceptable for this university demo but not production-grade session security.
 - WebSocket connections use a short-lived access token in the connection URL for the demo flow and verifier.
 - WebSocket membership refresh is demo-grade but explicit: after a user joins or receives a membership update, the frontend sends a subscribe/resync message so the open socket follows the latest authorized channel set.
+- Targeted `membership_update` events are forwarded to the authenticated user even when the affected channel is not yet in that socket's subscription set. This supports approval-required joins without exposing message payloads to unauthorized users.
 
 ## Authorization
 - Channel reads and writes check membership/role permissions.
@@ -44,7 +45,7 @@
 - New events receive `previous_hash`, `event_hash`, `hash_algorithm`, `integrity_version`, and `integrity_scope`.
 - The hash protects stable audit fields: event id, channel id, actor id, event type, created timestamp, payload, previous hash, integrity version, and scope.
 - Channel owners/admins with event-log access can call `GET /v1/channels/{id}/events/integrity` or use the Event Log UI to verify the chain.
-- Legacy events created before the upgrade may show Not initialized until `python scripts/backfill_event_integrity.py` is run.
+- Legacy events created before the upgrade may show Not initialized until `scripts/backfill_event_integrity.py` is run. The canonical demo-safe dry-run is `docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"`.
 
 This protects against accidental or unauthorized event modification, insertion, reordering, or deletion that breaks links between remaining events being silently missed by the application verifier. Tail truncation requires an external remembered last hash to prove. It does not replace database access control, backups, monitoring, or secret management. It is not a blockchain, not external notarization, and not a full Merkle-tree proof. A database administrator with full write access could recompute a forged chain unless event hashes are anchored outside the database.
 

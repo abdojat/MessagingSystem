@@ -16,6 +16,7 @@
   - Includes a durable dead-letter exchange/queue for operational visibility.
 - Redis + WebSocket
   - Low-latency delivery path for active subscribers.
+  - Targeted membership updates are allowed through the socket even when the new channel is not yet in the socket subscription set, so approval-after-connect can refresh and subscribe safely.
 - PostgreSQL
   - Source of truth for users, channels, memberships, messages, outbox, and events.
 - Frontend (Next.js)
@@ -109,3 +110,4 @@ This is a practical hash-chain integrity layer, not a blockchain and not externa
 - After max attempts, the worker marks the row `dead_lettered` in PostgreSQL and tries to mirror the payload to RabbitMQ `ex.channels.dlx` / `q.dead.messages`.
 - The admin delivery APIs and frontend Delivery Monitor are scoped to channels the current user manages.
 - The DLQ is operational evidence only; the database status is the authoritative record.
+- `scripts/verify_delivery_reliability.py` provides a supervisor-facing proof of the normal worker publish path plus a controlled dead-letter/manual retry path. It does not replace a future full broker-outage CI test.

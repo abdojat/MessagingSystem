@@ -389,10 +389,10 @@ class WSManager:
                     logger.warning("failed to decrypt realtime event: %s", exc.code)
                     continue
                 channel_id = str(event.get("channel_id") or "")
-                subs = self._subscriptions.get(id(websocket), set())
-                if channel_id and subs and channel_id not in subs:
-                    continue
                 event_type = str(event.get("type") or "event")
+                subs = self._subscriptions.get(id(websocket), set())
+                if event_type != "membership_update" and channel_id and subs and channel_id not in subs:
+                    continue
                 await websocket.send_json(build_envelope(event_type, event))
         finally:
             await pubsub.unsubscribe(channel_name)

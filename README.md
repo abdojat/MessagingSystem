@@ -26,9 +26,12 @@ cp .env.example .env
 # set MESSAGE_ENCRYPTION_KEY in .env
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
+docker compose config
 docker compose up -d --build
 docker compose ps -a
 ```
+
+For the deterministic supervisor sequence, use the [Golden Demo Path](docs/DEMO_GUIDE.md#golden-demo-path).
 
 ## Environment Variables
 See `.env.example`.
@@ -94,23 +97,28 @@ It now opens User B's WebSocket before joining, explicitly subscribes after the 
 
 Event integrity checks:
 ```bash
-cd backend
-python -m pytest tests/test_event_integrity.py -q
-cd ..
-python scripts/backfill_event_integrity.py --dry-run
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app pytest tests/test_event_integrity.py -q"
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
 ```
-If a host-local PostgreSQL listener or password mismatch prevents the direct command from reaching the Docker database, run the dry-run inside the Docker network:
+Canonical real backfill, when you intentionally want to initialize legacy events:
 ```bash
-docker compose run --rm -v "${PWD}/scripts:/scripts:ro" backend sh -lc "cd /app && PYTHONPATH=/app python /scripts/backfill_event_integrity.py --dry-run"
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
 ```
+Host execution (`python scripts/backfill_event_integrity.py --dry-run`) is optional and depends on local PostgreSQL credentials matching the Docker database.
 
 Delivery reliability checks:
 ```bash
-cd backend
-python -m pytest tests/test_delivery_reliability.py -q
-cd ..
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app pytest tests/test_delivery_reliability.py -q"
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"
 docker compose exec postgres psql -U postgres -d channels -c "select status, count(*) from outbox group by status order by status;"
 ```
+The verifier proves normal worker publish plus a controlled dead-letter/manual retry path; it does not claim full broker-outage CI coverage.
+
+Approval-required membership verifier:
+```bash
+python scripts/verify_approval_flow.py --base-url http://localhost:8000/v1
+```
+This opens User B's WebSocket while pending, approves User B, verifies membership update or REST resync, then checks live delivery and REST backfill.
 
 ## Manual Demo Flow
 1. User A register/login.
@@ -133,8 +141,8 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Complete:
   - Authentication, authorization, membership management, channel CRUD, encrypted message storage, event logging, upload access checks, safe identifier validation, and backend regression tests.
 - Mostly complete:
-  - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier, including the join-after-connect WebSocket resubscribe path, but there is still no broad CI suite around it.
-  - Delivery reliability monitoring with retry scheduling, dead-letter status, admin APIs, and a frontend Delivery Monitor. The deterministic tests mock AMQP failures; full broker-outage CI coverage remains future work.
+  - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier and approval verifier, including join-after-connect and approval-after-connect WebSocket resubscribe paths, but there is still no broad CI suite around it.
+  - Delivery reliability monitoring with retry scheduling, dead-letter status, admin APIs, frontend Delivery Monitor, and a controlled verifier for normal publish plus manual retry. Full broker-outage CI coverage remains future work.
   - Event audit integrity with a per-scope SHA-256 hash chain. This is tamper-evident, not external notarization; legacy rows need explicit backfill before they verify as initialized.
 - Demo-grade:
   - Frontend token handling. Access tokens are kept in a JavaScript-managed cookie and refresh tokens are kept in `localStorage`, which is acceptable for a university demo but not production-grade session security.

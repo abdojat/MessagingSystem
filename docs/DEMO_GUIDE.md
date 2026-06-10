@@ -1,5 +1,65 @@
 # Demo Guide
 
+## Golden Demo Path
+
+Run these commands from the repository root unless a step says otherwise.
+
+Optional clean reset, destructive:
+```bash
+# WARNING: this deletes local Docker database, broker, and upload volumes.
+docker compose down -v
+```
+
+Prepare environment:
+```bash
+cp .env.example .env
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+Paste the generated value into `MESSAGE_ENCRYPTION_KEY` in `.env`. Replace `JWT_SECRET` with a non-default demo secret.
+
+Start and inspect the stack:
+```bash
+docker compose config
+docker compose up -d --build
+docker compose ps -a
+```
+
+Run backend and frontend checks:
+```bash
+docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
+cd frontend
+npm run typecheck
+cd ..
+```
+
+Run supervisor-safe verifiers:
+```bash
+python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
+python scripts/verify_approval_flow.py --base-url http://localhost:8000/v1
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"
+```
+
+Canonical event-integrity commands:
+```bash
+# Dry-run; safe for final demo.
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
+
+# Real backfill; use only when you intentionally want to initialize legacy event rows.
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
+```
+
+What to show the supervisor:
+- User A creates a channel/topic.
+- User B joins or is approved after a pending request.
+- User A publishes and User B receives the message live.
+- REST sync/backfill returns the same persisted message.
+- Event Log shows channel, membership, approval, and message events.
+- Audit integrity verifies initialized event rows.
+- Delivery Monitor shows outbox status and manual retry behavior.
+- User C is blocked from private channel/upload access.
+- PostgreSQL stores message ciphertext, not plaintext.
+
 ## 1) Start Services
 ```bash
 cp .env.example .env
@@ -38,10 +98,14 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
 8. User B receives/reads message.
 9. Open channel details -> Event Log panel.
 10. Click Verify integrity and show `Audit integrity: Verified`.
-    - If the database contains pre-upgrade legacy events, run `python scripts/backfill_event_integrity.py` first or explain the Not initialized state honestly.
-    - If the direct host command cannot reach the Docker database, use:
+    - If the database contains pre-upgrade legacy events, run the canonical Docker backfill command first or explain the Not initialized state honestly.
+    - Dry-run first:
       ```bash
-      docker compose run --rm -v "${PWD}/scripts:/scripts:ro" backend sh -lc "cd /app && PYTHONPATH=/app python /scripts/backfill_event_integrity.py --dry-run"
+      docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
+      ```
+    - Real backfill when intentional:
+      ```bash
+      docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
       ```
 11. Open the sidebar Delivery Monitor as User A.
     - Normal demo state should show published/pending counters and empty failed/dead-lettered tables.
@@ -59,16 +123,17 @@ Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not p
 
 Developer-only tamper test:
 ```bash
-python scripts/backfill_event_integrity.py --dry-run
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
 ```
-Docker-network fallback for the same dry-run:
+Host command, optional when local PostgreSQL credentials match the Docker database:
 ```bash
-docker compose run --rm -v "${PWD}/scripts:/scripts:ro" backend sh -lc "cd /app && PYTHONPATH=/app python /scripts/backfill_event_integrity.py --dry-run"
+python scripts/backfill_event_integrity.py --dry-run
 ```
 For a real tamper demonstration, modify a non-production event payload directly in PostgreSQL, then click Verify integrity again. The UI should report Broken. Do not include manual database tampering in the normal supervisor demo unless asked.
 
 Useful delivery reliability checks:
 ```bash
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"
 docker compose logs -f worker
 docker compose exec postgres psql -U postgres -d channels -c "select status, count(*) from outbox group by status order by status;"
 docker compose exec postgres psql -U postgres -d channels -c "select id, status, attempts, max_attempts, next_retry_at, dead_lettered_at from outbox order by created_at desc limit 10;"

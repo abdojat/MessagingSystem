@@ -6,6 +6,16 @@ Last updated: 2026-06-10
 
 This pass focused on demo determinism for the distributed publish/subscribe path. The main code change fixes the join-after-WebSocket-connect edge case by making socket subscriptions refresh explicitly after membership changes and by keeping idle Redis pub/sub timeouts from closing healthy WebSockets.
 
+## Stabilization Pass 2 — Approval Flow, Backfill, Delivery Reliability
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Event-integrity backfill command | Docker canonical path passed; host path fails clearly | `docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"` -> latest run: `scopes: 5`, `events_seen: 16`, `events_updated: 0`, `existing_kept: 16`, `conflicts: 0`; host `python scripts/backfill_event_integrity.py --dry-run` failed with `InvalidPasswordError` and printed the Docker fallback | Host PostgreSQL credentials may differ from the Docker database | Use Docker `exec backend` dry-run for final demo; run real backfill only when intentionally initializing legacy rows |
+| Approval-required membership after WebSocket connect | Passed | `python scripts/verify_approval_flow.py --base-url http://localhost:8000/v1` verified pending join, WebSocket open while pending with an existing subscription, approval membership update, explicit subscribe/resync, live delivery, REST backfill, event log, and outsider denial | No browser e2e test for the approval UI | Keep the script in the golden demo path; add Playwright only if time remains |
+| Delivery reliability proof | Passed with scoped proof | `docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"` verified worker-published outbox count, controlled dead-letter listing, manual retry reset to pending, and outsider authorization denial | Still no full broker-outage CI; controlled row is not a real RabbitMQ outage | Keep wording honest; add a broker-outage runbook or CI job later |
+| Golden demo path | Updated and runnable | `docs/DEMO_GUIDE.md` now has a Golden Demo Path; `README.md` links to it; stack rebuilt with scripts copied into backend image | Clean reset deletes local demo data if used | Keep destructive reset clearly labeled and run verifiers after backend tests |
+| Ciphertext-at-rest proof | Passed | `docker compose exec postgres psql ... left(content_text, 12) ...` returned `gAAAA...` prefixes for recent messages | Query is a spot check, not a formal encryption audit | Use it as a supervisor demonstration, not a production security proof |
+
 ## Areas Checked
 
 | Area | Status | Evidence | Remaining risk | Next action |
@@ -70,4 +80,4 @@ The Docker path, backend tests, frontend typecheck/build, upgraded full-stack ve
 
 ## Recommended Next Step
 
-Run a second stabilization pass focused on one approval-required channel demo: User B opens WebSocket while pending, User A approves B, B receives the membership update, B subscribes/resyncs, then B receives User A's next message live.
+Package the final submission materials: final report, screenshots, and a short supervisor script that follows the Golden Demo Path exactly.

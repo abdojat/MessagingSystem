@@ -13,6 +13,7 @@ RUN python -c "import pathlib, tomllib; data = tomllib.loads(pathlib.Path('/tmp/
 
 COPY backend /app
 COPY worker /worker
+COPY scripts /app/scripts
 
 ENV PYTHONUNBUFFERED=1
 

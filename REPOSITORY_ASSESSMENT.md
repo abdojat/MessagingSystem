@@ -156,14 +156,14 @@ flowchart LR
 |---|---|---|---|---|---|
 | 1. Topic/channel creation | Complete | [`backend/app/services/channel_service.py`](backend/app/services/channel_service.py) `ChannelService.create_channel`; [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`; [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py) `ChannelCreateRequest` | Safe identifier validation exists and is backed by database constraints; docs should keep the broker-safe policy explicit | High | Keep the current safe identifier policy and document it clearly |
 | 2. Publishing messages to a specific channel | Complete | [`backend/app/services/message_service.py`](backend/app/services/message_service.py) `publish_message`; [`backend/app/api/routes/messages.py`](backend/app/api/routes/messages.py) `publish_message`; outbox in [`backend/app/services/outbox_service.py`](backend/app/services/outbox_service.py) `enqueue_message_outbox` | Reply-only member publish path is a custom exception; broker delivery still benefits from more integration coverage | High | Add broker/WebSocket integration tests and document the reply exception clearly |
-| 3. Automatic delivery to subscribers | Mostly complete | [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) `_consume_user`; [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py) `_redis_forward_loop`; membership binding in channel service | Live subscription state is captured at connect time; join-after-connect remains an edge case | High | Emit membership-change websocket updates that refresh subscription state or require explicit client resubscribe after join/accept |
+| 3. Automatic delivery to subscribers | Mostly complete | [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) `_consume_user`; [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py) `_redis_forward_loop`; membership binding in channel service; `scripts/verify_demo_flow.py`; `scripts/verify_approval_flow.py` | Join-after-connect and approval-after-connect now have scripted coverage, but there is still no browser e2e test or full CI broker/WebSocket job | High | Keep the verifiers in the supervisor path and add a CI broker/WebSocket integration test later |
 | 4. Channel management interface/API | Complete | [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`, `list_channels`, `get_channel`, `patch_channel`, `delete_channel`, `channel_stats` | Duplicate root routes are also exposed by [`backend/app/main.py`](backend/app/main.py) | Medium | Keep only one public API surface or document the duplicate compatibility routes |
 | 5. Subscriber management interface/API | Complete | [`backend/app/api/routes/memberships.py`](backend/app/api/routes/memberships.py) `join_channel`, `leave_channel`, `list_members`, `list_pending_requests`, `create_invite`, `accept_invite`, `approve_member`, `add_member_direct`, `promote_member`, `demote_member`, `update_admin_permissions`, `remove_member` | Complex permission matrix; not all flows are exercised by tests | Medium | Add integration tests for join/approve/invite/promote/demote/remove paths |
 | 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) `register`, `login`, `refresh`, `logout`; [`backend/app/core/security.py`](backend/app/core/security.py) `hash_password`, `create_access_token`, `create_refresh_token` | Frontend still uses a JS-managed access-token cookie plus `localStorage` refresh token storage, which is fine for the demo but not production-grade | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
 | 7. Authorization/permissions | Complete | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership before returning bytes | Browser token handling remains the larger remaining security caveat | High | Keep backend authorization strong and document the client-side limitation honestly |
 | 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; encryption key must stay out of tracked files | High | Treat encryption key as an external secret only and keep the env story explicit |
 | 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py) hash-chain verification | Event logging is not guaranteed if the logging path fails; event visibility and integrity verification are limited to channel managers | Medium | Keep the log path best-effort, document the limitation, and backfill legacy event hashes before final demos |
-| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) `bind_user_channel`; [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) `run_outbox_publisher`; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py); Delivery Monitor APIs/UI | DLQ/retry tracking exists, but DB commit and AMQP binding are still not atomic and the DLQ path still needs a real broker-outage integration test | High | Keep the live verifier and add a broker integration test or compensating retry path if binding fails after commit |
+| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) `bind_user_channel`; [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) `run_outbox_publisher`; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py); [`scripts/verify_delivery_reliability.py`](scripts/verify_delivery_reliability.py); Delivery Monitor APIs/UI | DLQ/retry tracking exists, but DB commit and AMQP binding are still not atomic and the DLQ path still needs a real broker-outage integration test | High | Keep the live verifier and delivery verifier; add a broker outage integration test later |
 | 11. Docker/environment setup | Complete | [`docker-compose.yml`](docker-compose.yml); [`backend/Dockerfile`](backend/Dockerfile); [`worker/Dockerfile`](worker/Dockerfile); [`frontend/Dockerfile`](frontend/Dockerfile) | There are manual steps and a few platform caveats in docs | Medium | Keep the env story explicit and keep the compose path as the canonical run path |
 | 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md); [`docs/SECURITY.md`](docs/SECURITY.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
 | 13. Testing | Mostly complete | [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) now covers authz, uploads, identifier validation, and smoke flow; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) is a manual verifier | No frontend tests, no broker integration tests, no load tests | High | Add at least one RabbitMQ/WebSocket integration test and one frontend smoke test; keep the demo verifier as a separate tool |
@@ -237,7 +237,7 @@ flowchart LR
 
 - The system still benefits from a strict broker-safe identifier policy, even though usernames and upload paths are now sanitized.
 - Join/accept flows bind broker queues after DB commit, so DB and broker state can diverge.
-- WebSocket subscription state is not obviously resynchronized when membership changes while the socket is already open.
+- WebSocket subscription state is refreshed explicitly after joins and targeted membership updates; approval-after-connect is covered by `scripts/verify_approval_flow.py`.
 
 ## 5. Backend Code Quality Review
 
@@ -517,8 +517,8 @@ The frontend is real and fairly complete.
 
 ### Reliability Note
 
-- I did not find frontend code that actively sends `subscribe` or `resume` websocket envelopes from the client.
-- The app appears to rely mainly on backend-initialized membership state and server push.
+- The frontend sends explicit `subscribe` websocket envelopes after a successful join and after a targeted membership update for the current user.
+- The backend allows targeted `membership_update` events through even when the affected channel is not yet in the current socket subscription set, which supports approval-required joins while the socket is already open.
 
 ## 10. Testing and Reliability Review
 
@@ -543,7 +543,7 @@ The frontend is real and fairly complete.
 - `cd backend && python -m pytest -q` passed with 20 tests and 17 skips.
 - `npm run typecheck` in `frontend/` passed.
 - `docker compose config` passed.
-- `python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1` timed out after 60 seconds because no backend was listening on `localhost:8000` in this shell.
+- `scripts/verify_demo_flow.py` and `scripts/verify_approval_flow.py` are the current supervisor-facing WebSocket verifiers; rerun them against a live Docker stack before final review.
 - The new migration is `0013_event_integrity`; a live Alembic upgrade was not separately run in this pass, but `docker compose config` passed and backend tests validated the model-level schema path.
 
 ### Practical Testing Plan
@@ -644,7 +644,7 @@ The frontend is real and fairly complete.
 
 | Task | Why it matters | Difficulty | Files/modules likely involved | Suggested direction |
 |---|---|---:|---|---|
-| Add a stronger broker/WebSocket integration test | The project's main selling point still deserves direct proof | Medium | [`backend/tests/`](backend/tests), [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) | Add at least one RabbitMQ/WebSocket integration test and one end-to-end smoke test |
+| Add a stronger broker/WebSocket integration test | The project's main selling point still deserves direct proof | Medium | [`backend/tests/`](backend/tests), [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py), [`scripts/verify_approval_flow.py`](scripts/verify_approval_flow.py) | Keep the supervisor verifiers and add at least one CI RabbitMQ/WebSocket integration test later |
 | Keep safe identifier policy documented and covered by tests | Routing-key safety is already implemented, but it still needs to stay explicit and regression-tested | Low | [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py), [`backend/app/schemas/auth.py`](backend/app/schemas/auth.py), [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) | Keep the safe identifier policy documented and covered by the existing validation tests |
 | Keep browser-side token storage clearly labeled as demo-grade | Prevents overclaiming security | Medium | frontend auth hooks/store/docs | If you cannot move to httpOnly cookies, clearly mark it as demo-only and harden UI inputs/SOP |
 
@@ -692,7 +692,7 @@ The frontend is real and fairly complete.
 ### What would make it impressive?
 
 - Add broker/WebSocket integration tests.
-- Add resubscribe handling for membership changes.
+- Keep the approval-required WebSocket verifier in the final demo path.
 - Expand the Delivery Monitor with richer operational metrics if time allows.
 - Ship a cleaned-up final report with screenshots and a clear deployment story.
 
