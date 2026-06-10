@@ -12,6 +12,7 @@ RUN python -c "import pathlib, tomllib; data = tomllib.loads(pathlib.Path('/tmp/
     pip install --no-cache-dir --retries 10 --timeout 180 -r /tmp/requirements.txt
 
 COPY backend /app
+COPY worker /worker
 
 ENV PYTHONUNBUFFERED=1
 

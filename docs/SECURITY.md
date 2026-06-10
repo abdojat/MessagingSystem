@@ -12,6 +12,8 @@
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
 - The upload route allows content only to the owner, and the download route only allows the owner or a user who is a member of a channel that references the upload.
 - Unauthorized publish/read attempts are logged as security events.
+- Delivery monitoring endpoints under `/v1/admin/delivery/*` require authentication and are scoped to channels where the caller is an owner or an admin with management permissions.
+- Manual delivery retry is authorized through the same scoped channel-manager rule.
 
 ## Message Encryption
 - Message content is encrypted at rest on the server side with Fernet.
@@ -29,6 +31,11 @@
 - Safe usernames and channel slugs are restricted to `^[A-Za-z0-9_-]{3,50}$`.
 - Upload storage paths are derived from sanitized filename components and validated to stay inside the uploads directory.
 - Raw user input is not used directly in broker routing keys, Redis pub/sub channels, or filesystem paths.
+
+## Delivery Error Handling
+- Worker delivery errors are sanitized before being stored in `outbox.last_error` or exposed through the Delivery Monitor.
+- Sanitization masks common token, password, secret, key, and AMQP credential patterns.
+- Error text is still operational data, so it should not be used to intentionally log secrets or full connection strings.
 
 ## Known Limitations
 - This project is a university MVP, not a production-hardened identity or secret-management platform.

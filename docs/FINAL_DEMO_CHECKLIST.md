@@ -22,13 +22,15 @@
 9. User A publishes a message.
 10. Show that User B receives the message live through the WebSocket-backed UI. If the live socket is unavailable in the environment, show the REST sync/backfill result instead.
 11. Open the event log and show `channel.created`, `membership.joined`, and `message.published`.
-12. Create a private upload owned by User A, attach it to a message, and show that User C receives `403 Forbidden` when trying to download the file.
-13. If RabbitMQ management is available, show the exchange/queue activity or worker logs as extra proof of the broker path.
+12. Open Delivery Monitor as User A and show delivery counters plus empty or retryable failure tables.
+13. Create a private upload owned by User A, attach it to a message, and show that User C receives `403 Forbidden` when trying to download the file.
+14. If RabbitMQ management is available, show the exchange/queue activity, worker logs, or the `q.dead.messages` queue as extra proof of the broker path.
 
 ## Proof To Show
 - The channel exists and persists.
 - The subscriber receives the message.
 - The event log records the activity.
+- The Delivery Monitor shows outbox delivery status for managed channels.
 - Unauthorized access is blocked.
 - The message remains stored encrypted at rest in PostgreSQL.
 
@@ -37,11 +39,13 @@
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 docker compose logs -f backend worker
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
+docker compose exec postgres psql -U postgres -d channels -c "select status, count(*) from outbox group by status order by status;"
 ```
 
 ## What To Say Clearly
 - This is a distributed publish/subscribe system, not just a chat app.
 - PostgreSQL is the source of truth.
 - RabbitMQ, the worker, Redis, and WebSockets are part of the delivery path.
+- Delivery failures are tracked in PostgreSQL, retried by the worker, and dead-lettered after max attempts; the RabbitMQ DLQ is operational evidence, not the source of truth.
 - Upload downloads are protected by backend authorization checks.
 - Browser token storage is demo-grade, not production-grade.

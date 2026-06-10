@@ -9,6 +9,7 @@ Core capabilities:
 - Realtime subscriber delivery.
 - Persistent message/event storage.
 - Security controls (JWT auth, authorization, encryption-at-rest).
+- Delivery reliability controls for outbox retry scheduling, dead-letter tracking, and admin retry.
 
 ## Why Publish/Subscribe
 Pub/Sub decouples producers from consumers:
@@ -20,9 +21,9 @@ Pub/Sub decouples producers from consumers:
 - `backend` (FastAPI): API, auth/authz, encryption, persistence orchestration.
 - `worker` (Python): outbox polling and AMQP/Redis fanout tasks.
 - `postgres`: durable storage for users, channels, memberships, messages, outbox, events.
-- `rabbitmq`: pub/sub broker for routing events/messages.
+- `rabbitmq`: pub/sub broker for routing events/messages, plus a durable dead-letter queue for terminal delivery failures.
 - `redis`: realtime fanout and WebSocket support.
-- `frontend` (Next.js): demo UI for login, channels, publish/subscribe, event log.
+- `frontend` (Next.js): demo UI for login, channels, publish/subscribe, event log, and delivery monitoring.
 
 ## Message Flow
 1. Client publishes to `POST /v1/channels/{channel_id}/messages`.
@@ -30,7 +31,10 @@ Pub/Sub decouples producers from consumers:
 3. Message content is encrypted with Fernet before DB persistence.
 4. Encrypted payload is written to `messages` and `outbox` in Postgres.
 5. Worker relays outbox events through RabbitMQ and Redis.
-6. Authorized subscribers receive updates via WebSocket and can retrieve plaintext through authorized REST/API responses.
+6. Successful broker publish marks the outbox row `published`.
+7. Failed broker publish schedules retry with backoff, then marks `dead_lettered` after max attempts.
+8. Channel owners/admins can inspect failed/dead-lettered deliveries and request manual retry.
+9. Authorized subscribers receive updates via WebSocket and can retrieve plaintext through authorized REST/API responses.
 
 ## Security Model
 - Passwords are hashed (Passlib).
@@ -43,6 +47,8 @@ Pub/Sub decouples producers from consumers:
 ## Event Logging
 Channel events are stored in `events` and exposed via `GET /v1/channels/{id}/events`.
 Frontend channel details page includes an Event Log panel (loading/error/empty/populated states).
+
+Delivery reliability events include `broker.retry_scheduled`, `broker.dead_lettered`, and `broker.manual_retry_requested`. Stored errors are sanitized and should not contain secrets.
 
 ## Official Requirement Status
 All five official requirements are implemented, with backend regression tests and a demo verifier script that exercise the main flow (see `docs/REQUIREMENTS_MAPPING.md`).

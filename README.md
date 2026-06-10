@@ -9,6 +9,7 @@ University final-year project implementing a secure distributed channel messagin
 - Broker: RabbitMQ
 - Realtime: Redis + WebSocket
 - Frontend: Next.js (`frontend/`)
+- Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
 
 ## Services
 - `postgres` (5432)
@@ -37,6 +38,10 @@ Important:
 - `JWT_SECRET` (replace development default)
 - `MESSAGE_ENCRYPTION_ENABLED=true`
 - `MESSAGE_ENCRYPTION_KEY` (Fernet key)
+- `OUTBOX_MAX_ATTEMPTS`
+- `OUTBOX_INITIAL_RETRY_DELAY_SECONDS`
+- `OUTBOX_RETRY_BACKOFF_MULTIPLIER`
+- `OUTBOX_MAX_RETRY_DELAY_SECONDS`
 - `NEXT_PUBLIC_API_BASE_URL`
 - Keep `.env` local only; the repository tracks `.env.example` for documentation.
 
@@ -86,6 +91,14 @@ python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 The script verifies register/login, channel creation, join, live WebSocket delivery when available, REST sync backfill, event log entries, and an unauthorized upload access check.
 It is the strongest repo-level proof of the distributed publish/subscribe path currently available.
 
+Delivery reliability checks:
+```bash
+cd backend
+python -m pytest tests/test_delivery_reliability.py -q
+cd ..
+docker compose exec postgres psql -U postgres -d channels -c "select status, count(*) from outbox group by status order by status;"
+```
+
 ## Manual Demo Flow
 1. User A register/login.
 2. User B register/login.
@@ -94,9 +107,10 @@ It is the strongest repo-level proof of the distributed publish/subscribe path c
 5. User A publishes.
 6. User B receives/reads.
 7. Show event log panel in channel details.
-8. Show unauthorized access denial on private channel.
-9. Show private upload access is denied to a non-member.
-10. Show ciphertext at rest:
+8. Open Delivery Monitor from the sidebar as a channel owner/admin.
+9. Show unauthorized access denial on private channel.
+10. Show private upload access is denied to a non-member.
+11. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
@@ -106,6 +120,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
   - Authentication, authorization, membership management, channel CRUD, encrypted message storage, event logging, upload access checks, safe identifier validation, and backend regression tests.
 - Mostly complete:
   - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier, but there is still no broad CI suite around it.
+  - Delivery reliability monitoring with retry scheduling, dead-letter status, admin APIs, and a frontend Delivery Monitor. The deterministic tests mock AMQP failures; full broker-outage CI coverage remains future work.
 - Demo-grade:
   - Frontend token handling. Access tokens are kept in a JavaScript-managed cookie and refresh tokens are kept in `localStorage`, which is acceptable for a university demo but not production-grade session security.
 - Future work:

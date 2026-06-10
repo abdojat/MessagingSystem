@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 
-from app.api.routes import auth, channels, events, health, memberships, messages, users
+from app.api.routes import auth, channels, delivery, events, health, memberships, messages, users
 from app.core.config import get_settings
 from app.core.errors import AppError, default_error_code
 from app.core.logging import configure_logging
@@ -62,9 +62,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for route_module in (auth, users, channels, memberships, messages, events, health):
+for route_module in (auth, users, channels, memberships, messages, events, delivery, health):
     app.include_router(route_module.router, prefix=settings.api_v1_prefix)
-for route_module in (auth, users, channels, memberships, messages, events, health):
+for route_module in (auth, users, channels, memberships, messages, events, delivery, health):
     app.include_router(route_module.router, include_in_schema=False)
 
 

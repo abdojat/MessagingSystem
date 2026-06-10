@@ -36,15 +36,26 @@ The script waits for API health before running flow checks and verifies the live
 7. User A publishes a message.
 8. User B receives/reads message.
 9. Open channel details -> Event Log panel.
-10. Show unauthorized behavior:
+10. Open the sidebar Delivery Monitor as User A.
+    - Normal demo state should show published/pending counters and empty failed/dead-lettered tables.
+    - If a delivery has failed in the environment, use the per-row Retry button or Retry all button to move it back to pending.
+    - Worker logs show retry scheduling and dead-letter transitions when RabbitMQ publish failures occur.
+11. Show unauthorized behavior:
    - Use a private upload download blocked for User C.
    - Optionally show a private channel where non-member read/publish is denied.
-11. Show ciphertext at rest:
+12. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
 Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not plaintext.
-12. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path.
+13. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
+
+Useful delivery reliability checks:
+```bash
+docker compose logs -f worker
+docker compose exec postgres psql -U postgres -d channels -c "select status, count(*) from outbox group by status order by status;"
+docker compose exec postgres psql -U postgres -d channels -c "select id, status, attempts, max_attempts, next_retry_at, dead_lettered_at from outbox order by created_at desc limit 10;"
+```
 
 ## Final Acceptance Checklist
 - [ ] Docker stack starts
@@ -57,6 +68,7 @@ Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not p
 - [ ] User A can publish
 - [ ] User B can receive
 - [ ] Event log shows activity
+- [ ] Delivery Monitor loads for a channel owner/admin
 - [ ] Unauthorized access denied
 - [ ] Unauthorized upload access denied
 - [ ] DB stores ciphertext, not plaintext

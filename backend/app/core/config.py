@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     jwt_refresh_ttl_days: int = 14
 
     outbox_poll_interval: float = 1.0
+    outbox_max_attempts: int = 5
+    outbox_initial_retry_delay_seconds: int = 5
+    outbox_retry_backoff_multiplier: float = 2.0
+    outbox_max_retry_delay_seconds: int = 300
     worker_online_scan_interval: float = 3.0
     ws_history_batch_limit: int = 100
 

@@ -52,8 +52,11 @@ class ContentType(str, enum.Enum):
 
 class OutboxStatus(str, enum.Enum):
     pending = "pending"
-    sent = "sent"
+    publishing = "publishing"
+    published = "published"
+    retry_scheduled = "retry_scheduled"
     failed = "failed"
+    dead_lettered = "dead_lettered"
 
 
 class User(Base):
@@ -292,13 +295,19 @@ class Outbox(Base):
         Enum(OutboxStatus, name="outbox_status"), nullable=False, default=OutboxStatus.pending, server_default="pending"
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_outbox_status_next_retry", "status", "next_retry_at"),
         Index("ix_outbox_published_at", "published_at"),
+        Index("ix_outbox_dead_lettered_at", "dead_lettered_at"),
     )

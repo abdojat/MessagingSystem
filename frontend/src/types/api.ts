@@ -197,3 +197,49 @@ export interface EventListResponse {
   next_cursor?: string | null;
   has_more: boolean;
 }
+
+export type DeliveryStatus =
+  | "pending"
+  | "publishing"
+  | "published"
+  | "retry_scheduled"
+  | "failed"
+  | "dead_lettered";
+
+export interface DeliveryStatsResponse {
+  pending: number;
+  publishing: number;
+  published: number;
+  retry_scheduled: number;
+  failed: number;
+  dead_lettered: number;
+}
+
+export interface DeliveryItemResponse {
+  id: string;
+  channel_id: string;
+  channel_slug?: string | null;
+  message_id?: string | null;
+  event_type?: string | null;
+  payload_type?: string | null;
+  routing_key: string;
+  status: DeliveryStatus | string;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at?: string | null;
+  last_error?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  published_at?: string | null;
+  dead_lettered_at?: string | null;
+}
+
+export interface DeliveryListResponse {
+  items: DeliveryItemResponse[];
+}
+
+export interface DeliveryRetryResponse {
+  status: string;
+  retried_count: number;
+  items: DeliveryItemResponse[];
+}

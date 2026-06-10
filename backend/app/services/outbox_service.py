@@ -3,6 +3,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.identifiers import normalize_channel_slug, normalize_username
 from app.db.models import Channel, Outbox, OutboxStatus, User
 
@@ -29,6 +30,7 @@ async def enqueue_message_outbox(
     channel_id: UUID,
     payload: dict,
 ) -> Outbox:
+    settings = get_settings()
     channel_slug = await _get_channel_slug(db, channel_id)
     row = Outbox(
         aggregate_type="message",
@@ -38,6 +40,7 @@ async def enqueue_message_outbox(
         type=str(payload.get("type", "message")),
         routing_key=f"channel.{channel_slug}",
         status=OutboxStatus.pending,
+        max_attempts=settings.outbox_max_attempts,
     )
     db.add(row)
     await db.flush()
@@ -51,6 +54,7 @@ async def enqueue_channel_event_outbox(
     event_type: str,
     payload: dict,
 ) -> Outbox:
+    settings = get_settings()
     channel_slug = await _get_channel_slug(db, channel_id)
     row = Outbox(
         aggregate_type=event_type,
@@ -60,6 +64,7 @@ async def enqueue_channel_event_outbox(
         type=event_type,
         routing_key=f"channel.{channel_slug}",
         status=OutboxStatus.pending,
+        max_attempts=settings.outbox_max_attempts,
     )
     db.add(row)
     await db.flush()
@@ -74,6 +79,7 @@ async def enqueue_user_event_outbox(
     event_type: str,
     payload: dict,
 ) -> Outbox:
+    settings = get_settings()
     username = await _get_username(db, user_id)
     row = Outbox(
         aggregate_type=event_type,
@@ -83,6 +89,7 @@ async def enqueue_user_event_outbox(
         type=event_type,
         routing_key=f"user.{username}",
         status=OutboxStatus.pending,
+        max_attempts=settings.outbox_max_attempts,
     )
     db.add(row)
     await db.flush()

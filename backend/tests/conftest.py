@@ -30,6 +30,13 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(text("ALTER TYPE outbox_status ADD VALUE IF NOT EXISTS 'publishing'"))
+            await conn.execute(text("ALTER TYPE outbox_status ADD VALUE IF NOT EXISTS 'published'"))
+            await conn.execute(text("ALTER TYPE outbox_status ADD VALUE IF NOT EXISTS 'retry_scheduled'"))
+            await conn.execute(text("ALTER TYPE outbox_status ADD VALUE IF NOT EXISTS 'dead_lettered'"))
+            await conn.execute(text("ALTER TABLE outbox ADD COLUMN IF NOT EXISTS max_attempts integer NOT NULL DEFAULT 5"))
+            await conn.execute(text("ALTER TABLE outbox ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()"))
+            await conn.execute(text("ALTER TABLE outbox ADD COLUMN IF NOT EXISTS dead_lettered_at timestamptz"))
     except Exception as exc:
         await engine.dispose()
         pytest.skip(f"PostgreSQL test database is not reachable for DATABASE_URL={database_url!r}: {exc}")

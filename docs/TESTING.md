@@ -10,6 +10,13 @@ Backend P0 tests:
 - `test_channel_slug_validation_rejects_unsafe_identifiers`
 - `test_smoke_flow_channel_join_publish_sync_and_events`
 
+Delivery reliability tests:
+- `test_outbox_publish_success_marks_published`
+- `test_outbox_failure_schedules_retry_with_sanitized_error`
+- `test_outbox_failure_after_max_attempts_dead_letters`
+- `test_admin_delivery_stats_are_scoped_to_channel_managers`
+- `test_manual_retry_resets_dead_lettered_outbox_and_logs_event`
+
 Run in Docker (recommended):
 ```bash
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
@@ -21,6 +28,12 @@ cd backend
 python -m pytest -q
 ```
 Note: local tests may skip if `DATABASE_URL` PostgreSQL is not reachable.
+
+Focused delivery reliability run:
+```bash
+python -m pytest backend/tests/test_delivery_reliability.py -q
+```
+These tests use a fake AMQP exchange to verify worker status transitions without requiring a live RabbitMQ broker. They still require PostgreSQL because the project uses PostgreSQL-specific schema behavior.
 
 Frontend typecheck:
 ```bash
@@ -47,6 +60,7 @@ Verifies:
 - Event log contains core events
 - Private upload access is denied to an unauthorized user
 - Final PASS/FAIL summary with visible step names and timeouts
+The verifier does not currently force a RabbitMQ failure or DLQ transition; use the backend delivery reliability tests and worker logs for that path.
 Note: the verifier is the best single proof of the pub/sub chain in this repo, but it is still a scripted demo flow rather than a CI-level full-stack integration suite.
 
 ## Manual Verification
@@ -61,3 +75,4 @@ Note: the verifier is the best single proof of the pub/sub chain in this repo, b
 - No dedicated frontend lint script currently exists (`npm run lint` unsupported).
 - `scripts/ws_client.py` is still useful for a standalone socket check, but the main demo verifier now covers the end-to-end proof path with live WebSocket delivery plus REST backfill fallback.
 - There is no dedicated CI broker/WebSocket integration test yet.
+- Delivery reliability tests cover database outbox transitions and admin APIs, but they mock AMQP publish success/failure rather than exercising a real RabbitMQ outage.

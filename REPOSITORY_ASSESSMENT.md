@@ -14,6 +14,7 @@ It does more than a toy chat app:
 - It has real REST APIs for channels, memberships, messages, auth, events, users, uploads, and sync.
 - It persists state in PostgreSQL and uses Alembic migrations.
 - It has a RabbitMQ topic exchange, an outbox worker, Redis-based realtime fanout, and WebSocket delivery.
+- It now has explicit outbox delivery status tracking, retry scheduling, dead-letter state, RabbitMQ DLQ topology, and a frontend Delivery Monitor.
 - It has a substantial Next.js frontend for login, channel management, publishing, membership control, and event logs.
 - It implements password hashing, JWT auth, role-based authorization, and Fernet message encryption at rest.
 
@@ -22,6 +23,7 @@ Biggest strengths:
 - The domain model is broad and persistent.
 - The UI covers the whole demo flow.
 - There is genuine event logging and an outbox pattern.
+- Delivery failures are visible through admin APIs/UI instead of only worker logs.
 
 Biggest risks:
 - Security is not strong enough for a serious deployment.
@@ -31,7 +33,7 @@ Biggest risks:
 
 Most urgent missing pieces:
 - Keep the security posture honest and documented.
-- Keep a small set of broker/WebSocket integration tests.
+- Keep a small set of broker/WebSocket integration tests, including a real broker failure/DLQ scenario.
 - Clarify whether the project is graded as a demo or as a security-conscious system.
 
 ## 2. Repository and Architecture Overview
@@ -100,6 +102,7 @@ PostgreSQL is the source of truth. Important entities in [`backend/app/db/models
 
 - RabbitMQ is configured as a durable topic exchange named `ex.channels`.
 - Outbox rows are published by the worker to RabbitMQ.
+- RabbitMQ dead-letter infrastructure is declared as `ex.channels.dlx` and `q.dead.messages`.
 - Online users have durable queues bound to their username and channel routes.
 - Redis is used as a live pub/sub bridge for active WebSocket sessions.
 
@@ -156,11 +159,11 @@ flowchart LR
 | 7. Authorization/permissions | Complete | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership before returning bytes | Browser token handling remains the larger remaining security caveat | High | Keep backend authorization strong and document the client-side limitation honestly |
 | 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; encryption key must stay out of tracked files | High | Treat encryption key as an external secret only and keep the env story explicit |
 | 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events` | Event logging is not guaranteed if the logging path fails; event visibility is limited to managers | Medium | Keep the log path best-effort, but document that limitation and add a few more high-value event types |
-| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) `bind_user_channel`; [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) `run_outbox_publisher`; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) | No DLQ; DB commit and AMQP binding are not atomic | High | Keep the live verifier and add a broker integration test or compensating retry path if binding fails after commit |
+| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py) `bind_user_channel`; [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) `run_outbox_publisher`; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py); Delivery Monitor APIs/UI | DLQ/retry tracking exists, but DB commit and AMQP binding are still not atomic and the DLQ path still needs a real broker-outage integration test | High | Keep the live verifier and add a broker integration test or compensating retry path if binding fails after commit |
 | 11. Docker/environment setup | Complete | [`docker-compose.yml`](docker-compose.yml); [`backend/Dockerfile`](backend/Dockerfile); [`worker/Dockerfile`](worker/Dockerfile); [`frontend/Dockerfile`](frontend/Dockerfile) | There are manual steps and a few platform caveats in docs | Medium | Keep the env story explicit and keep the compose path as the canonical run path |
 | 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md); [`docs/SECURITY.md`](docs/SECURITY.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
 | 13. Testing | Mostly complete | [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) now covers authz, uploads, identifier validation, and smoke flow; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) is a manual verifier | No frontend tests, no broker integration tests, no load tests | High | Add at least one RabbitMQ/WebSocket integration test and one frontend smoke test; keep the demo verifier as a separate tool |
-| 14. Monitoring/message-flow visibility | Partial | [`backend/app/api/routes/health.py`](backend/app/api/routes/health.py) `health`; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; frontend event log panel | No metrics dashboard, no tracing, no broker dashboard integration, no operational observability beyond events/health | Medium | Add a small admin/ops panel or at least a channel activity dashboard and visible broker status |
+| 14. Monitoring/message-flow visibility | Mostly complete for MVP | [`backend/app/api/routes/health.py`](backend/app/api/routes/health.py) `health`; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; frontend event log panel; `/v1/admin/delivery/*`; frontend Delivery Monitor | No metrics dashboard, tracing, or real broker dashboard integration; delivery monitor is scoped to managed channels | Medium | Add full-stack broker/DLQ integration tests and richer metrics only if needed |
 | 15. Merkle-tree or hashing/data-integrity feature | Partial | SHA-256 helpers in [`backend/app/core/utils.py`](backend/app/core/utils.py); invite token hashing and refresh-token hashing | No Merkle tree, no integrity chain, and no tamper-evident audit structure | Low | If needed, add a simple hash-chain or Merkle root over event batches; otherwise document the current SHA-256 usage as the integrity feature |
 | 16. Optional anomaly detection / AI feature | Missing | Repo-wide search found no anomaly/AI module | Not present | Low | Only add this if your supervisor explicitly expects it; otherwise do not spend time here |
 
@@ -192,6 +195,8 @@ flowchart LR
 
 - [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) reads pending outbox rows.
 - It publishes persistent AMQP messages to the `ex.channels` topic exchange.
+- It marks successful rows `published`, schedules retryable failures as `retry_scheduled`, and marks exhausted failures `dead_lettered`.
+- Terminal dead-letter rows are also mirrored to RabbitMQ `q.dead.messages` when possible.
 - [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) watches online users and republishes payloads to Redis pub/sub.
 - [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py) subscribes to Redis and forwards the message to the browser.
 
@@ -352,8 +357,10 @@ flowchart LR
 
 ### Retry / Dead-Letter
 
-- Outbox publish has retries with exponential backoff.
-- There is no explicit dead-letter queue.
+- Outbox publish has retries with configurable exponential backoff.
+- Retryable failures are visible as `retry_scheduled`.
+- Exhausted failures become `dead_lettered` in PostgreSQL and are mirrored to RabbitMQ `q.dead.messages` when possible.
+- Manual retry is exposed through scoped admin APIs and the frontend Delivery Monitor.
 
 ### Ordering
 
@@ -482,6 +489,7 @@ The frontend is real and fairly complete.
 ### Event Log / Monitoring UI
 
 - Yes, via the channel details page.
+- Delivery reliability visibility is also available through the Delivery Monitor page for channel owners/admins.
 
 ### UX Clarity
 
@@ -491,9 +499,9 @@ The frontend is real and fairly complete.
 
 ### Missing Pages
 
-- No broker dashboard.
+- No full broker dashboard, though delivery status and retry controls now exist.
 - No system metrics page.
-- No formal ops console.
+- No formal ops console beyond the scoped Delivery Monitor.
 - No load/diagnostics UI.
 
 ### Reliability Note
@@ -512,18 +520,18 @@ The frontend is real and fairly complete.
 ### What Is Missing
 
 - No frontend test suite.
-- No broker integration test suite.
+- No real broker failure/DLQ integration test suite.
 - No WebSocket integration test suite beyond helper scripts.
 - No load/stress tests.
 - No CI workflow visible in the repository.
 
 ### What I Verified in This Environment
 
-- `npm run typecheck` succeeded.
-- `python -m pytest -q` succeeded.
-- `docker compose config` succeeded.
-- `docker compose up -d --build` succeeded.
-- `python scripts\verify_demo_flow.py --base-url http://localhost:8000/v1` succeeded and proved live WebSocket delivery plus REST backfill fallback.
+- `docker compose run --rm --build backend sh -lc "cd /app && PYTHONPATH=/app:/worker pytest -q"` passed with 30 tests.
+- `npm run typecheck` in `frontend/` passed.
+- `docker compose config` passed.
+- A temporary PostgreSQL database migration check passed with `alembic upgrade head`, including `0012_delivery_reliability`.
+- Local host `python -m pytest -q` passed non-DB tests but skipped PostgreSQL-dependent tests because the Compose hostname `postgres` is not resolvable from the host shell.
 
 ### Practical Testing Plan
 
@@ -640,7 +648,7 @@ The frontend is real and fairly complete.
 
 | Task | Why it matters | Difficulty | Files/modules likely involved | Suggested direction |
 |---|---|---:|---|---|
-| Add a small ops/monitoring dashboard | Makes the system look complete and teachable | Medium | Frontend pages, events API, health route | Show broker health, event counts, online users, recent publishes |
+| Expand the Delivery Monitor into richer ops metrics | Makes the system more teachable if extra polish is needed | Medium | Frontend delivery page, events API, health route | Add broker health, event counts, online users, recent publishes, and live refresh |
 | Add a hash-chain or Merkle-style integrity proof | Helps the cryptography angle of the project | High | Events, messages, a new integrity service | Hash event batches or message sequences and expose a verification endpoint |
 | Add anomaly detection / AI message analysis | Nice advanced feature if your supervisor wants a stretch goal | High | New worker/service + analytics UI | Keep it lightweight: frequency spikes, unread surges, or simple anomaly scoring |
 | Add load/reliability tests | Useful for defending the design in a presentation | Medium | `scripts/`, backend integration tests | Script a small multi-user publish flood and measure latency/throughput |
@@ -672,7 +680,7 @@ The frontend is real and fairly complete.
 
 - Add broker/WebSocket integration tests.
 - Add resubscribe handling for membership changes.
-- Add a small monitoring/dashboard page.
+- Expand the Delivery Monitor with richer operational metrics if time allows.
 - Ship a cleaned-up final report with screenshots and a clear deployment story.
 
 ### Top 5 Concrete Next Actions
