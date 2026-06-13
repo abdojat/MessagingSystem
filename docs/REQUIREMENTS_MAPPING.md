@@ -6,7 +6,7 @@
 | Allow subscribers to publish and receive automatically | Complete | Membership join + message publish + realtime pipeline (RabbitMQ/Redis/WebSocket + REST retrieval). Verified by `scripts/verify_demo_flow.py`, which opens User B's WebSocket before join, explicitly subscribes/resyncs after join, checks live WebSocket delivery, and checks REST backfill fallback. Approval-after-connect is covered by `scripts/verify_approval_flow.py` | User B joins or is approved, User A publishes, User B receives |
 | Interfaces for managing channels and subscribers | Complete | Frontend channel list/details, create dialog, membership actions, channel settings, approval route, and approval verifier | Show channel details and membership actions; run approval verifier |
 | Security: encryption, authentication, permissions | Complete | JWT auth, role/permission checks, Fernet encryption at rest, protected upload downloads, safe routing identifiers, unauthorized security events | Login required routes, denied unauthorized actions, DB ciphertext query |
-| Event log for tracking activity | Complete | `events` API (`GET /v1/channels/{id}/events`) + frontend event log panel | Open channel details Event Log panel |
+| Event log for tracking activity | Complete | `events` API (`GET /v1/channels/{id}/events`) + frontend event log subpage | Open channel details -> Event Log |
 
 ## Advanced Reliability Enhancement
 

@@ -11,7 +11,6 @@ import {
   Hash,
   Info,
   Lock,
-  RefreshCw,
   Shield,
   ShieldPlus,
   UserMinus,
@@ -45,15 +44,13 @@ import {
   useUpdateAdminPermissions,
   useUpdateChannel,
 } from "@/hooks/use-channels";
-import { useChannelEventIntegrity, useChannelEvents } from "@/hooks/use-events";
 import { toast } from "@/hooks/use-toast";
 import { apiClient } from "@/services/api/client";
 import { getApiBaseUrl } from "@/services/api/runtime";
 import { useAuthStore } from "@/store/authStore";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
-import type { AdminPermissions, ChannelMembershipItem, ChannelPatchRequest, EventIntegrityResponse } from "@/types/api";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import type { AdminPermissions, ChannelMembershipItem, ChannelPatchRequest } from "@/types/api";
 
 type UploadCreateResponse = {
   file_id: string;
@@ -73,25 +70,6 @@ function formatDateTime(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not available";
   return format(date, "PPP p");
-}
-
-function shortHash(value?: string | null) {
-  if (!value) return "-";
-  if (value.length <= 20) return value;
-  return `${value.slice(0, 12)}...${value.slice(-8)}`;
-}
-
-function getIntegrityStatus(
-  result: EventIntegrityResponse | undefined,
-  isFetching: boolean,
-  isError: boolean,
-): { label: string; variant: "default" | "secondary" | "destructive" | "outline" } {
-  if (isFetching) return { label: "Checking...", variant: "secondary" };
-  if (isError) return { label: "Check failed", variant: "destructive" };
-  if (!result) return { label: "Not checked", variant: "outline" };
-  if (result.valid) return { label: "Verified", variant: "default" };
-  if (result.reason === "missing_hash") return { label: "Not initialized", variant: "secondary" };
-  return { label: "Broken", variant: "destructive" };
 }
 
 function getRoleBadgeVariant(role: ChannelMembershipItem["role"]): "default" | "secondary" | "outline" {
@@ -266,9 +244,6 @@ export default function ChannelDetailsPage() {
 
   const canManageMembers = channel?.permissions.can_manage_members ?? false;
   const membersQuery = useChannelMembers(channel?.id || "", { enabled: canManageMembers });
-  const eventsQuery = useChannelEvents(channel?.id || "", 30, canManageMembers);
-  const integrityQuery = useChannelEventIntegrity(channel?.id || "", false);
-  const integrityStatus = getIntegrityStatus(integrityQuery.data, integrityQuery.isFetching, integrityQuery.isError);
 
   useEffect(() => {
     if (!isInitializing && !isAuthenticated) {
@@ -574,101 +549,19 @@ export default function ChannelDetailsPage() {
           {canManageMembers ? (
             <div className="border-t border-border/60 p-6">
               <Card className="rounded-2xl p-5">
-                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                   <div>
                     <h3 className="text-lg font-semibold">Event log</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">Recent security and system events for this channel.</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Review recent security and system events for this channel.</p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={integrityStatus.variant}>Audit integrity: {integrityStatus.label}</Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => integrityQuery.refetch()}
-                      disabled={integrityQuery.isFetching}
-                    >
-                      <Shield className="mr-2 h-4 w-4" />
-                      {integrityQuery.isFetching ? "Checking..." : "Verify integrity"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => eventsQuery.refetch()}
-                      disabled={eventsQuery.isFetching}
-                    >
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      {eventsQuery.isFetching ? "Refreshing..." : "Refresh"}
-                    </Button>
-                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => router.push(localePath(`/app/channels/${channel.id}/details/event-log`))}
+                  >
+                    <Shield className="mr-2 h-4 w-4" />
+                    Open event log
+                  </Button>
                 </div>
-                {integrityQuery.data ? (
-                  <div className="mt-4 grid gap-3 rounded-xl border border-border/70 bg-muted/30 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                    <div>
-                      <p className="text-xs uppercase text-muted-foreground">Status</p>
-                      <p className="mt-1 font-medium">{integrityStatus.label}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase text-muted-foreground">Checked events</p>
-                      <p className="mt-1 font-medium">{integrityQuery.data.checked_events}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase text-muted-foreground">Last hash</p>
-                      <p className="mt-1 break-all font-mono text-xs">{shortHash(integrityQuery.data.last_valid_hash)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs uppercase text-muted-foreground">Scope</p>
-                      <p className="mt-1 break-all font-mono text-xs">{integrityQuery.data.scope}</p>
-                    </div>
-                    {!integrityQuery.data.valid ? (
-                      <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive sm:col-span-2 lg:col-span-4">
-                        <span className="font-medium">{integrityQuery.data.reason || "integrity check failed"}</span>
-                        {integrityQuery.data.broken_event_id ? (
-                          <span className="ml-2 break-all font-mono text-xs">{integrityQuery.data.broken_event_id}</span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                {integrityQuery.isError ? (
-                  <p className="mt-3 text-sm text-destructive">Could not verify audit integrity. Please try again.</p>
-                ) : null}
-                {eventsQuery.isLoading ? (
-                  <div className="mt-4 space-y-2">
-                    <Skeleton className="h-10 w-full rounded-lg" />
-                    <Skeleton className="h-10 w-full rounded-lg" />
-                  </div>
-                ) : eventsQuery.isError ? (
-                  <p className="mt-4 text-sm text-destructive">Could not load event log. Please try again.</p>
-                ) : (eventsQuery.data?.items?.length ?? 0) === 0 ? (
-                  <p className="mt-4 text-sm text-muted-foreground">No events recorded yet for this channel.</p>
-                ) : (
-                  <div className="mt-4">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Time</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead>Actor</TableHead>
-                          <TableHead>Channel</TableHead>
-                          <TableHead>Details</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {eventsQuery.data?.items.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell>{formatDateTime(item.created_at)}</TableCell>
-                            <TableCell className="font-medium">{item.event_type}</TableCell>
-                            <TableCell className="font-mono text-xs">{item.actor_user_id || "-"}</TableCell>
-                            <TableCell className="font-mono text-xs">{item.channel_id || "-"}</TableCell>
-                            <TableCell className="max-w-[320px] truncate text-xs text-muted-foreground">
-                              {JSON.stringify(item.payload ?? {})}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
               </Card>
             </div>
           ) : null}

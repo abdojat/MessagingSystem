@@ -96,7 +96,7 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
 6. User B joins/subscribes.
 7. User A publishes a message.
 8. User B receives/reads message.
-9. Open channel details -> Event Log panel.
+9. Open channel details -> Event Log.
 10. Click Verify integrity and show `Audit integrity: Verified`.
     - If the database contains pre-upgrade legacy events, run the canonical Docker backfill command first or explain the Not initialized state honestly.
     - Dry-run first:

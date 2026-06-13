@@ -35,7 +35,7 @@
 ## New Integrity Enhancement
 - New audit events store `previous_hash`, `event_hash`, `hash_algorithm`, `integrity_version`, and `integrity_scope`.
 - Channel event logs are chained per `channel:<channel_id>`; system events use a separate `system` chain.
-- The frontend Event Log card can verify channel audit integrity and show Verified, Broken, Not initialized, or Checking.
+- The frontend Event Log page can verify channel audit integrity and show Verified, Broken, Not initialized, or Checking.
 - `scripts/backfill_event_integrity.py` can initialize legacy event rows explicitly.
 
 ## Still Not Production-Certified

@@ -86,7 +86,7 @@ sequenceDiagram
 - `broker.dead_lettered`
 - `broker.manual_retry_requested`
 
-Events are stored in `events` table and shown in frontend channel details.
+Events are stored in the `events` table and shown in the frontend event-log subpage under channel details.
 
 ## Event Log Integrity
 Event Integrity Upgrade v1 adds a tamper-evident hash chain to the audit log.
@@ -98,7 +98,7 @@ Event Integrity Upgrade v1 adds a tamper-evident hash chain to the audit log.
 - The canonical hash payload includes stable event fields: event id, channel id, actor user id, event type, created timestamp, event payload, previous hash, integrity version, and integrity scope.
 - Canonical JSON is serialized with sorted keys and compact separators before SHA-256 hashing.
 - `GET /v1/channels/{channel_id}/events/integrity` verifies the chain for a channel and returns only summary status, counts, hashes, and the first broken event id if any.
-- The frontend Event Log card includes an Audit Integrity badge and a Verify Integrity button.
+- The frontend Event Log page includes an Audit Integrity badge and a Verify Integrity button.
 
 This is a practical hash-chain integrity layer, not a blockchain and not external notarization. It detects later modification, insertion, reordering, and deletion that breaks links between remaining events, but tail truncation requires an external remembered last hash to prove. A database administrator who can rewrite all event rows and hashes can still forge a new chain. Existing legacy events need `python scripts/backfill_event_integrity.py` before they can verify as initialized.
 

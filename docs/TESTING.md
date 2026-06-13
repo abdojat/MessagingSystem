@@ -128,7 +128,7 @@ This is an automated supervisor proof for the normal worker path and controlled 
 
 ## Manual Verification
 - Frontend login/register/channel flows.
-- Event log panel rendering.
+- Event log subpage rendering.
 - Ciphertext-at-rest SQL check.
 - Unauthorized publish/read denial behavior.
 - Private upload download denial for a non-member.
