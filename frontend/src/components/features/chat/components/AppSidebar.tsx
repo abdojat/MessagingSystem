@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, ChevronRight, Hash, LogOut, Plus, Search } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { useChannels } from "@/hooks/use-channels";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLogout } from "@/hooks/use-auth";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthStore } from "@/store/authStore";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { LanguageToggle } from "@/components/LanguageToggle";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 import { ChannelResponse } from "@/types/api";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,14 +25,14 @@ function getChannelActivityAt(channel: ChannelResponse) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function sortChannelsByActivity(channels: ChannelResponse[]) {
+function sortChannelsByActivity(channels: ChannelResponse[], locale: string) {
   return [...channels].sort((left, right) => {
     const activityDiff = getChannelActivityAt(right) - getChannelActivityAt(left);
     if (activityDiff !== 0) {
       return activityDiff;
     }
 
-    return left.name.localeCompare(right.name);
+    return left.name.localeCompare(right.name, locale);
   });
 }
 
@@ -140,6 +142,9 @@ function ChannelListSkeleton() {
 export function AppSidebar() {
   const pathname = usePathname();
   const localePath = useLocalePath();
+  const locale = useLocale();
+  const t = useTranslations("sidebar");
+  const appT = useTranslations("app");
   const logout = useLogout();
   const user = useAuthStore(s => s.user);
   const userAvatarUrl = resolveApiMediaUrl(user?.avatar_url);
@@ -160,10 +165,10 @@ export function AppSidebar() {
     isLoading: isDiscoverLoading,
   } = useChannels({ scope: "discover", q: debouncedSearchQuery, enabled: isSearching });
 
-  const sortedMemberChannels = sortChannelsByActivity(memberChannels);
+  const sortedMemberChannels = sortChannelsByActivity(memberChannels, locale);
   const myChannels = sortedMemberChannels.filter(channel => channel.my_role === "owner" || channel.my_role === "admin");
   const joinedChannels = sortedMemberChannels.filter(channel => channel.my_role !== "owner" && channel.my_role !== "admin");
-  const sortedDiscoverChannels = sortChannelsByActivity(discoverChannels);
+  const sortedDiscoverChannels = sortChannelsByActivity(discoverChannels, locale);
 
   return (
     <>
@@ -178,16 +183,17 @@ export function AppSidebar() {
             <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center text-primary-foreground font-bold shadow-lg shadow-primary/20">
               C
             </div>
-            <h1 className="font-bold text-sidebar-foreground">ChatCore</h1>
+            <h1 className="font-bold text-sidebar-foreground">{appT("name")}</h1>
           </div>
           <div className="flex items-center gap-1">
+            <LanguageToggle className="text-sidebar-foreground hover:bg-sidebar-accent" />
             <ThemeToggle className="text-sidebar-foreground hover:bg-sidebar-accent" />
             <Button
               size="icon"
               variant="ghost"
               className="text-sidebar-foreground hover:bg-sidebar-accent"
               onClick={() => setIsCreateDialogOpen(true)}
-              aria-label="Create channel"
+              aria-label={t("createChannel")}
             >
               <Plus className="w-5 h-5" />
             </Button>
@@ -199,7 +205,7 @@ export function AppSidebar() {
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input 
               type="text" 
-              placeholder="Search channels..." 
+              placeholder={t("searchPlaceholder")}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               className="w-full bg-sidebar-accent/50 border border-sidebar-border rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 text-sidebar-foreground placeholder:text-muted-foreground transition-all"
@@ -208,7 +214,7 @@ export function AppSidebar() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-6">
-          <SidebarSection title="My Channels" isOpen={isMyChannelsOpen} onToggle={() => setIsMyChannelsOpen(open => !open)}>
+          <SidebarSection title={t("sections.myChannels")} isOpen={isMyChannelsOpen} onToggle={() => setIsMyChannelsOpen(open => !open)}>
             <div className="space-y-1">
               {myChannels.map(channel => (
                 <ChannelListItem
@@ -221,13 +227,13 @@ export function AppSidebar() {
               {isMemberChannelsLoading && <ChannelListSkeleton />}
               {!isMemberChannelsLoading && myChannels.length === 0 && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">
-                  {isSearching ? "No matching owned or admin channels" : "No owned or admin channels yet"}
+                  {isSearching ? t("empty.myChannelsSearch") : t("empty.myChannels")}
                 </div>
               )}
             </div>
           </SidebarSection>
 
-          <SidebarSection title="Channels" isOpen={isChannelsOpen} onToggle={() => setIsChannelsOpen(open => !open)}>
+          <SidebarSection title={t("sections.channels")} isOpen={isChannelsOpen} onToggle={() => setIsChannelsOpen(open => !open)}>
             <div className="space-y-1">
               {joinedChannels.map(channel => (
                 <ChannelListItem
@@ -240,14 +246,14 @@ export function AppSidebar() {
               {isMemberChannelsLoading && <ChannelListSkeleton />}
               {!isMemberChannelsLoading && joinedChannels.length === 0 && (
                 <div className="px-3 py-2 text-sm text-muted-foreground">
-                  {isSearching ? "No matching member channels" : "No joined channels yet"}
+                  {isSearching ? t("empty.joinedSearch") : t("empty.joined")}
                 </div>
               )}
             </div>
           </SidebarSection>
 
           {isSearching ? (
-            <SidebarSection title="Discover" isOpen={isDiscoverOpen} onToggle={() => setIsDiscoverOpen(open => !open)}>
+            <SidebarSection title={t("sections.discover")} isOpen={isDiscoverOpen} onToggle={() => setIsDiscoverOpen(open => !open)}>
               <div className="space-y-1">
                 {sortedDiscoverChannels.map(channel => (
                   <ChannelListItem
@@ -259,7 +265,7 @@ export function AppSidebar() {
                 ))}
                 {isDiscoverLoading && <ChannelListSkeleton />}
                 {!isDiscoverLoading && sortedDiscoverChannels.length === 0 && (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">No matching discoverable channels</div>
+                  <div className="px-3 py-2 text-sm text-muted-foreground">{t("empty.discoverSearch")}</div>
                 )}
               </div>
             </SidebarSection>
@@ -279,7 +285,7 @@ export function AppSidebar() {
                 <div className="text-xs text-muted-foreground truncate">@{user?.username}</div>
               </div>
             </Link>
-            <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => logout.mutate()}>
+            <Button size="icon" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => logout.mutate()} aria-label={t("logout")}>
               <LogOut className="w-4 h-4" />
             </Button>
           </div>

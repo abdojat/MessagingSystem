@@ -5,7 +5,7 @@ import { useChannel, useChannelMembers, useJoinChannel } from "@/hooks/use-chann
 import { useMarkSeen, useMessages, useSendMessage, useToggleReaction } from "@/hooks/use-messages";
 import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight, Copy, ArrowUpRight } from "lucide-react";
 import { useState, useRef, useEffect, type ReactNode } from "react";
-import { format } from "date-fns";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthStore } from "@/store/authStore";
@@ -59,18 +59,18 @@ function ChannelViewSkeleton() {
 const MAX_REPLY_CHAIN_DEPTH = 12;
 const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E}", "\u{1F389}", "\u{1F44E}"] as const;
 
-function getMessageSnippet(message: MessageResponse | undefined): string {
-  if (!message) return "Original message is not loaded in this view.";
-  if (message.deleted_at) return "Original message was deleted.";
+function getMessageSnippet(message: MessageResponse | undefined, t: ReturnType<typeof useTranslations>): string {
+  if (!message) return t("messages.snippet.notLoaded");
+  if (message.deleted_at) return t("messages.snippet.deleted");
   if (message.content_type === "text") {
     const text = (message.content_text || "").trim();
-    if (!text) return "Empty message";
+    if (!text) return t("messages.snippet.empty");
     return text.length > 90 ? `${text.slice(0, 90)}...` : text;
   }
   if (message.attachments && message.attachments.length > 0) {
-    return `[${message.attachments.length} attachment${message.attachments.length > 1 ? "s" : ""}]`;
+    return t("messages.snippet.attachments", { count: message.attachments.length });
   }
-  return "Structured message";
+  return t("messages.snippet.structured");
 }
 
 async function copyToClipboard(value: string) {
@@ -103,6 +103,9 @@ export default function ChannelView() {
   const channelId = Array.isArray(params?.channelId) ? params.channelId[0] : params?.channelId;
   const router = useRouter();
   const localePath = useLocalePath();
+  const locale = useLocale();
+  const t = useTranslations("channelView");
+  const commonT = useTranslations("common");
   const {
     data: channel,
     isLoading: isChannelLoading,
@@ -132,6 +135,9 @@ export default function ChannelView() {
   const membersQuery = useChannelMembers(channel?.id || '', {
     enabled: isMember && Boolean(channel?.permissions.can_manage_members),
   });
+
+  const formatTime = (value: string) =>
+    new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(new Date(value));
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -175,14 +181,14 @@ export default function ChannelView() {
   if (isChannelError && !channel) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6">
-        <div className="text-muted-foreground">We couldn't open this channel right now.</div>
+        <div className="text-muted-foreground">{t("errors.openFailed")}</div>
         <Button onClick={() => refetchChannel()} className="rounded-full px-6">
-          Try again
+          {commonT("actions.tryAgain")}
         </Button>
       </div>
     );
   }
-  if (!channel) return <div className="flex-1 flex items-center justify-center text-muted-foreground">Channel not found</div>;
+  if (!channel) return <div className="flex-1 flex items-center justify-center text-muted-foreground">{t("errors.notFound")}</div>;
 
   const channelAvatarUrl = resolveApiMediaUrl(channel.avatar_url);
   const userAvatarUrl = resolveApiMediaUrl(user?.avatar_url);
@@ -236,19 +242,19 @@ export default function ChannelView() {
   }
 
   const resolveSenderName = (senderUserId: string | undefined, message?: MessageResponse) => {
-    if (!senderUserId) return "Member";
-    if (senderUserId === user?.id) return user?.display_name?.trim() || user?.username || "You";
+    if (!senderUserId) return t("messages.member");
+    if (senderUserId === user?.id) return user?.display_name?.trim() || user?.username || t("messages.you");
     const messageDisplayName = message?.sender_display_name?.trim();
     if (messageDisplayName) return messageDisplayName;
     const memberName = memberNameById.get(senderUserId);
     if (memberName) return memberName;
     const messageUsername = message?.sender_username?.trim();
     if (messageUsername) return messageUsername;
-    return `Member ${senderUserId.slice(0, 8)}`;
+    return t("messages.memberWithId", { id: senderUserId.slice(0, 8) });
   };
 
   const resolveSenderLabel = (message: MessageResponse | undefined) => {
-    if (!message) return "Message";
+    if (!message) return t("messages.message");
     return resolveSenderName(message.sender_user_id, message);
   };
 
@@ -325,8 +331,8 @@ export default function ChannelView() {
   const toggleMessageReaction = (emoji: string, message: MessageResponse) => {
     if (!canUseComposer) {
       toast({
-        title: "Cannot react right now",
-        description: "Join this channel to react to messages.",
+        title: t("toasts.reactBlockedTitle"),
+        description: t("toasts.reactBlockedDescription"),
         variant: "destructive",
       });
       return;
@@ -340,8 +346,8 @@ export default function ChannelView() {
     const text = (message.content_text || "").trim();
     if (message.deleted_at || message.content_type !== "text" || !text) {
       toast({
-        title: "Nothing to copy",
-        description: "Only text content can be copied from this message.",
+        title: t("toasts.nothingToCopyTitle"),
+        description: t("toasts.nothingToCopyDescription"),
         variant: "destructive",
       });
       return;
@@ -350,15 +356,13 @@ export default function ChannelView() {
     try {
       await copyToClipboard(text);
       toast({
-        title: "Message copied",
-        description: "The message text is now in your clipboard.",
+        title: t("toasts.copiedTitle"),
+        description: t("toasts.copiedDescription"),
       });
-    } catch (error) {
-      const description = error instanceof Error && error.message
-        ? error.message
-        : "Clipboard access was blocked by the browser.";
+    } catch (_error) {
+      const description = t("toasts.clipboardBlocked");
       toast({
-        title: "Copy failed",
+        title: t("toasts.copyFailedTitle"),
         description,
         variant: "destructive",
       });
@@ -425,7 +429,7 @@ export default function ChannelView() {
                 <span className="font-semibold text-foreground text-sm">
                   {resolveSenderName(msg.sender_user_id, msg)}
                 </span>
-                <span className="text-[11px] text-muted-foreground">{format(new Date(msg.created_at), "h:mm a")}</span>
+                <span className="text-[11px] text-muted-foreground">{formatTime(msg.created_at)}</span>
               </div>
             )}
 
@@ -456,7 +460,7 @@ export default function ChannelView() {
                   {resolveSenderName(msg.sender_user_id, msg)}
                 </span>
                 <span className={cn("text-[10px]", isMe ? "text-primary-foreground/70" : "text-muted-foreground")}>
-                  {format(new Date(msg.created_at), "h:mm a")}
+                  {formatTime(msg.created_at)}
                 </span>
               </div>
             )}
@@ -473,16 +477,16 @@ export default function ChannelView() {
                 )}
               >
                 <div className={cn("text-[11px] font-semibold", isMe ? "text-primary-foreground" : "text-primary")}>
-                  Replying to {resolveSenderLabel(repliedMessage)}
+                  {t("messages.replyingTo")} {resolveSenderLabel(repliedMessage)}
                   {msg.reply_to_seq_id ? ` (#${msg.reply_to_seq_id})` : ""}
                 </div>
-                <div className={cn("truncate text-xs", isMe ? "text-primary-foreground/75" : "text-muted-foreground")}>{getMessageSnippet(repliedMessage)}</div>
+                <div className={cn("truncate text-xs", isMe ? "text-primary-foreground/75" : "text-muted-foreground")}>{getMessageSnippet(repliedMessage, t)}</div>
               </button>
             )}
 
             <div className={cn("whitespace-pre-wrap break-words text-sm leading-relaxed", isMe ? "text-primary-foreground" : "text-foreground/90")}>
               {msg.deleted_at
-                ? "Message deleted"
+                ? t("messages.deleted")
                 : msg.content_type === "text"
                   ? msg.content_text
                   : JSON.stringify(msg.content_json ?? {}, null, 2)}
@@ -508,7 +512,9 @@ export default function ChannelView() {
                               : "border-border/70 bg-background/80 text-foreground/80 hover:bg-accent"
                         }`}
                         onClick={() => toggleMessageReaction(emoji, msg)}
-                        aria-label={`${isMine ? "Remove" : "Add"} reaction ${emoji} on message #${msg.seq_id}`}
+                        aria-label={isMine
+                          ? t("aria.removeReaction", { emoji, seq: msg.seq_id })
+                          : t("aria.addReaction", { emoji, seq: msg.seq_id })}
                       >
                         <span>{emoji}</span>
                         <span>{count}</span>
@@ -531,7 +537,7 @@ export default function ChannelView() {
                     size="icon"
                     variant="ghost"
                     className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                    aria-label={`Add reaction to message #${msg.seq_id}`}
+                    aria-label={t("aria.addReactionMenu", { seq: msg.seq_id })}
                   >
                     <SmilePlus className="w-4 h-4" />
                   </Button>
@@ -543,7 +549,7 @@ export default function ChannelView() {
                         key={`${msg.id}-${emoji}`}
                         className="h-8 w-8 p-0 flex items-center justify-center text-base"
                         onSelect={() => toggleMessageReaction(emoji, msg)}
-                        aria-label={`React with ${emoji}`}
+                        aria-label={t("aria.reactWith", { emoji })}
                       >
                         {emoji}
                       </DropdownMenuItem>
@@ -557,14 +563,14 @@ export default function ChannelView() {
                   variant="ghost"
                   className="h-7 w-7 text-muted-foreground hover:text-foreground"
                   onClick={() => setReplyingTo(msg)}
-                  aria-label={`Reply to message #${msg.seq_id}`}
+                  aria-label={t("aria.replyToMessage", { seq: msg.seq_id })}
                 >
                   <Reply className="w-4 h-4" />
                 </Button>
               )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" aria-label={`Open options for message #${msg.seq_id}`}>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" aria-label={t("aria.openOptions", { seq: msg.seq_id })}>
                     <MoreVertical className="w-4 h-4" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -577,7 +583,7 @@ export default function ChannelView() {
                       }}
                     >
                       <Reply className="mr-2 h-4 w-4" />
-                      Reply
+                      {t("actions.reply")}
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem
@@ -587,19 +593,19 @@ export default function ChannelView() {
                     disabled={Boolean(msg.deleted_at) || msg.content_type !== "text" || !((msg.content_text || "").trim().length > 0)}
                   >
                     <Copy className="mr-2 h-4 w-4" />
-                    Copy text
+                    {t("actions.copyText")}
                   </DropdownMenuItem>
                   {msg.reply_to_message_id && (
                     <DropdownMenuItem onSelect={() => jumpToMessage(msg.reply_to_message_id)}>
                       <ArrowUpRight className="mr-2 h-4 w-4" />
-                      Jump to parent message
+                      {t("actions.jumpToParent")}
                     </DropdownMenuItem>
                   )}
                   {canCollapseReplies && (
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onSelect={() => toggleCollapsedReplies(msg.id)}>
-                        {isRepliesCollapsed ? "Show replies" : "Hide replies"}
+                        {isRepliesCollapsed ? t("actions.showReplies") : t("actions.hideReplies")}
                       </DropdownMenuItem>
                     </>
                   )}
@@ -614,10 +620,16 @@ export default function ChannelView() {
                 className="mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 onClick={() => toggleCollapsedReplies(msg.id)}
                 aria-expanded={!isRepliesCollapsed}
-                aria-label={`${isRepliesCollapsed ? "Show" : "Hide"} replies for message #${msg.seq_id}`}
+                aria-label={isRepliesCollapsed
+                  ? t("aria.showRepliesFor", { seq: msg.seq_id })
+                  : t("aria.hideRepliesFor", { seq: msg.seq_id })}
               >
                 {isRepliesCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                <span>{isRepliesCollapsed ? "Show" : "Hide"} {nestedReplyCount} repl{nestedReplyCount === 1 ? "y" : "ies"}</span>
+                <span>
+                  {isRepliesCollapsed
+                    ? t("messages.showReplyCount", { count: nestedReplyCount })
+                    : t("messages.hideReplyCount", { count: nestedReplyCount })}
+                </span>
               </button>
             )}
 
@@ -663,7 +675,7 @@ export default function ChannelView() {
           <div>
             <h2 className="font-bold text-foreground leading-tight">{channel.name}</h2>
             <div className="text-xs text-muted-foreground flex items-center gap-2">
-              <span>{channel.member_count || 0} members</span>
+              <span>{t("header.members", { count: channel.member_count || 0 })}</span>
               {channel.description && (
                 <>
                   <span>&bull;</span>
@@ -679,7 +691,7 @@ export default function ChannelView() {
             variant="ghost"
             className="text-muted-foreground hover:text-foreground"
             onClick={() => router.push(localePath(`/app/channels/${channel.id}/details`))}
-            aria-label="Open channel details"
+            aria-label={t("aria.openDetails")}
           >
             <Settings className="w-5 h-5" />
           </Button>
@@ -693,15 +705,15 @@ export default function ChannelView() {
             <div className="w-20 h-20 rounded-2xl bg-secondary flex items-center justify-center mb-6 shadow-inner">
               <Hash className="w-10 h-10 text-muted-foreground" />
             </div>
-            <h3 className="text-2xl font-bold text-foreground mb-2">You are not in this channel</h3>
-            <p className="text-muted-foreground mb-8 max-w-md">Join {channel.name} to see history and start messaging with the team.</p>
+            <h3 className="text-2xl font-bold text-foreground mb-2">{t("joinPrompt.title")}</h3>
+            <p className="text-muted-foreground mb-8 max-w-md">{t("joinPrompt.description", { name: channel.name })}</p>
             <Button 
               size="lg" 
               onClick={() => joinChannel.mutate(channelId!)}
               disabled={joinChannel.isPending}
               className="bg-primary text-primary-foreground font-semibold px-8 rounded-full shadow-lg shadow-primary/20 hover:-translate-y-0.5 transition-transform"
             >
-              {joinChannel.isPending ? "Joining..." : "Join Channel"}
+              {joinChannel.isPending ? t("joinPrompt.joining") : t("joinPrompt.join")}
             </Button>
           </div>
         ) : (
@@ -726,8 +738,8 @@ export default function ChannelView() {
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                   <Hash className="w-8 h-8 text-primary" />
                 </div>
-                <h3 className="text-xl font-bold text-foreground mb-1">Welcome to {channel.name}!</h3>
-                <p className="text-muted-foreground text-sm">This is the start of the channel history.</p>
+                <h3 className="text-xl font-bold text-foreground mb-1">{t("empty.title", { name: channel.name })}</h3>
+                <p className="text-muted-foreground text-sm">{t("empty.description")}</p>
               </div>
             ) : (
               rootMessages.map((msg, i) => renderMessageThread(msg, rootMessages[i - 1]))
@@ -749,23 +761,23 @@ export default function ChannelView() {
                   onClick={() => jumpToMessage(activeReplyTarget.id)}
                 >
                   <div className="text-[11px] font-semibold text-primary">
-                    Replying to {resolveSenderLabel(activeReplyTarget)} (#{activeReplyTarget.seq_id})
+                    {t("messages.replyingTo")} {resolveSenderLabel(activeReplyTarget)} (#{activeReplyTarget.seq_id})
                   </div>
-                  <div className="text-xs text-muted-foreground truncate">{getMessageSnippet(activeReplyTarget)}</div>
+                  <div className="text-xs text-muted-foreground truncate">{getMessageSnippet(activeReplyTarget, t)}</div>
                 </button>
                 <Button
                   size="icon"
                   variant="ghost"
                   className="h-7 w-7 text-muted-foreground hover:text-foreground"
                   onClick={() => setReplyingTo(null)}
-                  aria-label="Cancel reply"
+                  aria-label={t("aria.cancelReply")}
                 >
                   <X className="w-4 h-4" />
                 </Button>
               </div>
             )}
             <div className="flex items-end gap-2">
-              <Button size="icon" variant="ghost" className="h-10 w-10 text-muted-foreground hover:bg-background rounded-xl flex-shrink-0 mb-1">
+              <Button size="icon" variant="ghost" className="h-10 w-10 text-muted-foreground hover:bg-background rounded-xl flex-shrink-0 mb-1" aria-label={t("aria.attachFile")}>
                 <Paperclip className="w-5 h-5" />
               </Button>
               
@@ -774,7 +786,7 @@ export default function ChannelView() {
                 value={content}
                 onChange={e => setContent(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={canCompose ? `Message ${channel.name}...` : "Write a reply..."}
+                placeholder={canCompose ? t("composer.messagePlaceholder", { name: channel.name }) : t("composer.replyPlaceholder")}
                 className="flex-1 bg-transparent border-none focus:ring-0 resize-none max-h-48 min-h-[44px] py-3 text-sm text-foreground placeholder:text-muted-foreground"
                 rows={1}
               />
@@ -784,13 +796,15 @@ export default function ChannelView() {
                 className={`h-10 w-10 rounded-xl flex-shrink-0 mb-1 transition-all ${content.trim() ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:scale-105' : 'bg-muted text-muted-foreground'}`}
                 onClick={handleSend}
                 disabled={!content.trim() || sendMessage.isPending || (canReplyAsMember && !activeReplyTarget)}
+                aria-label={t("composer.send")}
               >
                 <Send className="w-4 h-4 translate-x-0.5 -translate-y-0.5" />
               </Button>
             </div>
           </div>
           <div className="text-center mt-2 text-[10px] text-muted-foreground/60">
-            <strong>Enter</strong> to send, <strong>Shift + Enter</strong> for new line
+            <strong>{t("composer.enter")}</strong> {t("composer.toSend")},{" "}
+            <strong>{t("composer.shiftEnter")}</strong> {t("composer.forNewLine")}
           </div>
         </div>
       )}

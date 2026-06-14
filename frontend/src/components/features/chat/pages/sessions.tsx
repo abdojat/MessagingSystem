@@ -1,12 +1,13 @@
 "use client";
 
 import { useDeleteSession, useLogoutAll, useSessions } from "@/hooks/use-auth";
-import { format } from "date-fns";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Laptop, Smartphone, Globe, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
+import { formatDateTimeLocalized } from "@/lib/i18n-format";
 
 function SessionsSkeleton() {
   return (
@@ -29,6 +30,9 @@ function SessionsSkeleton() {
 
 export default function Sessions() {
   const localePath = useLocalePath();
+  const locale = useLocale();
+  const t = useTranslations("sessions");
+  const commonT = useTranslations("common");
   const { data: sessions = [], isLoading } = useSessions();
   const deleteSession = useDeleteSession();
   const logoutAll = useLogoutAll();
@@ -45,9 +49,9 @@ export default function Sessions() {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <Link href={localePath("/app")} className="text-primary text-sm font-medium hover:underline mb-2 inline-block">&larr; Back to App</Link>
-            <h1 className="text-3xl font-bold tracking-tight">Active Sessions</h1>
-            <p className="text-muted-foreground mt-1">Manage devices currently logged into your account</p>
+            <Link href={localePath("/app")} className="text-primary text-sm font-medium hover:underline mb-2 inline-block">{commonT("actions.backToApp")}</Link>
+            <h1 className="text-3xl font-bold tracking-tight">{t("title")}</h1>
+            <p className="text-muted-foreground mt-1">{t("description")}</p>
           </div>
           <Button 
             variant="destructive" 
@@ -56,7 +60,7 @@ export default function Sessions() {
             className="shadow-sm shadow-destructive/20"
           >
             <ShieldAlert className="w-4 h-4 mr-2" />
-            Terminate All Sessions
+            {t("terminateAll")}
           </Button>
         </div>
 
@@ -64,7 +68,11 @@ export default function Sessions() {
           <SessionsSkeleton />
         ) : (
           <div className="grid gap-4">
-            {sessions.map(session => (
+            {sessions.length === 0 ? (
+              <div className="rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground">
+                {t("empty")}
+              </div>
+            ) : sessions.map(session => (
               <div key={session.id} className="p-6 rounded-2xl border border-border bg-card shadow-sm flex flex-col sm:flex-row gap-6 items-start sm:items-center">
                 <div className="p-4 rounded-xl bg-secondary text-muted-foreground">
                   {getDeviceIcon(session.user_agent)}
@@ -73,14 +81,14 @@ export default function Sessions() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3 mb-1">
                     <h3 className="font-semibold text-foreground text-lg truncate">
-                      {session.user_agent ? session.user_agent.split(' ')[0] : 'Unknown Device'}
+                      {session.user_agent ? session.user_agent.split(' ')[0] : t("unknownDevice")}
                     </h3>
                   </div>
                   <div className="text-sm text-muted-foreground space-y-0.5">
-                    <p>IP Address: <span className="font-medium text-foreground/80">{session.ip || 'Unknown'}</span></p>
-                    <p>Started: {format(new Date(session.created_at), 'PPP p')}</p>
-                    <p>Expires: {format(new Date(session.expires_at), 'PPP p')}</p>
-                    {session.revoked_at && <p>Revoked: {format(new Date(session.revoked_at), 'PPP p')}</p>}
+                    <p>{t("ipAddress")}: <span className="font-medium text-foreground/80">{session.ip || t("unknown")}</span></p>
+                    <p>{t("started")}: {formatDateTimeLocalized(session.created_at, locale, commonT("notAvailable"))}</p>
+                    <p>{t("expires")}: {formatDateTimeLocalized(session.expires_at, locale, commonT("notAvailable"))}</p>
+                    {session.revoked_at && <p>{t("revoked")}: {formatDateTimeLocalized(session.revoked_at, locale, commonT("notAvailable"))}</p>}
                   </div>
                 </div>
 
@@ -90,7 +98,7 @@ export default function Sessions() {
                   onClick={() => deleteSession.mutate(session.id)}
                   disabled={deleteSession.isPending || !!session.revoked_at}
                 >
-                  {session.revoked_at ? 'Revoked' : 'Revoke Access'}
+                  {session.revoked_at ? t("revoked") : t("revokeAccess")}
                 </Button>
               </div>
             ))}

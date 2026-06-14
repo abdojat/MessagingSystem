@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Check,
   DoorOpen,
@@ -50,6 +50,7 @@ import { getApiBaseUrl } from "@/services/api/runtime";
 import { useAuthStore } from "@/store/authStore";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
+import { formatDateTimeLocalized } from "@/lib/i18n-format";
 import type { AdminPermissions, ChannelMembershipItem, ChannelPatchRequest } from "@/types/api";
 
 type UploadCreateResponse = {
@@ -64,13 +65,6 @@ type UploadContentResponse = {
   file_id: string;
   public_url: string;
 };
-
-function formatDateTime(value?: string | null) {
-  if (!value) return "Not available";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not available";
-  return format(date, "PPP p");
-}
 
 function getRoleBadgeVariant(role: ChannelMembershipItem["role"]): "default" | "secondary" | "outline" {
   if (role === "owner") return "default";
@@ -151,6 +145,9 @@ export default function ChannelDetailsPage() {
   const channelId = Array.isArray(params?.channelId) ? params.channelId[0] : params?.channelId;
   const router = useRouter();
   const localePath = useLocalePath();
+  const locale = useLocale();
+  const t = useTranslations("channelDetails");
+  const commonT = useTranslations("common");
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitializing = useAuthStore((state) => state.isInitializing);
   const currentUser = useAuthStore((state) => state.user);
@@ -177,7 +174,7 @@ export default function ChannelDetailsPage() {
   const uploadAvatar = useMutation({
     mutationFn: async (file: File): Promise<string> => {
       if (!accessToken) {
-        throw new Error("You need to be signed in before uploading a channel image.");
+        throw new Error(t("errors.signInBeforeUpload"));
       }
 
       const created = await apiClient<UploadCreateResponse>("/uploads", {
@@ -209,7 +206,7 @@ export default function ChannelDetailsPage() {
       });
 
       if (!putResponse.ok) {
-        let message = "Could not upload channel avatar image.";
+        let message = t("errors.avatarUpload");
         try {
           const error = (await putResponse.json()) as { detail?: { message?: string } | string };
           if (typeof error.detail === "string") {
@@ -226,7 +223,7 @@ export default function ChannelDetailsPage() {
       const uploaded = (await putResponse.json()) as UploadContentResponse;
       const nextAvatarUrl = (uploaded.public_url || created.public_url || "").trim();
       if (!nextAvatarUrl) {
-        throw new Error("Upload succeeded but no avatar URL was returned.");
+        throw new Error(t("errors.avatarMissingUrl"));
       }
       return nextAvatarUrl;
     },
@@ -291,15 +288,15 @@ export default function ChannelDetailsPage() {
             href={channelId ? localePath(`/app/channels/${channelId}`) : localePath("/app")}
             className="text-primary text-sm font-medium hover:underline"
           >
-            &larr; Back
+            {commonT("actions.back")}
           </Link>
           <Card className="mt-6 rounded-3xl p-8 text-center">
-            <h1 className="text-2xl font-bold">We couldn&apos;t load this channel</h1>
+            <h1 className="text-2xl font-bold">{t("errors.loadTitle")}</h1>
             <p className="mt-2 text-muted-foreground">
-              The channel may not exist anymore, or your session needs to be refreshed.
+              {t("errors.loadDescription")}
             </p>
             <div className="mt-6">
-              <Button onClick={() => refetch()}>Try Again</Button>
+              <Button onClick={() => refetch()}>{commonT("actions.tryAgain")}</Button>
             </div>
           </Card>
         </div>
@@ -315,6 +312,21 @@ export default function ChannelDetailsPage() {
 
   const managedMembers = (membersQuery.data?.items ?? []).filter((item) => item.role !== "pending");
   const pendingMembers = (membersQuery.data?.items ?? []).filter((item) => item.role === "pending");
+
+  const formatDateTime = (value?: string | null) => formatDateTimeLocalized(value, locale, commonT("notAvailable"));
+  const visibilityLabel = (value: "public" | "private") => commonT(`visibility.${value}`);
+  const joinModeLabel = (value: "open" | "approval_required" | "invite_only") => {
+    if (value === "approval_required") return commonT("joinMode.approvalRequired");
+    if (value === "invite_only") return commonT("joinMode.inviteOnly");
+    return commonT("joinMode.open");
+  };
+  const roleLabel = (role?: string | null) => {
+    if (role === "owner") return commonT("roles.owner");
+    if (role === "admin") return commonT("roles.admin");
+    if (role === "member") return commonT("roles.member");
+    if (role === "pending") return commonT("roles.pending");
+    return commonT("roles.none");
+  };
 
   const trimmedName = editForm.name.trim();
   const trimmedDescription = editForm.description.trim();
@@ -353,8 +365,8 @@ export default function ChannelDetailsPage() {
 
       if (Object.keys(payload).length === 0) {
         toast({
-          title: "No changes to save",
-          description: "Update one or more fields before saving.",
+          title: t("toasts.noChangesTitle"),
+          description: t("toasts.noChangesDescription"),
         });
         return;
       }
@@ -365,14 +377,14 @@ export default function ChannelDetailsPage() {
           onSuccess: () => {
             setAvatarFile(null);
             toast({
-              title: "Channel updated",
-              description: "Channel settings were saved successfully.",
+              title: t("toasts.updatedTitle"),
+              description: t("toasts.updatedDescription"),
             });
           },
           onError: () => {
             toast({
-              title: "Could not update channel",
-              description: "Please try again in a moment.",
+              title: t("toasts.updateFailedTitle"),
+              description: commonT("tryAgainLater"),
               variant: "destructive",
             });
           },
@@ -382,8 +394,8 @@ export default function ChannelDetailsPage() {
 
     submitUpdate().catch((error: unknown) => {
       toast({
-        title: "Could not upload avatar",
-        description: getErrorMessage(error, "Please try again in a moment."),
+        title: t("toasts.avatarUploadFailedTitle"),
+        description: getErrorMessage(error, commonT("tryAgainLater")),
         variant: "destructive",
       });
     });
@@ -399,10 +411,10 @@ export default function ChannelDetailsPage() {
               onClick={() => router.push(localePath(`/app/channels/${channel.id}`))}
               className="text-primary text-sm font-medium hover:underline"
             >
-              &larr; Back to channel
+              {t("actions.backToChannel")}
             </button>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight">Channel Details</h1>
-            <p className="mt-1 text-muted-foreground">Overview, membership status, and access controls for this channel.</p>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight">{t("title")}</h1>
+            <p className="mt-1 text-muted-foreground">{t("description")}</p>
           </div>
           <div className="flex items-center gap-2">
             {!isMember ? (
@@ -415,7 +427,7 @@ export default function ChannelDetailsPage() {
                 disabled={joinChannel.isPending}
               >
                 <UserPlus className="mr-2 h-4 w-4" />
-                {joinChannel.isPending ? "Joining..." : "Join Channel"}
+                {joinChannel.isPending ? t("actions.joining") : t("actions.join")}
               </Button>
             ) : null}
             {canLeave ? (
@@ -429,7 +441,7 @@ export default function ChannelDetailsPage() {
                 disabled={leaveChannel.isPending}
               >
                 <DoorOpen className="mr-2 h-4 w-4" />
-                {leaveChannel.isPending ? "Leaving..." : "Leave Channel"}
+                {leaveChannel.isPending ? t("actions.leaving") : t("actions.leave")}
               </Button>
             ) : null}
           </div>
@@ -448,13 +460,13 @@ export default function ChannelDetailsPage() {
                 </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">{channel.visibility}</Badge>
-                    <Badge variant="secondary">{channel.join_mode}</Badge>
-                    <Badge>{channel.my_role}</Badge>
+                    <Badge variant="secondary">{visibilityLabel(channel.visibility)}</Badge>
+                    <Badge variant="secondary">{joinModeLabel(channel.join_mode)}</Badge>
+                    <Badge>{roleLabel(channel.my_role)}</Badge>
                   </div>
                   <h2 className="mt-3 truncate text-3xl font-bold">{channel.name}</h2>
                   <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                    {channel.description?.trim() || "No description has been added for this channel yet."}
+                    {channel.description?.trim() || t("empty.noDescription")}
                   </p>
                 </div>
               </div>
@@ -465,82 +477,82 @@ export default function ChannelDetailsPage() {
             <Card className="rounded-2xl p-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Users className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Members</span>
+                <span className="text-xs uppercase tracking-[0.18em]">{t("stats.members")}</span>
               </div>
               <p className="mt-2 text-2xl font-semibold">{channel.member_count}</p>
             </Card>
             <Card className="rounded-2xl p-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Shield className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Pending</span>
+                <span className="text-xs uppercase tracking-[0.18em]">{t("stats.pending")}</span>
               </div>
               <p className="mt-2 text-2xl font-semibold">{channel.pending_count}</p>
             </Card>
             <Card className="rounded-2xl p-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Info className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Unread</span>
+                <span className="text-xs uppercase tracking-[0.18em]">{t("stats.unread")}</span>
               </div>
               <p className="mt-2 text-2xl font-semibold">{channel.unread_count}</p>
             </Card>
             <Card className="rounded-2xl p-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Lock className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Access</span>
+                <span className="text-xs uppercase tracking-[0.18em]">{t("stats.access")}</span>
               </div>
-              <p className="mt-2 text-sm font-semibold capitalize">{channel.join_mode.replace("_", " ")}</p>
+              <p className="mt-2 text-sm font-semibold">{joinModeLabel(channel.join_mode)}</p>
             </Card>
           </div>
 
           <div className="grid gap-4 border-t border-border/60 p-6 lg:grid-cols-[1.1fr_0.9fr]">
             <Card className="rounded-2xl p-5">
-              <h3 className="text-lg font-semibold">Channel overview</h3>
+              <h3 className="text-lg font-semibold">{t("sections.overview")}</h3>
               <div className="mt-4 space-y-4 text-sm">
                 <div>
-                  <p className="text-muted-foreground">Visibility</p>
-                  <p className="mt-1 font-medium capitalize">{channel.visibility}</p>
+                  <p className="text-muted-foreground">{t("fields.visibility")}</p>
+                  <p className="mt-1 font-medium">{visibilityLabel(channel.visibility)}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Join policy</p>
-                  <p className="mt-1 font-medium capitalize">{channel.join_mode.replace("_", " ")}</p>
+                  <p className="text-muted-foreground">{t("fields.joinPolicy")}</p>
+                  <p className="mt-1 font-medium">{joinModeLabel(channel.join_mode)}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Created</p>
+                  <p className="text-muted-foreground">{t("fields.created")}</p>
                   <p className="mt-1 font-medium">{formatDateTime(channel.created_at)}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Updated</p>
+                  <p className="text-muted-foreground">{t("fields.updated")}</p>
                   <p className="mt-1 font-medium">{formatDateTime(channel.updated_at)}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Last activity</p>
+                  <p className="text-muted-foreground">{t("fields.lastActivity")}</p>
                   <p className="mt-1 font-medium">{formatDateTime(channel.last_message_at)}</p>
                 </div>
               </div>
             </Card>
 
             <Card className="rounded-2xl p-5">
-              <h3 className="text-lg font-semibold">Your access</h3>
+              <h3 className="text-lg font-semibold">{t("sections.yourAccess")}</h3>
               <div className="mt-4 space-y-3 text-sm">
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">Publish messages</span>
-                  <span className="font-medium">{channel.permissions.can_publish ? "Allowed" : "No"}</span>
+                  <span className="text-muted-foreground">{t("permissions.publish")}</span>
+                  <span className="font-medium">{channel.permissions.can_publish ? commonT("allowed") : commonT("no")}</span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">Invite members</span>
-                  <span className="font-medium">{channel.permissions.can_invite ? "Allowed" : "No"}</span>
+                  <span className="text-muted-foreground">{t("permissions.invite")}</span>
+                  <span className="font-medium">{channel.permissions.can_invite ? commonT("allowed") : commonT("no")}</span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">Approve requests</span>
-                  <span className="font-medium">{channel.permissions.can_approve ? "Allowed" : "No"}</span>
+                  <span className="text-muted-foreground">{t("permissions.approve")}</span>
+                  <span className="font-medium">{channel.permissions.can_approve ? commonT("allowed") : commonT("no")}</span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">Manage members</span>
-                  <span className="font-medium">{channel.permissions.can_manage_members ? "Allowed" : "No"}</span>
+                  <span className="text-muted-foreground">{t("permissions.manageMembers")}</span>
+                  <span className="font-medium">{channel.permissions.can_manage_members ? commonT("allowed") : commonT("no")}</span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-muted-foreground">Edit channel</span>
-                  <span className="font-medium">{channel.permissions.can_edit_channel ? "Allowed" : "No"}</span>
+                  <span className="text-muted-foreground">{t("permissions.editChannel")}</span>
+                  <span className="font-medium">{channel.permissions.can_edit_channel ? commonT("allowed") : commonT("no")}</span>
                 </div>
               </div>
             </Card>
@@ -551,15 +563,15 @@ export default function ChannelDetailsPage() {
               <Card className="rounded-2xl p-5">
                 <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                   <div>
-                    <h3 className="text-lg font-semibold">Event log</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">Review recent security and system events for this channel.</p>
+                    <h3 className="text-lg font-semibold">{t("sections.eventLog")}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">{t("eventLogDescription")}</p>
                   </div>
                   <Button
                     variant="outline"
                     onClick={() => router.push(localePath(`/app/channels/${channel.id}/details/event-log`))}
                   >
                     <Shield className="mr-2 h-4 w-4" />
-                    Open event log
+                    {t("actions.openEventLog")}
                   </Button>
                 </div>
               </Card>
@@ -570,11 +582,11 @@ export default function ChannelDetailsPage() {
             <div className="grid gap-4 border-t border-border/60 p-6 lg:grid-cols-2">
               {canEditChannel ? (
                 <Card className="rounded-2xl p-5">
-                  <h3 className="text-lg font-semibold">Edit channel</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">Settings for members who can edit channel profile and access behavior.</p>
+                  <h3 className="text-lg font-semibold">{t("sections.editChannel")}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">{t("editDescription")}</p>
                   <form className="mt-4 space-y-4" onSubmit={handleEditSubmit}>
                     <div className="grid gap-2">
-                      <Label htmlFor="details-channel-name">Name</Label>
+                      <Label htmlFor="details-channel-name">{t("fields.name")}</Label>
                       <Input
                         id="details-channel-name"
                         value={editForm.name}
@@ -583,7 +595,7 @@ export default function ChannelDetailsPage() {
                       />
                     </div>
                     <div className="grid gap-2">
-                      <Label htmlFor="details-channel-description">Description</Label>
+                      <Label htmlFor="details-channel-description">{t("fields.description")}</Label>
                       <Textarea
                         id="details-channel-description"
                         value={editForm.description}
@@ -593,7 +605,7 @@ export default function ChannelDetailsPage() {
                       />
                     </div>
                     <div className="grid gap-2">
-                      <Label htmlFor="details-channel-avatar">Avatar upload</Label>
+                      <Label htmlFor="details-channel-avatar">{t("fields.avatarUpload")}</Label>
                       <Input
                         id="details-channel-avatar"
                         type="file"
@@ -601,13 +613,13 @@ export default function ChannelDetailsPage() {
                         onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)}
                       />
                       <p className="text-xs text-muted-foreground">
-                        {avatarFile ? `Selected: ${avatarFile.name}` : "Choose an image file to update the channel avatar."}
+                        {avatarFile ? t("fields.selectedFile", { name: avatarFile.name }) : t("fields.avatarHint")}
                       </p>
                       {avatarFile && avatarPreviewUrl ? (
                         <div>
                           <img
                             src={avatarPreviewUrl}
-                            alt="Selected channel avatar preview"
+                            alt={t("fields.avatarPreviewAlt")}
                             className="h-16 w-16 rounded-xl border border-border/70 object-cover"
                           />
                         </div>
@@ -615,7 +627,7 @@ export default function ChannelDetailsPage() {
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="grid gap-2">
-                        <Label>Visibility</Label>
+                        <Label>{t("fields.visibility")}</Label>
                         <Select
                           value={editForm.visibility}
                           onValueChange={(value: "public" | "private") =>
@@ -626,13 +638,13 @@ export default function ChannelDetailsPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="public">Public</SelectItem>
-                            <SelectItem value="private">Private</SelectItem>
+                            <SelectItem value="public">{commonT("visibility.public")}</SelectItem>
+                            <SelectItem value="private">{commonT("visibility.private")}</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
                       <div className="grid gap-2">
-                        <Label>Join mode</Label>
+                        <Label>{t("fields.joinMode")}</Label>
                         <Select
                           value={editForm.joinMode}
                           onValueChange={(value: "open" | "approval_required" | "invite_only") =>
@@ -643,9 +655,9 @@ export default function ChannelDetailsPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="open">Open</SelectItem>
-                            <SelectItem value="approval_required">Approval required</SelectItem>
-                            <SelectItem value="invite_only">Invite only</SelectItem>
+                            <SelectItem value="open">{commonT("joinMode.open")}</SelectItem>
+                            <SelectItem value="approval_required">{commonT("joinMode.approvalRequired")}</SelectItem>
+                            <SelectItem value="invite_only">{commonT("joinMode.inviteOnly")}</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -665,39 +677,39 @@ export default function ChannelDetailsPage() {
                         }}
                         disabled={updateChannel.isPending || uploadAvatar.isPending}
                       >
-                        Reset
+                        {commonT("actions.reset")}
                       </Button>
                       <Button type="submit" disabled={updateChannel.isPending || uploadAvatar.isPending || !hasEditChanges}>
-                        {updateChannel.isPending || uploadAvatar.isPending ? "Saving..." : "Save changes"}
+                        {updateChannel.isPending || uploadAvatar.isPending ? commonT("actions.saving") : commonT("actions.saveChanges")}
                       </Button>
                     </div>
                   </form>
                 </Card>
               ) : (
                 <Card className="rounded-2xl p-5">
-                  <h3 className="text-lg font-semibold">Edit channel</h3>
+                  <h3 className="text-lg font-semibold">{t("sections.editChannel")}</h3>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Editing is currently restricted to the owner or admins with edit permission.
+                    {t("editRestricted")}
                   </p>
                 </Card>
               )}
 
               {canManageMembers ? (
                 <Card className="rounded-2xl p-5">
-                  <h3 className="text-lg font-semibold">Members & roles</h3>
+                  <h3 className="text-lg font-semibold">{t("sections.membersRoles")}</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Manage pending requests, remove access, and owner-only role promotions.
+                    {t("membersDescription")}
                   </p>
 
                   <div className="mt-4 space-y-3">
-                    <p className="text-sm font-medium">Pending requests</p>
+                    <p className="text-sm font-medium">{t("sections.pendingRequests")}</p>
                     {membersQuery.isLoading ? (
                       <div className="space-y-2">
                         <Skeleton className="h-12 w-full rounded-xl" />
                         <Skeleton className="h-12 w-full rounded-xl" />
                       </div>
                     ) : pendingMembers.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No pending requests right now.</p>
+                      <p className="text-sm text-muted-foreground">{t("empty.noPendingRequests")}</p>
                     ) : (
                       pendingMembers.map((member) => {
                         const isSelf = member.user_id === currentUser?.id;
@@ -708,10 +720,10 @@ export default function ChannelDetailsPage() {
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <div>
                                 <div className="font-medium leading-none">{member.username}</div>
-                                <div className="mt-1 text-xs text-muted-foreground">{member.email || "No email available"}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">{member.email || t("empty.noEmailAvailable")}</div>
                               </div>
                               <div className="flex items-center gap-2">
-                                <Badge variant={getRoleBadgeVariant(member.role)}>{member.role}</Badge>
+                                <Badge variant={getRoleBadgeVariant(member.role)}>{roleLabel(member.role)}</Badge>
                                 {channel.permissions.can_approve ? (
                                   <Button
                                     size="sm"
@@ -725,15 +737,15 @@ export default function ChannelDetailsPage() {
                                             onSuccess: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Request approved",
-                                                description: `${member.username} is now a member.`,
+                                                title: t("toasts.requestApprovedTitle"),
+                                                description: t("toasts.requestApprovedDescription", { username: member.username }),
                                               });
                                             },
                                             onError: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Could not approve request",
-                                                description: "Please try again.",
+                                                title: t("toasts.approveFailedTitle"),
+                                                description: commonT("tryAgain"),
                                                 variant: "destructive",
                                               });
                                             },
@@ -743,7 +755,7 @@ export default function ChannelDetailsPage() {
                                     }
                                   >
                                     <Check className="mr-1 h-4 w-4" />
-                                    Approve
+                                    {t("actions.approve")}
                                   </Button>
                                 ) : null}
                                 {!isSelf ? (
@@ -759,15 +771,15 @@ export default function ChannelDetailsPage() {
                                             onSuccess: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Request removed",
-                                                description: `${member.username} is no longer pending.`,
+                                                title: t("toasts.requestRemovedTitle"),
+                                                description: t("toasts.requestRemovedDescription", { username: member.username }),
                                               });
                                             },
                                             onError: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Could not remove request",
-                                                description: "Please try again.",
+                                                title: t("toasts.removeRequestFailedTitle"),
+                                                description: commonT("tryAgain"),
                                                 variant: "destructive",
                                               });
                                             },
@@ -777,7 +789,7 @@ export default function ChannelDetailsPage() {
                                     }
                                   >
                                     <UserMinus className="mr-1 h-4 w-4" />
-                                    Remove
+                                    {t("actions.remove")}
                                   </Button>
                                 ) : null}
                               </div>
@@ -789,14 +801,14 @@ export default function ChannelDetailsPage() {
                   </div>
 
                   <div className="mt-6 space-y-3">
-                    <p className="text-sm font-medium">Current members</p>
+                    <p className="text-sm font-medium">{t("sections.currentMembers")}</p>
                     {membersQuery.isLoading ? (
                       <div className="space-y-2">
                         <Skeleton className="h-12 w-full rounded-xl" />
                         <Skeleton className="h-12 w-full rounded-xl" />
                       </div>
                     ) : managedMembers.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No members to display.</p>
+                      <p className="text-sm text-muted-foreground">{t("empty.noMembers")}</p>
                     ) : (
                       managedMembers.map((member) => {
                         const isSelf = member.user_id === currentUser?.id;
@@ -825,10 +837,10 @@ export default function ChannelDetailsPage() {
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <div>
                                 <div className="font-medium leading-none">{member.username}</div>
-                                <div className="mt-1 text-xs text-muted-foreground">{member.email || "No email available"}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">{member.email || t("empty.noEmailAvailable")}</div>
                               </div>
                               <div className="flex flex-wrap items-center gap-2">
-                                <Badge variant={getRoleBadgeVariant(member.role)}>{member.role}</Badge>
+                                <Badge variant={getRoleBadgeVariant(member.role)}>{roleLabel(member.role)}</Badge>
                                 {canPromote ? (
                                   <Button
                                     size="sm"
@@ -842,15 +854,15 @@ export default function ChannelDetailsPage() {
                                             onSuccess: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Member promoted",
-                                                description: `${member.username} is now an admin.`,
+                                                title: t("toasts.memberPromotedTitle"),
+                                                description: t("toasts.memberPromotedDescription", { username: member.username }),
                                               });
                                             },
                                             onError: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Could not promote member",
-                                                description: "Please try again.",
+                                                title: t("toasts.promoteFailedTitle"),
+                                                description: commonT("tryAgain"),
                                                 variant: "destructive",
                                               });
                                             },
@@ -860,7 +872,7 @@ export default function ChannelDetailsPage() {
                                     }
                                   >
                                     <ShieldPlus className="mr-1 h-4 w-4" />
-                                    Promote
+                                    {t("actions.promote")}
                                   </Button>
                                 ) : null}
                                 {canDemote ? (
@@ -876,15 +888,15 @@ export default function ChannelDetailsPage() {
                                             onSuccess: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Admin demoted",
-                                                description: `${member.username} is now a member.`,
+                                                title: t("toasts.adminDemotedTitle"),
+                                                description: t("toasts.adminDemotedDescription", { username: member.username }),
                                               });
                                             },
                                             onError: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Could not demote admin",
-                                                description: "Please try again.",
+                                                title: t("toasts.demoteFailedTitle"),
+                                                description: commonT("tryAgain"),
                                                 variant: "destructive",
                                               });
                                             },
@@ -893,7 +905,7 @@ export default function ChannelDetailsPage() {
                                       )
                                     }
                                   >
-                                    Demote
+                                    {t("actions.demote")}
                                   </Button>
                                 ) : null}
                                 {canRemove ? (
@@ -909,15 +921,15 @@ export default function ChannelDetailsPage() {
                                             onSuccess: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Member removed",
-                                                description: `${member.username} no longer has access.`,
+                                                title: t("toasts.memberRemovedTitle"),
+                                                description: t("toasts.memberRemovedDescription", { username: member.username }),
                                               });
                                             },
                                             onError: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Could not remove member",
-                                                description: "Please try again.",
+                                                title: t("toasts.removeMemberFailedTitle"),
+                                                description: commonT("tryAgain"),
                                                 variant: "destructive",
                                               });
                                             },
@@ -927,17 +939,17 @@ export default function ChannelDetailsPage() {
                                     }
                                   >
                                     <UserMinus className="mr-1 h-4 w-4" />
-                                    Remove
+                                    {t("actions.remove")}
                                   </Button>
                                 ) : null}
                               </div>
                             </div>
                             {isOwner && isAdmin ? (
                               <div className="mt-3 rounded-lg bg-muted/50 p-3">
-                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Admin permissions</p>
+                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("sections.adminPermissions")}</p>
                                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                                   <div className="flex items-center justify-between rounded-md bg-background/80 px-2 py-1.5">
-                                    <span className="text-xs">Publish messages</span>
+                                    <span className="text-xs">{t("permissions.publish")}</span>
                                     <Switch
                                       checked={draftPermissions.can_publish}
                                       onCheckedChange={(checked) =>
@@ -949,7 +961,7 @@ export default function ChannelDetailsPage() {
                                     />
                                   </div>
                                   <div className="flex items-center justify-between rounded-md bg-background/80 px-2 py-1.5">
-                                    <span className="text-xs">Invite members</span>
+                                    <span className="text-xs">{t("permissions.invite")}</span>
                                     <Switch
                                       checked={draftPermissions.can_invite}
                                       onCheckedChange={(checked) =>
@@ -961,7 +973,7 @@ export default function ChannelDetailsPage() {
                                     />
                                   </div>
                                   <div className="flex items-center justify-between rounded-md bg-background/80 px-2 py-1.5">
-                                    <span className="text-xs">Approve requests</span>
+                                    <span className="text-xs">{t("permissions.approve")}</span>
                                     <Switch
                                       checked={draftPermissions.can_approve}
                                       onCheckedChange={(checked) =>
@@ -973,7 +985,7 @@ export default function ChannelDetailsPage() {
                                     />
                                   </div>
                                   <div className="flex items-center justify-between rounded-md bg-background/80 px-2 py-1.5">
-                                    <span className="text-xs">Manage members</span>
+                                    <span className="text-xs">{t("permissions.manageMembers")}</span>
                                     <Switch
                                       checked={draftPermissions.can_manage_members}
                                       onCheckedChange={(checked) =>
@@ -985,7 +997,7 @@ export default function ChannelDetailsPage() {
                                     />
                                   </div>
                                   <div className="flex items-center justify-between rounded-md bg-background/80 px-2 py-1.5">
-                                    <span className="text-xs">Edit channel</span>
+                                    <span className="text-xs">{t("permissions.editChannel")}</span>
                                     <Switch
                                       checked={draftPermissions.can_edit_channel}
                                       onCheckedChange={(checked) =>
@@ -1013,15 +1025,15 @@ export default function ChannelDetailsPage() {
                                             onSuccess: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Permissions updated",
-                                                description: `${member.username}'s admin permissions were saved.`,
+                                                title: t("toasts.permissionsUpdatedTitle"),
+                                                description: t("toasts.permissionsUpdatedDescription", { username: member.username }),
                                               });
                                             },
                                             onError: () => {
                                               setActingOn(null);
                                               toast({
-                                                title: "Could not update permissions",
-                                                description: "Please try again.",
+                                                title: t("toasts.permissionsFailedTitle"),
+                                                description: commonT("tryAgain"),
                                                 variant: "destructive",
                                               });
                                             },
@@ -1030,7 +1042,7 @@ export default function ChannelDetailsPage() {
                                       )
                                     }
                                   >
-                                    Save permissions
+                                    {t("actions.savePermissions")}
                                   </Button>
                                 </div>
                               </div>

@@ -69,6 +69,25 @@ cd frontend
 npm run typecheck
 ```
 
+Frontend production build:
+```bash
+cd frontend
+npm run build
+```
+
+Frontend locale file validation:
+```bash
+cd frontend
+node -e "JSON.parse(require('fs').readFileSync('src/locales/en.json','utf8')); JSON.parse(require('fs').readFileSync('src/locales/ar.json','utf8')); console.log('locale json ok')"
+```
+This verifies that both English and Arabic message catalogs are valid JSON. The current frontend i18n pass is also covered by `npm run typecheck`, but there is not yet an automated visual RTL regression test.
+
+Frontend locale key-set alignment:
+```bash
+cd frontend
+node -e "const fs=require('fs'); const flat=(obj,p='')=>Object.entries(obj).flatMap(([k,v])=>v&&typeof v==='object'&&!Array.isArray(v)?flat(v,p?p+'.'+k:k):[p?p+'.'+k:k]); const en=flat(JSON.parse(fs.readFileSync('src/locales/en.json','utf8'))); const ar=flat(JSON.parse(fs.readFileSync('src/locales/ar.json','utf8'))); const missingAr=en.filter(k=>!ar.includes(k)); const missingEn=ar.filter(k=>!en.includes(k)); if(missingAr.length||missingEn.length){console.log({missingAr,missingEn}); process.exit(1)} console.log('locale keys aligned:', en.length);"
+```
+
 Docker Compose config check:
 ```bash
 docker compose config
@@ -128,14 +147,16 @@ This is an automated supervisor proof for the normal worker path and controlled 
 
 ## Manual Verification
 - Frontend login/register/channel flows.
+- English/Arabic language switcher and Arabic RTL rendering on login/register, channel, details, event log, delivery monitor, profile, and sessions pages.
 - Event log subpage rendering.
 - Ciphertext-at-rest SQL check.
 - Unauthorized publish/read denial behavior.
 - Private upload download denial for a non-member.
 
 ## Current Limitations
-- Local Windows `npm run build` may fail with a local Node dependency resolution issue (`caniuse-lite/dist/unpacker/agents`); Docker frontend build succeeds and is the verified path for demo readiness.
+- Local Windows `npm run build` passed during the 2026-06-14 frontend i18n pass. Docker Compose remains the canonical evaluator path if local Node dependency behavior differs on another machine.
 - No dedicated frontend lint script currently exists (`npm run lint` unsupported).
+- No automated browser screenshot/regression suite currently verifies Arabic RTL layout; check it manually during the UI demo.
 - `scripts/ws_client.py` is still useful for a standalone socket check, but the main demo verifier now covers the end-to-end proof path with join-after-connect resubscribe, live WebSocket delivery, event-integrity verification, and REST backfill fallback.
 - There is no dedicated CI broker/WebSocket integration test yet.
 - Delivery reliability tests cover database outbox transitions and admin APIs, but they mock AMQP publish success/failure rather than exercising a real RabbitMQ outage.

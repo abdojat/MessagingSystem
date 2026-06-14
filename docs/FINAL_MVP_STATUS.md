@@ -14,8 +14,10 @@
 - Verified during Delivery Reliability Upgrade v1: Docker-backed backend tests passed, frontend typecheck passed, Docker Compose config passed, and a temporary-database Alembic upgrade to head passed.
 - Verified during Stabilization Pass on 2026-06-10: Docker Compose config passed, Docker stack rebuilt and was healthy, Docker-backed backend tests passed, frontend typecheck passed, Docker frontend build passed, upgraded demo verifier passed, and Docker-network event-integrity dry-run passed.
 - Verified during Stabilization Pass 2 on 2026-06-10: Docker Compose config passed, Docker stack rebuilt and stayed healthy, Docker-backed backend tests passed (`37 passed, 2 warnings`), frontend typecheck passed, main demo verifier passed, approval-required membership verifier passed with live WebSocket delivery, Docker event-integrity dry-run passed, delivery reliability verifier passed, container compileall passed, and `git diff --check` reported no whitespace errors beyond line-ending notices.
+- Verified during frontend i18n pass on 2026-06-14: frontend typecheck passed, frontend production build passed, English/Arabic locale JSON parsing passed, English/Arabic key-set alignment passed, placeholder scan found no `???` entries, and `git diff --check` reported no whitespace errors beyond line-ending notices.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
+- Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.
 
 ## What Is Mostly Complete
 - Distributed delivery through PostgreSQL outbox, RabbitMQ, worker dispatch, Redis fanout, and WebSocket push.
@@ -48,6 +50,7 @@
 ## What Is Demo-Grade
 - Browser-managed token storage and WebSocket token transport.
 - This is acceptable for a university demo, but it is not production-grade session security.
+- Arabic/RTL frontend coverage is demo-oriented and verified by typecheck plus translation-file parsing; there is no automated visual regression suite for RTL layout yet.
 
 ## Future Work
 - Dedicated broker/WebSocket integration tests in CI.
@@ -66,6 +69,9 @@ docker compose ps -a
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
 cd frontend
 npm run typecheck
+npm run build
+node -e "JSON.parse(require('fs').readFileSync('src/locales/en.json','utf8')); JSON.parse(require('fs').readFileSync('src/locales/ar.json','utf8')); console.log('locale json ok')"
+node -e "const fs=require('fs'); const flat=(obj,p='')=>Object.entries(obj).flatMap(([k,v])=>v&&typeof v==='object'&&!Array.isArray(v)?flat(v,p?p+'.'+k:k):[p?p+'.'+k:k]); const en=flat(JSON.parse(fs.readFileSync('src/locales/en.json','utf8'))); const ar=flat(JSON.parse(fs.readFileSync('src/locales/ar.json','utf8'))); const missingAr=en.filter(k=>!ar.includes(k)); const missingEn=ar.filter(k=>!en.includes(k)); if(missingAr.length||missingEn.length){console.log({missingAr,missingEn}); process.exit(1)} console.log('locale keys aligned:', en.length);"
 cd ..
 python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
 python scripts/verify_approval_flow.py --base-url http://localhost:8000/v1

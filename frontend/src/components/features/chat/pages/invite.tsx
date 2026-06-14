@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { apiClient } from "@/services/api/client";
 import { InviteDetailsResponse } from "@/types/api";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,8 @@ export default function Invite() {
   const token = Array.isArray(params?.token) ? params.token[0] : params?.token;
   const router = useRouter();
   const localePath = useLocalePath();
+  const t = useTranslations("invite");
+  const commonT = useTranslations("common");
 
   const { data: invite, isLoading, isError } = useQuery({
     queryKey: ['/invites', token],
@@ -57,9 +60,9 @@ export default function Invite() {
         <div className="w-20 h-20 bg-destructive/10 text-destructive rounded-full flex items-center justify-center mb-6">
           <Hash className="w-10 h-10" />
         </div>
-        <h1 className="text-3xl font-bold text-foreground mb-2">Invalid Invite</h1>
-        <p className="text-muted-foreground mb-8 max-w-md">This invite link is invalid, expired, or no longer available.</p>
-        <Button onClick={() => router.push(localePath("/app"))} variant="outline" className="h-12 px-8 rounded-xl font-medium">Return to App</Button>
+        <h1 className="text-3xl font-bold text-foreground mb-2">{t("invalidTitle")}</h1>
+        <p className="text-muted-foreground mb-8 max-w-md">{t("invalidDescription")}</p>
+        <Button onClick={() => router.push(localePath("/app"))} variant="outline" className="h-12 px-8 rounded-xl font-medium">{commonT("actions.returnToApp")}</Button>
       </div>
     );
   }
@@ -74,11 +77,11 @@ export default function Invite() {
         </div>
         
         <h1 className="text-3xl font-bold text-foreground tracking-tight mb-2">
-          {invite.channel?.name || "Join Channel"}
+          {invite.channel?.name || t("joinChannel")}
         </h1>
 
         <p className="text-muted-foreground mb-8">
-          This invite grants access to a {invite.channel?.visibility || 'public'} channel.
+          {t("grantAccess", { visibility: commonT(`visibility.${invite.channel?.visibility || "public"}`) })}
         </p>
 
         <Button 
@@ -87,7 +90,7 @@ export default function Invite() {
           className="w-full h-14 text-lg font-bold rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25 transition-all hover:-translate-y-0.5"
         >
           <LogIn className="w-5 h-5 mr-2" />
-          {acceptInvite.isPending ? "Joining..." : "Accept Invite"}
+          {acceptInvite.isPending ? t("joining") : t("accept")}
         </Button>
       </div>
     </div>

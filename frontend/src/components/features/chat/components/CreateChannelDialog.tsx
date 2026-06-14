@@ -2,6 +2,7 @@
 
 import { type FormEvent, useEffect, useState } from "react";
 import { Globe, Lock, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 
 import { useCreateChannel } from "@/hooks/use-channels";
@@ -35,68 +36,29 @@ type CreateChannelDialogProps = {
 type Visibility = "public" | "private";
 type JoinMode = "open" | "approval_required" | "invite_only";
 
-const presets: Array<{
-  id: string;
-  title: string;
-  description: string;
+const presetConfigs: Array<{
+  id: "community" | "screened" | "private";
   visibility: Visibility;
   joinMode: JoinMode;
   icon: typeof Globe;
 }> = [
   {
     id: "community",
-    title: "Open room",
-    description: "Public and easy to join for fast-moving team spaces.",
     visibility: "public",
     joinMode: "open",
     icon: Globe,
   },
   {
     id: "screened",
-    title: "Screened room",
-    description: "Public discovery with approvals before people enter.",
     visibility: "public",
     joinMode: "approval_required",
     icon: ShieldCheck,
   },
   {
     id: "private",
-    title: "Private room",
-    description: "Invite-only access for leadership, ops, or sensitive work.",
     visibility: "private",
     joinMode: "invite_only",
     icon: Lock,
-  },
-];
-
-const visibilityOptions = [
-  {
-    value: "public" as const,
-    label: "Public",
-    description: "Anyone in the workspace can discover this channel.",
-  },
-  {
-    value: "private" as const,
-    label: "Private",
-    description: "Only invited people can find and access this channel.",
-  },
-];
-
-const joinModeOptions = [
-  {
-    value: "open" as const,
-    label: "Open join",
-    description: "People can join immediately.",
-  },
-  {
-    value: "approval_required" as const,
-    label: "Approval required",
-    description: "Requests are visible before someone is admitted.",
-  },
-  {
-    value: "invite_only" as const,
-    label: "Invite only",
-    description: "Only direct invites can grant access.",
   },
 ];
 
@@ -113,6 +75,8 @@ export function CreateChannelDialog({
 }: CreateChannelDialogProps) {
   const router = useRouter();
   const localePath = useLocalePath();
+  const t = useTranslations("createChannel");
+  const commonT = useTranslations("common");
   const createChannel = useCreateChannel();
   const [form, setForm] = useState(initialForm);
 
@@ -121,6 +85,43 @@ export function CreateChannelDialog({
       setForm(initialForm);
     }
   }, [open]);
+
+  const visibilityOptions = [
+    {
+      value: "public" as const,
+      label: commonT("visibility.public"),
+      description: t("visibility.publicDescription"),
+    },
+    {
+      value: "private" as const,
+      label: commonT("visibility.private"),
+      description: t("visibility.privateDescription"),
+    },
+  ];
+
+  const joinModeOptions = [
+    {
+      value: "open" as const,
+      label: commonT("joinMode.open"),
+      description: t("joinMode.openDescription"),
+    },
+    {
+      value: "approval_required" as const,
+      label: commonT("joinMode.approvalRequired"),
+      description: t("joinMode.approvalDescription"),
+    },
+    {
+      value: "invite_only" as const,
+      label: commonT("joinMode.inviteOnly"),
+      description: t("joinMode.inviteDescription"),
+    },
+  ];
+
+  const presets = presetConfigs.map((preset) => ({
+    ...preset,
+    title: t(`presets.${preset.id}.title`),
+    description: t(`presets.${preset.id}.description`),
+  }));
 
   const selectedVisibility = visibilityOptions.find(
     (option) => option.value === form.visibility,
@@ -145,8 +146,8 @@ export function CreateChannelDialog({
 
     if (!trimmedName) {
       toast({
-        title: "Channel name required",
-        description: "Give the new channel a short, clear name first.",
+        title: t("toasts.nameRequiredTitle"),
+        description: t("toasts.nameRequiredDescription"),
         variant: "destructive",
       });
       return;
@@ -164,14 +165,14 @@ export function CreateChannelDialog({
           onOpenChange(false);
           router.push(localePath(`/app/channels/${channel.id}`));
           toast({
-            title: "Channel created",
-            description: `${channel.name} is ready for your team.`,
+            title: t("toasts.createdTitle"),
+            description: t("toasts.createdDescription", { name: channel.name }),
           });
         },
         onError: () => {
           toast({
-            title: "Could not create channel",
-            description: "Please try again in a moment.",
+            title: t("toasts.createFailedTitle"),
+            description: commonT("tryAgainLater"),
             variant: "destructive",
           });
         },
@@ -188,14 +189,14 @@ export function CreateChannelDialog({
             <DialogHeader className="space-y-3 text-left">
               <div className="inline-flex w-fit items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-primary">
                 <Sparkles className="h-3.5 w-3.5" />
-                New channel
+                {t("eyebrow")}
               </div>
               <div className="space-y-1">
                 <DialogTitle className="text-2xl font-semibold tracking-tight">
-                  Create a space people want to join
+                  {t("title")}
                 </DialogTitle>
                 <DialogDescription className="max-w-xl text-sm leading-6">
-                  Set the tone with a clear name, a little context, and the right access model for your team.
+                  {t("description")}
                 </DialogDescription>
               </div>
             </DialogHeader>
@@ -235,31 +236,31 @@ export function CreateChannelDialog({
 
           <div className="grid gap-5">
             <div className="grid gap-2">
-              <Label htmlFor="channel-name">Channel name</Label>
+              <Label htmlFor="channel-name">{t("fields.name")}</Label>
               <Input
                 id="channel-name"
                 value={form.name}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, name: event.target.value }))
                 }
-                placeholder="Marketing standup"
+                placeholder={t("fields.namePlaceholder")}
                 maxLength={80}
                 autoFocus
               />
               <p className="text-xs text-muted-foreground">
-                Keep it short and recognizable so people can find it fast.
+                {t("fields.nameHint")}
               </p>
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="channel-description">Description</Label>
+              <Label htmlFor="channel-description">{t("fields.description")}</Label>
               <Textarea
                 id="channel-description"
                 value={form.description}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, description: event.target.value }))
                 }
-                placeholder="What belongs here, who should use it, and how often the team checks in."
+                placeholder={t("fields.descriptionPlaceholder")}
                 className="min-h-28 resize-none"
                 maxLength={240}
               />
@@ -267,7 +268,7 @@ export function CreateChannelDialog({
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
-                <Label>Visibility</Label>
+                <Label>{t("fields.visibility")}</Label>
                 <Select
                   value={form.visibility}
                   onValueChange={(value: Visibility) =>
@@ -275,7 +276,7 @@ export function CreateChannelDialog({
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Choose visibility" />
+                    <SelectValue placeholder={t("fields.visibilityPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
                     {visibilityOptions.map((option) => (
@@ -291,7 +292,7 @@ export function CreateChannelDialog({
               </div>
 
               <div className="grid gap-2">
-                <Label>Join access</Label>
+                <Label>{t("fields.joinAccess")}</Label>
                 <Select
                   value={form.joinMode}
                   onValueChange={(value: JoinMode) =>
@@ -299,7 +300,7 @@ export function CreateChannelDialog({
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Choose join mode" />
+                    <SelectValue placeholder={t("fields.joinModePlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
                     {joinModeOptions.map((option) => (
@@ -323,17 +324,17 @@ export function CreateChannelDialog({
               </div>
               <div className="space-y-1">
                 <div className="font-medium text-foreground">
-                  {form.visibility === "public" ? "Easy to discover" : "Kept intentionally private"}
+                  {form.visibility === "public" ? t("summary.publicTitle") : t("summary.privateTitle")}
                 </div>
                 <div className="text-sm leading-6 text-muted-foreground">
                   {form.visibility === "public"
-                    ? "People across the workspace will be able to see this channel in discovery."
-                    : "Only invited members will know this channel exists."}{" "}
-                  {form.joinMode === "open" && "Anyone who sees it can join immediately."}
+                    ? t("summary.publicDescription")
+                    : t("summary.privateDescription")}{" "}
+                  {form.joinMode === "open" && t("summary.open")}
                   {form.joinMode === "approval_required" &&
-                    "New joiners will wait for approval before entering."}
+                    t("summary.approvalRequired")}
                   {form.joinMode === "invite_only" &&
-                    "Membership is controlled strictly through invitations."}
+                    t("summary.inviteOnly")}
                 </div>
               </div>
             </div>
@@ -341,7 +342,7 @@ export function CreateChannelDialog({
 
           <DialogFooter className="gap-2 sm:justify-between">
             <div className="text-xs text-muted-foreground">
-              You can update these settings later from channel details.
+              {t("footerHint")}
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -350,10 +351,10 @@ export function CreateChannelDialog({
                 onClick={() => onOpenChange(false)}
                 disabled={createChannel.isPending}
               >
-                Cancel
+                {commonT("actions.cancel")}
               </Button>
               <Button type="submit" disabled={createChannel.isPending}>
-                {createChannel.isPending ? "Creating..." : "Create channel"}
+                {createChannel.isPending ? t("actions.creating") : t("actions.create")}
               </Button>
             </div>
           </DialogFooter>

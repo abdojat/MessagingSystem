@@ -3,6 +3,7 @@
 import { ReactNode, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Hash } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useAuthStore } from "@/store/authStore";
 import { AppSidebar } from "@/components/features/chat/components/AppSidebar";
 import { useWS } from "@/hooks/use-websocket";
@@ -10,14 +11,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 
 export function AppHomeEmptyState() {
+  const t = useTranslations("appShell.empty");
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-background h-screen">
       <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center mb-6">
         <Hash className="w-12 h-12 text-primary" />
       </div>
-      <h2 className="text-2xl font-bold text-foreground mb-2">Welcome to ChatCore</h2>
+      <h2 className="text-2xl font-bold text-foreground mb-2">{t("title")}</h2>
       <p className="text-muted-foreground max-w-md text-center">
-        Select a channel from the sidebar to start messaging, or create a new one to gather your team.
+        {t("description")}
       </p>
     </div>
   );
@@ -86,6 +89,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const isInitializing = useAuthStore((s) => s.isInitializing);
   const wsStatus = useWS().status;
+  const t = useTranslations("appShell.connection");
 
   useEffect(() => {
     if (!isInitializing && !isAuthenticated) {
@@ -108,7 +112,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 : "bg-destructive/20 text-destructive"
             }`}
           >
-            {wsStatus === "connecting" ? "Connecting to chat..." : "Disconnected. Reconnecting..."}
+            {wsStatus === "connecting" ? t("connecting") : t("reconnecting")}
           </div>
         )}
         {children}

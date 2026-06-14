@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Moon, Sun } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import { Button } from "./ui/button";
 
@@ -20,6 +21,7 @@ const DARK_THEME_OVERLAY =
 
 export function ThemeToggle({ className }: ThemeToggleProps) {
   const { resolvedTheme, setTheme } = useTheme();
+  const t = useTranslations("common.theme");
   const [mounted, setMounted] = useState(false);
   const [overlay, setOverlay] = useState<OverlayState | null>(null);
   const timeoutRef = useRef<number | null>(null);
@@ -103,8 +105,8 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
         size="icon"
         className={className}
         onClick={handleToggle}
-        aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-        title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+        aria-label={isDark ? t("switchToLight") : t("switchToDark")}
+        title={isDark ? t("switchToLight") : t("switchToDark")}
       >
         {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </Button>

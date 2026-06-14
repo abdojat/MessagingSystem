@@ -29,6 +29,8 @@ Run backend and frontend checks:
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
 cd frontend
 npm run typecheck
+npm run build
+node -e "JSON.parse(require('fs').readFileSync('src/locales/en.json','utf8')); JSON.parse(require('fs').readFileSync('src/locales/ar.json','utf8')); console.log('locale json ok')"
 cd ..
 ```
 
@@ -57,6 +59,7 @@ What to show the supervisor:
 - Event Log shows channel, membership, approval, and message events.
 - Audit integrity verifies initialized event rows.
 - Delivery Monitor shows outbox status and manual retry behavior.
+- The language switcher can show the same demo surfaces in English and Arabic, with Arabic using RTL layout.
 - User C is blocked from private channel/upload access.
 - PostgreSQL stores message ciphertext, not plaintext.
 
@@ -89,15 +92,16 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
 
 ## 5) Manual UI Demo (Instructor)
 1. Open `http://localhost:3000`.
-2. Register/login User A.
-3. Register/login User B (incognito or second browser profile).
-4. Register/login User C in a third window or separate profile.
-5. User A creates a channel.
-6. User B joins/subscribes.
-7. User A publishes a message.
-8. User B receives/reads message.
-9. Open channel details -> Event Log.
-10. Click Verify integrity and show `Audit integrity: Verified`.
+2. Use the language switcher to toggle between English and Arabic; confirm Arabic pages switch to RTL before continuing.
+3. Register/login User A.
+4. Register/login User B (incognito or second browser profile).
+5. Register/login User C in a third window or separate profile.
+6. User A creates a channel.
+7. User B joins/subscribes.
+8. User A publishes a message.
+9. User B receives/reads message.
+10. Open channel details -> Event Log.
+11. Click Verify integrity and show `Audit integrity: Verified`.
     - If the database contains pre-upgrade legacy events, run the canonical Docker backfill command first or explain the Not initialized state honestly.
     - Dry-run first:
       ```bash
@@ -107,19 +111,19 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
       ```bash
       docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
       ```
-11. Open the Delivery Monitor from User A's Profile page.
+12. Open the Delivery Monitor from User A's Profile page.
     - Normal demo state should show published/pending counters and empty failed/dead-lettered tables.
     - If a delivery has failed in the environment, use the per-row Retry button or Retry all button to move it back to pending.
     - Worker logs show retry scheduling and dead-letter transitions when RabbitMQ publish failures occur.
-12. Show unauthorized behavior:
+13. Show unauthorized behavior:
    - Use a private upload download blocked for User C.
    - Optionally show a private channel where non-member read/publish is denied.
-13. Show ciphertext at rest:
+14. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
 Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not plaintext.
-14. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
+15. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
 
 Developer-only tamper test:
 ```bash
@@ -152,6 +156,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, status,
 - [ ] Event log shows activity
 - [ ] Event integrity check shows Verified or an honestly explained Not initialized state
 - [ ] Delivery Monitor loads for a channel owner/admin
+- [ ] English/Arabic language switch works and Arabic renders RTL
 - [ ] Unauthorized access denied
 - [ ] Unauthorized upload access denied
 - [ ] DB stores ciphertext, not plaintext

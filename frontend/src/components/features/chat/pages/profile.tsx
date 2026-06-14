@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { format, formatDistanceToNowStrict } from "date-fns";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Activity,
   CheckCircle2,
@@ -35,6 +35,11 @@ import { useAuthStore } from "@/store/authStore";
 import type { MeResponse, UpdateMeRequest } from "@/types/api";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
+import {
+  formatDateLocalized,
+  formatDateTimeLocalized,
+  formatRelativeTimeStrictLocalized,
+} from "@/lib/i18n-format";
 
 type ProfileChecklistItem = {
   id: string;
@@ -65,27 +70,6 @@ type UploadContentResponse = {
 function normalizeFormValue(value: string): string | null {
   const normalized = value.trim();
   return normalized || null;
-}
-
-function formatDate(value?: string | null, fallback = "Not available") {
-  if (!value) return fallback;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return fallback;
-  return format(date, "PPP");
-}
-
-function formatDateTime(value?: string | null, fallback = "Not available") {
-  if (!value) return fallback;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return fallback;
-  return format(date, "PPP p");
-}
-
-function formatRelativeTime(value?: string | null, fallback = "No updates yet") {
-  if (!value) return fallback;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return fallback;
-  return `${formatDistanceToNowStrict(date)} ago`;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -216,6 +200,9 @@ function ProfileSkeleton() {
 export default function ProfilePage() {
   const router = useRouter();
   const localePath = useLocalePath();
+  const locale = useLocale();
+  const t = useTranslations("profile");
+  const commonT = useTranslations("common");
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitializing = useAuthStore((state) => state.isInitializing);
@@ -255,14 +242,14 @@ export default function ProfilePage() {
       updateUser(freshUser);
       setLastSyncedAt(new Date());
       toast({
-        title: "Profile refreshed",
-        description: "Your account details are now synced with the latest server data.",
+        title: t("toasts.refreshedTitle"),
+        description: t("toasts.refreshedDescription"),
       });
     },
     onError: (error: unknown) => {
       toast({
-        title: "Refresh failed",
-        description: getErrorMessage(error, "We couldn't refresh your profile right now."),
+        title: t("toasts.refreshFailedTitle"),
+        description: getErrorMessage(error, t("toasts.refreshFailedDescription")),
         variant: "destructive",
       });
     },
@@ -297,14 +284,14 @@ export default function ProfilePage() {
       updateUser(updatedUser);
       setLastSyncedAt(new Date());
       toast({
-        title: "Profile updated",
-        description: "Your profile changes were saved successfully.",
+        title: t("toasts.updatedTitle"),
+        description: t("toasts.updatedDescription"),
       });
     },
     onError: (error: unknown) => {
       toast({
-        title: "Update failed",
-        description: getErrorMessage(error, "We couldn't save your profile changes."),
+        title: t("toasts.updateFailedTitle"),
+        description: getErrorMessage(error, t("toasts.updateFailedDescription")),
         variant: "destructive",
       });
     },
@@ -313,7 +300,7 @@ export default function ProfilePage() {
   const uploadAvatar = useMutation({
     mutationFn: async (file: File): Promise<string> => {
       if (!accessToken) {
-        throw new Error("You need to be signed in before uploading a profile image.");
+        throw new Error(t("errors.signInBeforeUpload"));
       }
 
       const created = await apiClient<UploadCreateResponse>("/uploads", {
@@ -345,7 +332,7 @@ export default function ProfilePage() {
       });
 
       if (!putResponse.ok) {
-        let message = "Could not upload avatar image.";
+        let message = t("errors.avatarUpload");
         try {
           const error = (await putResponse.json()) as { detail?: { message?: string } | string };
           if (typeof error.detail === "string") {
@@ -362,7 +349,7 @@ export default function ProfilePage() {
       const uploaded = (await putResponse.json()) as UploadContentResponse;
       const nextAvatarUrl = normalizeFormValue(uploaded.public_url || created.public_url || "");
       if (!nextAvatarUrl) {
-        throw new Error("Upload succeeded but no avatar URL was returned.");
+        throw new Error(t("errors.avatarMissingUrl"));
       }
       return nextAvatarUrl;
     },
@@ -399,26 +386,26 @@ export default function ProfilePage() {
   const checklist: ProfileChecklistItem[] = [
     {
       id: "display_name",
-      label: "Display name",
-      hint: "Makes your identity clearer across channels and mentions.",
+      label: t("checklist.displayName.label"),
+      hint: t("checklist.displayName.hint"),
       completed: Boolean(user.display_name?.trim()),
     },
     {
       id: "email",
-      label: "Email address",
-      hint: "Required for account recovery and invite flows.",
+      label: t("checklist.email.label"),
+      hint: t("checklist.email.hint"),
       completed: Boolean(user.email?.trim()),
     },
     {
       id: "bio",
-      label: "Bio",
-      hint: "Adds role context so teammates know what you own.",
+      label: t("checklist.bio.label"),
+      hint: t("checklist.bio.hint"),
       completed: Boolean(user.bio?.trim()),
     },
     {
       id: "avatar",
-      label: "Avatar image",
-      hint: "Helps teammates find you quickly in busy conversations.",
+      label: t("checklist.avatar.label"),
+      hint: t("checklist.avatar.hint"),
       completed: Boolean(user.avatar_url?.trim()),
     },
   ];
@@ -434,16 +421,16 @@ export default function ProfilePage() {
       .sort((a, b) => a.getTime() - b.getTime())[0] || null;
 
   const profileRows = [
-    { label: "User ID", value: user.id, copyValue: user.id },
-    { label: "Username", value: `@${user.username}`, copyValue: user.username },
+    { label: t("rows.userId"), value: user.id, copyValue: user.id },
+    { label: t("rows.username"), value: `@${user.username}`, copyValue: user.username },
     {
-      label: "Display name",
-      value: user.display_name?.trim() || "No display name set",
+      label: t("rows.displayName"),
+      value: user.display_name?.trim() || t("empty.noDisplayName"),
       copyValue: user.display_name?.trim(),
     },
     {
-      label: "Email",
-      value: user.email?.trim() || "No email on record",
+      label: t("rows.email"),
+      value: user.email?.trim() || t("empty.noEmail"),
       copyValue: user.email?.trim(),
     },
   ];
@@ -452,8 +439,8 @@ export default function ProfilePage() {
     const safeValue = value?.trim();
     if (!safeValue) {
       toast({
-        title: `No ${label.toLowerCase()} available`,
-        description: `Set ${label.toLowerCase()} first, then try again.`,
+        title: t("toasts.copyMissingTitle", { label }),
+        description: t("toasts.copyMissingDescription", { label }),
         variant: "destructive",
       });
       return;
@@ -462,13 +449,13 @@ export default function ProfilePage() {
     try {
       await copyToClipboard(safeValue);
       toast({
-        title: `${label} copied`,
-        description: "It is now in your clipboard.",
+        title: t("toasts.copiedTitle", { label }),
+        description: t("toasts.copiedDescription"),
       });
-    } catch (error) {
+    } catch (_error) {
       toast({
-        title: "Copy failed",
-        description: getErrorMessage(error, "Clipboard access was blocked by the browser."),
+        title: t("toasts.copyFailedTitle"),
+        description: t("toasts.clipboardBlocked"),
         variant: "destructive",
       });
     }
@@ -478,13 +465,13 @@ export default function ProfilePage() {
     try {
       downloadProfileSnapshot(user, activeSessions.length);
       toast({
-        title: "Profile exported",
-        description: "A JSON snapshot has been downloaded.",
+        title: t("toasts.exportedTitle"),
+        description: t("toasts.exportedDescription"),
       });
     } catch (error) {
       toast({
-        title: "Export failed",
-        description: getErrorMessage(error, "The profile snapshot could not be generated."),
+        title: t("toasts.exportFailedTitle"),
+        description: getErrorMessage(error, t("toasts.exportFailedDescription")),
         variant: "destructive",
       });
     }
@@ -511,8 +498,8 @@ export default function ProfilePage() {
         payload.avatar_url = await uploadAvatar.mutateAsync(avatarFile);
       } catch (error) {
         toast({
-          title: "Avatar upload failed",
-          description: getErrorMessage(error, "We couldn't upload your profile image."),
+          title: t("toasts.avatarUploadFailedTitle"),
+          description: getErrorMessage(error, t("toasts.avatarUploadFailedDescription")),
           variant: "destructive",
         });
         return;
@@ -521,8 +508,8 @@ export default function ProfilePage() {
 
     if (!Object.keys(payload).length) {
       toast({
-        title: "No changes to save",
-        description: "Update a field first, then try again.",
+        title: t("toasts.noChangesTitle"),
+        description: t("toasts.noChangesDescription"),
       });
       return;
     }
@@ -534,15 +521,17 @@ export default function ProfilePage() {
       <div className="mx-auto max-w-5xl space-y-6 pb-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <Link href={localePath("/app")} className="text-primary text-sm font-medium hover:underline">&larr; Back to App</Link>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight">Profile</h1>
+            <Link href={localePath("/app")} className="text-primary text-sm font-medium hover:underline">{commonT("actions.backToApp")}</Link>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight">{t("title")}</h1>
             <p className="mt-1 text-muted-foreground">
-              Review your account details, monitor profile health.
+              {t("description")}
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               {lastSyncedAt
-                ? `Last synced ${format(lastSyncedAt, "PPP p")}`
-                : `Last server update ${formatRelativeTime(user.updated_at)}`}
+                ? t("lastSynced", { value: formatDateTimeLocalized(lastSyncedAt, locale, commonT("notAvailable")) })
+                : t("lastServerUpdate", {
+                    value: formatRelativeTimeStrictLocalized(user.updated_at, locale, t("noUpdatesYet")),
+                  })}
             </p>
           </div>
         </div>
@@ -557,14 +546,14 @@ export default function ProfilePage() {
                 </Avatar>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">Personal profile</Badge>
-                    <Badge>{completion}% complete</Badge>
-                    <Badge variant="outline">{activeSessions.length} active sessions</Badge>
+                    <Badge variant="secondary">{t("badges.personal")}</Badge>
+                    <Badge>{t("badges.complete", { percent: completion })}</Badge>
+                    <Badge variant="outline">{t("badges.activeSessions", { count: activeSessions.length })}</Badge>
                   </div>
                   <h2 className="mt-3 truncate text-3xl font-bold">{displayName}</h2>
                   <p className="text-muted-foreground">@{user.username}</p>
                   <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-                    {user.bio?.trim() || "No bio set yet."}
+                    {user.bio?.trim() || t("empty.noBio")}
                   </p>
                 </div>
               </div>
@@ -572,11 +561,11 @@ export default function ProfilePage() {
               <div className="flex flex-wrap gap-2">
                 <Link href={localePath("/app/delivery")} className={buttonVariants({ variant: "outline" })}>
                   <Activity className="mr-2 h-4 w-4" />
-                  Delivery Monitor
+                  {t("actions.deliveryMonitor")}
                 </Link>
-                <Button variant="secondary" onClick={() => void handleCopy("Username", user.username)}>
+                <Button variant="secondary" onClick={() => void handleCopy(t("rows.username"), user.username)}>
                   <Copy className="mr-2 h-4 w-4" />
-                  Copy Username
+                  {t("actions.copyUsername")}
                 </Button>
               </div>
             </div>
@@ -586,7 +575,7 @@ export default function ProfilePage() {
             <Card className="rounded-2xl p-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <UserCircle2 className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Profile health</span>
+                <span className="text-xs uppercase tracking-[0.18em]">{t("stats.profileHealth")}</span>
               </div>
               <p className="mt-2 text-xl font-semibold">{completion}%</p>
               <Progress value={completion} className="mt-3 h-2" />
@@ -595,33 +584,35 @@ export default function ProfilePage() {
             <Card className="rounded-2xl p-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Clock3 className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Member since</span>
+                <span className="text-xs uppercase tracking-[0.18em]">{t("stats.memberSince")}</span>
               </div>
-              <p className="mt-2 font-semibold">{formatDate(user.created_at)}</p>
-              <p className="mt-2 text-xs text-muted-foreground">{formatRelativeTime(user.created_at, "Unknown")}</p>
+              <p className="mt-2 font-semibold">{formatDateLocalized(user.created_at, locale, commonT("notAvailable"))}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{formatRelativeTimeStrictLocalized(user.created_at, locale, commonT("unknown"))}</p>
             </Card>
 
             <Card className="rounded-2xl p-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Mail className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Email status</span>
+                <span className="text-xs uppercase tracking-[0.18em]">{t("stats.emailStatus")}</span>
               </div>
-              <p className="mt-2 font-semibold">{user.email?.trim() ? "Configured" : "Missing"}</p>
-              <p className="mt-2 text-xs text-muted-foreground break-all">{user.email?.trim() || "No email address on record."}</p>
+              <p className="mt-2 font-semibold">{user.email?.trim() ? t("status.configured") : t("status.missing")}</p>
+              <p className="mt-2 text-xs text-muted-foreground break-all">{user.email?.trim() || t("empty.noEmailAddress")}</p>
             </Card>
 
             <Card className="rounded-2xl p-4">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <ShieldCheck className="h-4 w-4" />
-                <span className="text-xs uppercase tracking-[0.18em]">Security</span>
+                <span className="text-xs uppercase tracking-[0.18em]">{t("stats.security")}</span>
               </div>
               <p className="mt-2 font-semibold">
-                {isSessionsLoading ? "Checking sessions..." : `${activeSessions.length} active`}
+                {isSessionsLoading ? t("status.checkingSessions") : t("status.activeCount", { count: activeSessions.length })}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
                 {soonestSessionExpiry
-                  ? `Next expiration ${format(soonestSessionExpiry, "PPP p")}`
-                  : "No active sessions found."}
+                  ? t("status.nextExpiration", {
+                      value: formatDateTimeLocalized(soonestSessionExpiry, locale, commonT("notAvailable")),
+                    })
+                  : t("status.noActiveSessions")}
               </p>
             </Card>
           </div>
@@ -629,14 +620,14 @@ export default function ProfilePage() {
           <div className="border-t border-border/60 p-6">
             <Tabs defaultValue="overview" className="w-full">
               <TabsList className="mb-4 w-full justify-start overflow-x-auto">
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="security">Security</TabsTrigger>
+                <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
+                <TabsTrigger value="security">{t("tabs.security")}</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview" className="mt-0">
                 <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
                   <Card className="rounded-2xl p-5">
-                    <h3 className="text-lg font-semibold">Account details</h3>
+                    <h3 className="text-lg font-semibold">{t("sections.accountDetails")}</h3>
                     <div className="mt-4 space-y-3">
                       {profileRows.map((row) => (
                         <div key={row.label} className="rounded-xl border border-border/60 bg-background/40 p-3">
@@ -650,7 +641,7 @@ export default function ProfilePage() {
                                 size="icon"
                                 variant="ghost"
                                 onClick={() => void handleCopy(row.label, row.copyValue)}
-                                aria-label={`Copy ${row.label}`}
+                                aria-label={t("actions.copyLabel", { label: row.label })}
                               >
                                 <Copy className="h-4 w-4" />
                               </Button>
@@ -660,18 +651,18 @@ export default function ProfilePage() {
                       ))}
 
                       <div className="rounded-xl border border-border/60 bg-background/40 p-3">
-                        <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Bio</p>
+                        <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{t("rows.bio")}</p>
                         <p className="mt-1 whitespace-pre-wrap text-sm font-medium">
-                          {user.bio?.trim() || "No bio set yet."}
+                          {user.bio?.trim() || t("empty.noBio")}
                         </p>
                       </div>
                     </div>
                   </Card>
 
                   <Card className="rounded-2xl p-5">
-                    <h3 className="text-lg font-semibold">Completion checklist</h3>
+                    <h3 className="text-lg font-semibold">{t("sections.completionChecklist")}</h3>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      {completedItems} of {checklist.length} key profile fields are currently filled.
+                      {t("completionSummary", { completed: completedItems, total: checklist.length })}
                     </p>
                     <Progress value={completion} className="mt-4 h-2" />
 
@@ -688,7 +679,7 @@ export default function ProfilePage() {
                             <p className="text-xs text-muted-foreground">{item.hint}</p>
                           </div>
                           <Badge variant={item.completed ? "default" : "outline"} className="ml-auto">
-                            {item.completed ? "Done" : "Missing"}
+                            {item.completed ? t("status.done") : t("status.missing")}
                           </Badge>
                         </div>
                       ))}
@@ -700,27 +691,29 @@ export default function ProfilePage() {
               <TabsContent value="security" className="mt-0">
                 <div className="grid gap-4 lg:grid-cols-2">
                   <Card className="rounded-2xl p-5">
-                    <h3 className="text-lg font-semibold">Session status</h3>
+                    <h3 className="text-lg font-semibold">{t("sections.sessionStatus")}</h3>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      Keep this list clean to reduce account exposure on old or shared devices.
+                      {t("sessionDescription")}
                     </p>
 
                     <div className="mt-4 space-y-3 text-sm">
                       <div className="flex items-center justify-between gap-4">
-                        <span className="text-muted-foreground">Active sessions</span>
+                        <span className="text-muted-foreground">{t("sessionRows.activeSessions")}</span>
                         <span className="font-medium">
-                          {isSessionsLoading ? "Loading..." : activeSessions.length}
+                          {isSessionsLoading ? commonT("loading") : activeSessions.length}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-4">
-                        <span className="text-muted-foreground">Next session expiry</span>
+                        <span className="text-muted-foreground">{t("sessionRows.nextExpiry")}</span>
                         <span className="text-right font-medium">
-                          {soonestSessionExpiry ? format(soonestSessionExpiry, "PPP p") : "Not available"}
+                          {soonestSessionExpiry
+                            ? formatDateTimeLocalized(soonestSessionExpiry, locale, commonT("notAvailable"))
+                            : commonT("notAvailable")}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-4">
-                        <span className="text-muted-foreground">Last profile update</span>
-                        <span className="font-medium">{formatDateTime(user.updated_at, "No updates yet")}</span>
+                        <span className="text-muted-foreground">{t("sessionRows.lastProfileUpdate")}</span>
+                        <span className="font-medium">{formatDateTimeLocalized(user.updated_at, locale, t("noUpdatesYet"))}</span>
                       </div>
                     </div>
 
@@ -728,45 +721,45 @@ export default function ProfilePage() {
                       <Link href={localePath("/settings/sessions")}>
                         <Button className="w-full">
                           <ShieldCheck className="mr-2 h-4 w-4" />
-                          Open Session Settings
+                          {t("actions.openSessionSettings")}
                         </Button>
                       </Link>
                     </div>
                   </Card>
 
                   <Card className="rounded-2xl p-5">
-                    <h3 className="text-lg font-semibold">Edit profile</h3>
+                    <h3 className="text-lg font-semibold">{t("sections.editProfile")}</h3>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      Keep your identity details accurate for mentions, invites, and teammates.
+                      {t("editDescription")}
                     </p>
                     <form className="mt-4 space-y-3" onSubmit={handleSaveProfile}>
                       <div>
                         <label htmlFor="display-name" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                          Display name
+                          {t("fields.displayName")}
                         </label>
                         <Input
                           id="display-name"
                           value={formState.display_name}
                           onChange={(event) => handleFormChange("display_name", event.target.value)}
-                          placeholder="How your name appears in chats"
+                          placeholder={t("fields.displayNamePlaceholder")}
                           maxLength={128}
                         />
                       </div>
                       <div>
                         <label htmlFor="email" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                          Email
+                          {t("fields.email")}
                         </label>
                         <Input
                           id="email"
                           type="email"
                           value={formState.email}
                           onChange={(event) => handleFormChange("email", event.target.value)}
-                          placeholder="name@example.com"
+                          placeholder={t("fields.emailPlaceholder")}
                         />
                       </div>
                       <div>
                         <label htmlFor="avatar-file" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                          Profile picture
+                          {t("fields.profilePicture")}
                         </label>
                         <Input
                           id="avatar-file"
@@ -778,13 +771,13 @@ export default function ProfilePage() {
                           }}
                         />
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {avatarFile ? `Selected: ${avatarFile.name}` : "Upload an image to use as your avatar."}
+                          {avatarFile ? t("fields.selectedFile", { name: avatarFile.name }) : t("fields.avatarHint")}
                         </p>
                         {avatarFile && avatarPreviewUrl ? (
                           <div className="mt-2">
                             <img
                               src={avatarPreviewUrl}
-                              alt="Selected profile avatar preview"
+                              alt={t("fields.avatarPreviewAlt")}
                               className="h-16 w-16 rounded-full border border-border/70 object-cover"
                             />
                           </div>
@@ -792,20 +785,20 @@ export default function ProfilePage() {
                       </div>
                       <div>
                         <label htmlFor="bio" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-                          Bio
+                          {t("fields.bio")}
                         </label>
                         <Textarea
                           id="bio"
                           value={formState.bio}
                           onChange={(event) => handleFormChange("bio", event.target.value)}
-                          placeholder="Share your role, focus, or current responsibilities."
+                          placeholder={t("fields.bioPlaceholder")}
                           maxLength={2000}
                           rows={4}
                         />
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button type="submit" disabled={updateProfile.isPending || uploadAvatar.isPending || !hasProfileChanges}>
-                          {updateProfile.isPending || uploadAvatar.isPending ? "Saving..." : "Save Changes"}
+                          {updateProfile.isPending || uploadAvatar.isPending ? commonT("actions.saving") : t("actions.saveChanges")}
                         </Button>
                         <Button
                           type="button"
@@ -813,7 +806,7 @@ export default function ProfilePage() {
                           onClick={handleResetForm}
                           disabled={updateProfile.isPending || uploadAvatar.isPending || !hasProfileChanges}
                         >
-                          Reset
+                          {commonT("actions.reset")}
                         </Button>
                       </div>
                     </form>

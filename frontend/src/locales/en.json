@@ -1,6 +1,830 @@
 {
   "app": {
     "name": "ChatCore",
-    "tagline": "Real-time team messaging"
+    "tagline": "Distributed pub/sub messaging"
+  },
+  "common": {
+    "allowed": "Allowed",
+    "decorativeBackground": "Abstract elegant background",
+    "loading": "Loading...",
+    "no": "No",
+    "notAvailable": "Not available",
+    "tryAgain": "Please try again.",
+    "tryAgainLater": "Please try again in a moment.",
+    "unknown": "Unknown",
+    "yes": "Yes",
+    "actions": {
+      "back": "Back",
+      "backToApp": "← Back to App",
+      "cancel": "Cancel",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing...",
+      "reset": "Reset",
+      "retry": "Retry",
+      "retrying": "Retrying",
+      "returnToApp": "Return to App",
+      "saveChanges": "Save changes",
+      "saving": "Saving...",
+      "tryAgain": "Try again"
+    },
+    "joinMode": {
+      "approvalRequired": "Approval required",
+      "inviteOnly": "Invite only",
+      "open": "Open"
+    },
+    "language": {
+      "current": "Current language: {locale}",
+      "names": {
+        "ar": "Arabic",
+        "en": "English"
+      },
+      "switchTo": "Switch to {locale}"
+    },
+    "roles": {
+      "admin": "Admin",
+      "member": "Member",
+      "none": "No access",
+      "owner": "Owner",
+      "pending": "Pending"
+    },
+    "theme": {
+      "switchToDark": "Switch to dark mode",
+      "switchToLight": "Switch to light mode"
+    },
+    "visibility": {
+      "private": "Private",
+      "public": "Public"
+    }
+  },
+  "ui": {
+    "close": "Close",
+    "loading": "Loading",
+    "breadcrumb": {
+      "label": "Breadcrumb",
+      "more": "More"
+    },
+    "carousel": {
+      "next": "Next slide",
+      "previous": "Previous slide",
+      "region": "carousel",
+      "slide": "slide"
+    },
+    "pagination": {
+      "label": "Pagination",
+      "morePages": "More pages",
+      "next": "Next",
+      "nextPage": "Go to next page",
+      "previous": "Previous",
+      "previousPage": "Go to previous page"
+    },
+    "sidebar": {
+      "mobileDescription": "Displays the mobile sidebar.",
+      "title": "Sidebar",
+      "toggle": "Toggle sidebar"
+    }
+  },
+  "home": {
+    "actions": {
+      "alreadyHaveAccount": "I already have an account",
+      "continue": "Continue to your channels",
+      "profile": "Manage profile",
+      "start": "Start messaging now"
+    },
+    "eyebrow": "Built for focused channel delivery",
+    "features": {
+      "0": {
+        "description": "Realtime delivery keeps subscribers in sync without refreshes.",
+        "title": "Live publish/subscribe"
+      },
+      "1": {
+        "description": "Role-aware access and invite controls protect every channel.",
+        "title": "Private by default"
+      },
+      "2": {
+        "description": "Persistent history and backfill make missed messages easy to recover.",
+        "title": "Reliable everywhere"
+      }
+    },
+    "nav": {
+      "createAccount": "Create account",
+      "login": "Log in",
+      "openApp": "Open app"
+    },
+    "preview": {
+      "channels": {
+        "engineering": "engineering",
+        "product": "product",
+        "support": "support"
+      },
+      "live": "Live",
+      "messages": {
+        "engineering": "WebSocket events are stable. Ready for demo.",
+        "product": "Landing page shipped. Feedback is coming in fast.",
+        "support": "Resolution time is down 32% this week."
+      },
+      "title": "Workspace preview"
+    },
+    "subtitle": "Create channels, publish messages, manage subscribers, and demonstrate realtime pub/sub delivery with a workspace your team can actually use.",
+    "title": "Welcome. Publish and subscribe with clarity, not chaos.",
+    "titleWithName": "Welcome, {username}. Publish and subscribe with clarity, not chaos."
+  },
+  "auth": {
+    "login": {
+      "createOne": "Create one",
+      "error": "Failed to login. Please check your credentials.",
+      "noAccount": "Don't have an account?",
+      "password": "Password",
+      "passwordPlaceholder": "Enter your password",
+      "submit": "Sign in",
+      "submitting": "Signing in...",
+      "subtitle": "Sign in to continue your channel conversations",
+      "title": "Welcome back",
+      "username": "Username",
+      "usernamePlaceholder": "Enter your username"
+    },
+    "register": {
+      "email": "Email",
+      "emailPlaceholder": "name@example.com",
+      "error": "Failed to register.",
+      "hasAccount": "Already have an account?",
+      "password": "Password",
+      "passwordPlaceholder": "Create a password",
+      "signIn": "Sign in",
+      "submit": "Sign up",
+      "submitting": "Creating account...",
+      "subtitle": "Join ChatCore today",
+      "title": "Create account",
+      "username": "Username",
+      "usernamePlaceholder": "Choose a username"
+    }
+  },
+  "appShell": {
+    "connection": {
+      "connecting": "Connecting to chat...",
+      "reconnecting": "Disconnected. Reconnecting..."
+    },
+    "empty": {
+      "description": "Select a channel from the sidebar to start messaging, or create a new one to gather your team.",
+      "title": "Welcome to ChatCore"
+    }
+  },
+  "sidebar": {
+    "createChannel": "Create channel",
+    "empty": {
+      "discoverSearch": "No matching discoverable channels",
+      "joined": "No joined channels yet",
+      "joinedSearch": "No matching member channels",
+      "myChannels": "No owned or admin channels yet",
+      "myChannelsSearch": "No matching owned or admin channels"
+    },
+    "logout": "Log out",
+    "searchPlaceholder": "Search channels...",
+    "sections": {
+      "channels": "Channels",
+      "discover": "Discover",
+      "myChannels": "My Channels"
+    }
+  },
+  "createChannel": {
+    "actions": {
+      "create": "Create channel",
+      "creating": "Creating..."
+    },
+    "description": "Set the tone with a clear name, a little context, and the right access model for your team.",
+    "eyebrow": "New channel",
+    "fields": {
+      "description": "Description",
+      "descriptionPlaceholder": "What belongs here, who should use it, and how often the team checks in.",
+      "joinAccess": "Join access",
+      "joinModePlaceholder": "Choose join mode",
+      "name": "Channel name",
+      "nameHint": "Keep it short and recognizable so people can find it fast.",
+      "namePlaceholder": "Marketing standup",
+      "visibility": "Visibility",
+      "visibilityPlaceholder": "Choose visibility"
+    },
+    "footerHint": "You can update these settings later from channel details.",
+    "joinMode": {
+      "approvalDescription": "Requests are visible before someone is admitted.",
+      "inviteDescription": "Only direct invites can grant access.",
+      "openDescription": "People can join immediately."
+    },
+    "presets": {
+      "community": {
+        "description": "Public and easy to join for fast-moving team spaces.",
+        "title": "Open room"
+      },
+      "private": {
+        "description": "Invite-only access for leadership, operations, or sensitive work.",
+        "title": "Private room"
+      },
+      "screened": {
+        "description": "Public discovery with approvals before people enter.",
+        "title": "Screened room"
+      }
+    },
+    "summary": {
+      "approvalRequired": "New joiners will wait for approval before entering.",
+      "inviteOnly": "Membership is controlled strictly through invitations.",
+      "open": "Anyone who sees it can join immediately.",
+      "privateDescription": "Only invited members will know this channel exists.",
+      "privateTitle": "Kept intentionally private",
+      "publicDescription": "People across the workspace will be able to see this channel in discovery.",
+      "publicTitle": "Easy to discover"
+    },
+    "title": "Create a space people want to join",
+    "toasts": {
+      "createFailedTitle": "Could not create channel",
+      "createdDescription": "{name} is ready for your team.",
+      "createdTitle": "Channel created",
+      "nameRequiredDescription": "Give the new channel a short, clear name first.",
+      "nameRequiredTitle": "Channel name required"
+    },
+    "visibility": {
+      "privateDescription": "Only invited people can find and access this channel.",
+      "publicDescription": "Anyone in the workspace can discover this channel."
+    }
+  },
+  "channelView": {
+    "actions": {
+      "copyText": "Copy text",
+      "hideReplies": "Hide replies",
+      "jumpToParent": "Jump to parent message",
+      "reply": "Reply",
+      "showReplies": "Show replies"
+    },
+    "aria": {
+      "addReaction": "Add reaction {emoji} on message #{seq}",
+      "addReactionMenu": "Add reaction to message #{seq}",
+      "attachFile": "Attach file",
+      "cancelReply": "Cancel reply",
+      "hideRepliesFor": "Hide replies for message #{seq}",
+      "openDetails": "Open channel details",
+      "openOptions": "Open options for message #{seq}",
+      "reactWith": "React with {emoji}",
+      "removeReaction": "Remove reaction {emoji} on message #{seq}",
+      "replyToMessage": "Reply to message #{seq}",
+      "showRepliesFor": "Show replies for message #{seq}"
+    },
+    "composer": {
+      "enter": "Enter",
+      "forNewLine": "for new line",
+      "messagePlaceholder": "Message {name}...",
+      "replyPlaceholder": "Write a reply...",
+      "send": "Send message",
+      "shiftEnter": "Shift + Enter",
+      "toSend": "to send"
+    },
+    "empty": {
+      "description": "This is the start of the channel history.",
+      "title": "Welcome to {name}!"
+    },
+    "errors": {
+      "notFound": "Channel not found",
+      "openFailed": "We couldn't open this channel right now."
+    },
+    "header": {
+      "members": "{count, plural, one {# member} other {# members}}"
+    },
+    "joinPrompt": {
+      "description": "Join {name} to see history and start messaging with the team.",
+      "join": "Join Channel",
+      "joining": "Joining...",
+      "title": "You are not in this channel"
+    },
+    "messages": {
+      "deleted": "Message deleted",
+      "hideReplyCount": "Hide {count, plural, one {# reply} other {# replies}}",
+      "member": "Member",
+      "memberWithId": "Member {id}",
+      "message": "Message",
+      "replyingTo": "Replying to",
+      "showReplyCount": "Show {count, plural, one {# reply} other {# replies}}",
+      "snippet": {
+        "attachments": "[{count, plural, one {# attachment} other {# attachments}}]",
+        "deleted": "Original message was deleted.",
+        "empty": "Empty message",
+        "notLoaded": "Original message is not loaded in this view.",
+        "structured": "Structured message"
+      },
+      "you": "You"
+    },
+    "toasts": {
+      "clipboardBlocked": "Clipboard access was blocked by the browser.",
+      "copiedDescription": "The message text is now in your clipboard.",
+      "copiedTitle": "Message copied",
+      "copyFailedTitle": "Copy failed",
+      "nothingToCopyDescription": "Only text content can be copied from this message.",
+      "nothingToCopyTitle": "Nothing to copy",
+      "reactBlockedDescription": "Join this channel to react to messages.",
+      "reactBlockedTitle": "Cannot react right now"
+    }
+  },
+  "invite": {
+    "accept": "Accept Invite",
+    "grantAccess": "This invite grants access to a {visibility} channel.",
+    "invalidDescription": "This invite link is invalid, expired, or no longer available.",
+    "invalidTitle": "Invalid Invite",
+    "joinChannel": "Join Channel",
+    "joining": "Joining..."
+  },
+  "sessions": {
+    "description": "Manage devices currently logged into your account",
+    "empty": "No active sessions were returned for this account.",
+    "expires": "Expires",
+    "ipAddress": "IP Address",
+    "revokeAccess": "Revoke Access",
+    "revoked": "Revoked",
+    "started": "Started",
+    "terminateAll": "Terminate All Sessions",
+    "title": "Active Sessions",
+    "unknown": "Unknown",
+    "unknownDevice": "Unknown Device"
+  },
+  "profile": {
+    "actions": {
+      "copyLabel": "Copy {label}",
+      "copyUsername": "Copy Username",
+      "deliveryMonitor": "Delivery Monitor",
+      "openSessionSettings": "Open Session Settings",
+      "saveChanges": "Save Changes"
+    },
+    "badges": {
+      "activeSessions": "{count, plural, one {# active session} other {# active sessions}}",
+      "complete": "{percent}% complete",
+      "personal": "Personal profile"
+    },
+    "checklist": {
+      "avatar": {
+        "hint": "Helps teammates find you quickly in busy conversations.",
+        "label": "Avatar image"
+      },
+      "bio": {
+        "hint": "Adds role context so teammates know what you own.",
+        "label": "Bio"
+      },
+      "displayName": {
+        "hint": "Makes your identity clearer across channels and mentions.",
+        "label": "Display name"
+      },
+      "email": {
+        "hint": "Required for account recovery and invite flows.",
+        "label": "Email address"
+      }
+    },
+    "completionSummary": "{completed} of {total} key profile fields are currently filled.",
+    "description": "Review your account details and monitor profile health.",
+    "editDescription": "Keep your identity details accurate for mentions, invites, and teammates.",
+    "empty": {
+      "noBio": "No bio set yet.",
+      "noDisplayName": "No display name set",
+      "noEmail": "No email on record",
+      "noEmailAddress": "No email address on record."
+    },
+    "errors": {
+      "avatarMissingUrl": "Upload succeeded but no avatar URL was returned.",
+      "avatarUpload": "Could not upload avatar image.",
+      "signInBeforeUpload": "You need to be signed in before uploading a profile image."
+    },
+    "fields": {
+      "avatarHint": "Upload an image to use as your avatar.",
+      "avatarPreviewAlt": "Selected profile avatar preview",
+      "bio": "Bio",
+      "bioPlaceholder": "Share your role, focus, or current responsibilities.",
+      "displayName": "Display name",
+      "displayNamePlaceholder": "How your name appears in chats",
+      "email": "Email",
+      "emailPlaceholder": "name@example.com",
+      "profilePicture": "Profile picture",
+      "selectedFile": "Selected: {name}"
+    },
+    "lastServerUpdate": "Last server update {value}",
+    "lastSynced": "Last synced {value}",
+    "noUpdatesYet": "No updates yet",
+    "rows": {
+      "bio": "Bio",
+      "displayName": "Display name",
+      "email": "Email",
+      "userId": "User ID",
+      "username": "Username"
+    },
+    "sections": {
+      "accountDetails": "Account details",
+      "completionChecklist": "Completion checklist",
+      "editProfile": "Edit profile",
+      "sessionStatus": "Session status"
+    },
+    "sessionDescription": "Keep this list clean to reduce account exposure on old or shared devices.",
+    "sessionRows": {
+      "activeSessions": "Active sessions",
+      "lastProfileUpdate": "Last profile update",
+      "nextExpiry": "Next session expiry"
+    },
+    "stats": {
+      "emailStatus": "Email status",
+      "memberSince": "Member since",
+      "profileHealth": "Profile health",
+      "security": "Security"
+    },
+    "status": {
+      "activeCount": "{count} active",
+      "checkingSessions": "Checking sessions...",
+      "configured": "Configured",
+      "done": "Done",
+      "missing": "Missing",
+      "nextExpiration": "Next expiration {value}",
+      "noActiveSessions": "No active sessions found."
+    },
+    "tabs": {
+      "overview": "Overview",
+      "security": "Security"
+    },
+    "title": "Profile",
+    "toasts": {
+      "avatarUploadFailedDescription": "We couldn't upload your profile image.",
+      "avatarUploadFailedTitle": "Avatar upload failed",
+      "clipboardBlocked": "Clipboard access was blocked by the browser.",
+      "copiedDescription": "It is now in your clipboard.",
+      "copiedTitle": "{label} copied",
+      "copyFailedTitle": "Copy failed",
+      "copyMissingDescription": "Set {label} first, then try again.",
+      "copyMissingTitle": "No {label} available",
+      "exportFailedDescription": "The profile snapshot could not be generated.",
+      "exportFailedTitle": "Export failed",
+      "exportedDescription": "A JSON snapshot has been downloaded.",
+      "exportedTitle": "Profile exported",
+      "noChangesDescription": "Update a field first, then try again.",
+      "noChangesTitle": "No changes to save",
+      "refreshFailedDescription": "We couldn't refresh your profile right now.",
+      "refreshFailedTitle": "Refresh failed",
+      "refreshedDescription": "Your account details are now synced with the latest server data.",
+      "refreshedTitle": "Profile refreshed",
+      "updateFailedDescription": "We couldn't save your profile changes.",
+      "updateFailedTitle": "Update failed",
+      "updatedDescription": "Your profile changes were saved successfully.",
+      "updatedTitle": "Profile updated"
+    }
+  },
+  "delivery": {
+    "actions": {
+      "retryAll": "Retry all"
+    },
+    "description": "Outbox reliability status for channels you manage.",
+    "errors": {
+      "loadDescription": "Delivery monitor is available to channel owners and admins.",
+      "loadTitle": "Could not load delivery data"
+    },
+    "stats": {
+      "dead": "Dead",
+      "failed": "Failed",
+      "pending": "Pending",
+      "published": "Published",
+      "publishing": "Publishing",
+      "retrying": "Retrying"
+    },
+    "status": {
+      "deadLettered": "dead-lettered",
+      "failed": "failed",
+      "pending": "pending",
+      "published": "published",
+      "publishing": "publishing",
+      "retryScheduled": "retry scheduled"
+    },
+    "table": {
+      "action": "Action",
+      "attempts": "Attempts",
+      "channel": "Channel",
+      "lastError": "Last error",
+      "message": "message",
+      "nextRetry": "Next retry",
+      "noError": "No error recorded",
+      "notScheduled": "Not scheduled",
+      "status": "Status",
+      "type": "Type"
+    },
+    "tables": {
+      "deadLetteredEmpty": "No dead-lettered deliveries.",
+      "deadLetteredTitle": "Dead-Lettered",
+      "failedEmpty": "No failed or retry-scheduled deliveries.",
+      "failedTitle": "Failed / Retry Scheduled"
+    },
+    "title": "Delivery Monitor",
+    "toasts": {
+      "alreadyActiveDescription": "No status change was needed.",
+      "alreadyActiveTitle": "Delivery already active",
+      "retryAllFailedTitle": "Retry all failed",
+      "retryAllSavedDescription": "{count, plural, one {# delivery record queued.} other {# delivery records queued.}}",
+      "retryAllSavedTitle": "Retry request saved",
+      "retryFailedTitle": "Retry failed",
+      "retryQueuedDescription": "The worker will pick it up on the next poll.",
+      "retryQueuedTitle": "Delivery queued for retry"
+    }
+  },
+  "channelDetails": {
+    "actions": {
+      "approve": "Approve",
+      "backToChannel": "← Back to channel",
+      "demote": "Demote",
+      "join": "Join Channel",
+      "joining": "Joining...",
+      "leave": "Leave Channel",
+      "leaving": "Leaving...",
+      "openEventLog": "Open event log",
+      "promote": "Promote",
+      "remove": "Remove",
+      "savePermissions": "Save permissions"
+    },
+    "description": "Overview, membership status, and access controls for this channel.",
+    "editDescription": "Settings for members who can edit channel profile and access behavior.",
+    "editRestricted": "Editing is currently restricted to the owner or admins with edit permission.",
+    "empty": {
+      "noDescription": "No description has been added for this channel yet.",
+      "noEmailAvailable": "No email available",
+      "noMembers": "No members to display.",
+      "noPendingRequests": "No pending requests right now."
+    },
+    "errors": {
+      "avatarMissingUrl": "Upload succeeded but no avatar URL was returned.",
+      "avatarUpload": "Could not upload channel avatar image.",
+      "loadDescription": "The channel may not exist anymore, or your session needs to be refreshed.",
+      "loadTitle": "We couldn't load this channel",
+      "signInBeforeUpload": "You need to be signed in before uploading a channel image."
+    },
+    "eventLogDescription": "Review recent security and system events for this channel.",
+    "fields": {
+      "avatarHint": "Choose an image file to update the channel avatar.",
+      "avatarPreviewAlt": "Selected channel avatar preview",
+      "avatarUpload": "Avatar upload",
+      "created": "Created",
+      "description": "Description",
+      "joinMode": "Join mode",
+      "joinPolicy": "Join policy",
+      "lastActivity": "Last activity",
+      "name": "Name",
+      "selectedFile": "Selected: {name}",
+      "updated": "Updated",
+      "visibility": "Visibility"
+    },
+    "membersDescription": "Manage pending requests, remove access, and owner-only role promotions.",
+    "permissions": {
+      "approve": "Approve requests",
+      "editChannel": "Edit channel",
+      "invite": "Invite members",
+      "manageMembers": "Manage members",
+      "publish": "Publish messages"
+    },
+    "sections": {
+      "adminPermissions": "Admin permissions",
+      "currentMembers": "Current members",
+      "editChannel": "Edit channel",
+      "eventLog": "Event log",
+      "membersRoles": "Members & roles",
+      "overview": "Channel overview",
+      "pendingRequests": "Pending requests",
+      "yourAccess": "Your access"
+    },
+    "stats": {
+      "access": "Access",
+      "members": "Members",
+      "pending": "Pending",
+      "unread": "Unread"
+    },
+    "title": "Channel Details",
+    "toasts": {
+      "adminDemotedDescription": "{username} is now a member.",
+      "adminDemotedTitle": "Admin demoted",
+      "approveFailedTitle": "Could not approve request",
+      "avatarUploadFailedTitle": "Could not upload avatar",
+      "demoteFailedTitle": "Could not demote admin",
+      "memberPromotedDescription": "{username} is now an admin.",
+      "memberPromotedTitle": "Member promoted",
+      "memberRemovedDescription": "{username} no longer has access.",
+      "memberRemovedTitle": "Member removed",
+      "noChangesDescription": "Update one or more fields before saving.",
+      "noChangesTitle": "No changes to save",
+      "permissionsFailedTitle": "Could not update permissions",
+      "permissionsUpdatedDescription": "{username}'s admin permissions were saved.",
+      "permissionsUpdatedTitle": "Permissions updated",
+      "promoteFailedTitle": "Could not promote member",
+      "removeMemberFailedTitle": "Could not remove member",
+      "removeRequestFailedTitle": "Could not remove request",
+      "requestApprovedDescription": "{username} is now a member.",
+      "requestApprovedTitle": "Request approved",
+      "requestRemovedDescription": "{username} is no longer pending.",
+      "requestRemovedTitle": "Request removed",
+      "updateFailedTitle": "Could not update channel",
+      "updatedDescription": "Channel settings were saved successfully.",
+      "updatedTitle": "Channel updated"
+    }
+  },
+  "eventLog": {
+    "actions": {
+      "backToDetails": "← Back to details",
+      "verifyIntegrity": "Verify integrity"
+    },
+    "description": "Recent security and system events for {name}.",
+    "empty": "No events recorded yet for this channel.",
+    "errors": {
+      "loadChannelDescription": "The channel may not exist anymore, or your session needs to be refreshed.",
+      "loadChannelTitle": "We couldn't load this channel",
+      "loadEventsFailed": "Could not load event log. Please try again.",
+      "unavailableDescription": "You need member-management permission to view audit events for this channel.",
+      "unavailableTitle": "Event log unavailable",
+      "verifyFailed": "Could not verify audit integrity. Please try again."
+    },
+    "events": {
+      "brokerDeadLettered": {
+        "description": "RabbitMQ delivery failed too many times and moved to the dead-letter flow.",
+        "title": "Broker delivery dead-lettered"
+      },
+      "brokerRetry": {
+        "description": "RabbitMQ delivery failed temporarily. The worker scheduled another attempt.",
+        "title": "Broker retry scheduled"
+      },
+      "channelCreated": {
+        "description": "created",
+        "title": "Channel created"
+      },
+      "channelDeleted": {
+        "description": "deleted",
+        "title": "Channel deleted"
+      },
+      "channelUpdated": {
+        "description": "changed the channel settings for",
+        "title": "Channel settings updated"
+      },
+      "default": {
+        "description": "Audit event recorded for"
+      },
+      "decryptionFailed": {
+        "description": "A stored message could not be decrypted for delivery.",
+        "title": "Message decryption failed"
+      },
+      "encryptionFailed": {
+        "after": "could not be encrypted before storage.",
+        "before": "A message from",
+        "title": "Message encryption failed"
+      },
+      "inviteAccepted": {
+        "description": "accepted a channel invite",
+        "title": "Invite accepted"
+      },
+      "inviteCreated": {
+        "description": "created a channel invite",
+        "title": "Invite created"
+      },
+      "inviteRevoked": {
+        "description": "revoked a channel invite",
+        "title": "Invite revoked"
+      },
+      "manualRetry": {
+        "description": "asked the worker to retry a failed delivery job.",
+        "title": "Manual retry requested"
+      },
+      "memberAdded": {
+        "description": "added",
+        "title": "Member added"
+      },
+      "memberDemoted": {
+        "description": "changed back to member:",
+        "title": "Member demoted"
+      },
+      "memberJoined": {
+        "as": "as",
+        "joined": "joined",
+        "title": "Member joined"
+      },
+      "memberLeft": {
+        "description": "left",
+        "title": "Member left"
+      },
+      "memberPromoted": {
+        "description": "promoted to admin:",
+        "title": "Member promoted"
+      },
+      "memberRemoved": {
+        "description": "removed from the channel:",
+        "title": "Member removed"
+      },
+      "messagePublished": {
+        "description": "published",
+        "title": "Message published"
+      },
+      "permissionsUpdated": {
+        "description": "updated permissions for",
+        "title": "Admin permissions updated"
+      },
+      "publishBlocked": {
+        "description": "tried to publish without permission.",
+        "title": "Publish blocked"
+      },
+      "readBlocked": {
+        "description": "tried to read channel data without permission.",
+        "title": "Read blocked"
+      },
+      "requestApproved": {
+        "description": "approved",
+        "title": "Join request approved"
+      },
+      "slugAdjusted": {
+        "description": "The requested channel slug was already taken, so a safe alternative was assigned.",
+        "title": "Channel slug adjusted"
+      }
+    },
+    "fields": {
+      "actor": "Actor",
+      "adminPermissions": "Admin permissions",
+      "attempts": "Attempts",
+      "avatar": "Avatar",
+      "brokerRoute": "Broker route",
+      "channel": "Channel",
+      "channelSlug": "Channel slug",
+      "clientRetryToken": "Client retry token",
+      "contentType": "Content type",
+      "deleted": "Deleted",
+      "deliveryJob": "Delivery job",
+      "edited": "Edited",
+      "fileName": "File name",
+      "fileSize": "File size",
+      "invite": "Invite",
+      "joinMode": "Join mode",
+      "lastError": "Last error",
+      "maxAttempts": "Max attempts",
+      "message": "Message",
+      "messageData": "Message data",
+      "messageNumber": "Message number",
+      "messageText": "Message text",
+      "newRole": "New role",
+      "pinned": "Pinned",
+      "previousAttempts": "Previous attempts",
+      "previousStatus": "Previous status",
+      "replyTo": "Reply to",
+      "retryDelay": "Retry delay",
+      "sender": "Sender",
+      "senderDisplayName": "Sender display name",
+      "senderUsername": "Sender username",
+      "targetMember": "Target member",
+      "updated": "Updated",
+      "upload": "Upload",
+      "user": "User"
+    },
+    "integrity": {
+      "badge": "Audit integrity: {status}",
+      "broken": "Broken",
+      "checkFailed": "Check failed",
+      "checkedEvents": "Checked events",
+      "checking": "Checking...",
+      "damagedEntry": "A damaged audit entry was found in this channel.",
+      "failed": "integrity check failed",
+      "lastHash": "Last hash",
+      "notChecked": "Not checked",
+      "notInitialized": "Not initialized",
+      "scope": "Scope",
+      "status": "Status",
+      "verified": "Verified"
+    },
+    "latestEvents": "Showing the latest {count} channel-scoped events.",
+    "moreAvailable": "More events are available through the API.",
+    "references": {
+      "attachments": "{count, plural, one {# attachment} other {# attachments}}",
+      "bySender": "by {sender}",
+      "channelBrokerRoute": "{name} broker route",
+      "clientRetryToken": "Client retry token",
+      "deadLetterBrokerRoute": "Dead-letter broker route",
+      "deletedMessage": "Deleted message",
+      "deliveryJob": "Delivery job",
+      "emptyMessage": "Empty message",
+      "internalReference": "Internal reference",
+      "inviteLink": "Invite link",
+      "jsonMessage": "JSON message",
+      "loadingMessage": "Loading message",
+      "loadingUser": "Loading user",
+      "message": "Message",
+      "messageNumber": "Message #{seq}",
+      "system": "System",
+      "typedMessage": "{type} message",
+      "unknownActor": "Unknown actor",
+      "unknownMember": "Unknown member",
+      "unknownUser": "Unknown user",
+      "uploadFile": "Upload file",
+      "userDeliveryRoute": "User delivery route",
+      "userUnavailable": "User not available"
+    },
+    "structuredDetails": "Structured details",
+    "title": "Event Log",
+    "values": {
+      "encryptedJsonContent": "Encrypted JSON message content",
+      "noAdditionalDetails": "No additional details were recorded for this event.",
+      "noDetails": "No details",
+      "none": "None",
+      "notSet": "Not set",
+      "privateUploadLink": "Private upload link",
+      "seconds": "{count, plural, one {# second} other {# seconds}}",
+      "storedMessageText": "Stored message text"
+    }
+  },
+  "notFound": {
+    "description": "The requested page does not exist in this interface.",
+    "title": "404 Page Not Found"
   }
 }

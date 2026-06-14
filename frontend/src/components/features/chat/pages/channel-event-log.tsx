@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { useLocale, useTranslations } from "next-intl";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -38,6 +38,7 @@ import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { cn } from "@/lib/utils";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
 import { apiClient } from "@/services/api/client";
+import { formatDateTimeLocalized, formatNumberLocalized } from "@/lib/i18n-format";
 import type { AttachmentItem, ChannelResponse, EventIntegrityResponse, EventResponse, MessageResponse, User } from "@/types/api";
 
 const EVENT_LIMIT = 100;
@@ -55,6 +56,9 @@ type ReferenceMaps = {
   messages: Map<string, MessageResponse>;
   loadingMessageIds: Set<string>;
   uploads: Map<string, AttachmentItem>;
+  locale: string;
+  t: ReturnType<typeof useTranslations>;
+  commonT: ReturnType<typeof useTranslations>;
 };
 
 type ReferenceKind = "user" | "channel" | "message" | "upload" | "invite" | "delivery" | "client" | "internal";
@@ -80,13 +84,6 @@ const DELIVERY_ID_KEYS = new Set(["outbox_id", "delivery_id"]);
 const CLIENT_ID_KEYS = new Set(["client_msg_id"]);
 
 const HIDDEN_TECHNICAL_KEYS = new Set(["id"]);
-
-function formatDateTime(value?: string | null) {
-  if (!value) return "Not available";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not available";
-  return format(date, "PPP p");
-}
 
 function shortHash(value?: string | null) {
   if (!value) return "-";
@@ -114,43 +111,44 @@ function titleCase(value: string) {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function humanizeKey(key: string) {
+function humanizeKey(key: string, references: ReferenceMaps) {
+  const t = references.t;
   const labels: Record<string, string> = {
-    actor_user_id: "Actor",
-    admin_permissions: "Admin permissions",
-    attempt_count: "Attempts",
-    avatar_url: "Avatar",
-    channel_id: "Channel",
-    channel_slug: "Channel slug",
-    client_msg_id: "Client retry token",
-    content_json: "Message data",
-    content_text: "Message text",
-    content_type: "Content type",
-    deleted_at: "Deleted",
-    edited_at: "Edited",
-    file_id: "Upload",
-    filename: "File name",
-    invite_id: "Invite",
-    is_pinned: "Pinned",
-    join_mode: "Join mode",
-    last_error: "Last error",
-    max_attempts: "Max attempts",
-    message_id: "Message",
-    new_role: "New role",
-    outbox_id: "Delivery job",
-    previous_attempt_count: "Previous attempts",
-    previous_status: "Previous status",
-    reply_to_message_id: "Reply to",
-    retry_in_seconds: "Retry delay",
-    routing_key: "Broker route",
-    sender_display_name: "Sender display name",
-    sender_user_id: "Sender",
-    sender_username: "Sender username",
-    seq_id: "Message number",
-    size_bytes: "File size",
-    target_user_id: "Target member",
-    updated_at: "Updated",
-    user_id: "User",
+    actor_user_id: t("fields.actor"),
+    admin_permissions: t("fields.adminPermissions"),
+    attempt_count: t("fields.attempts"),
+    avatar_url: t("fields.avatar"),
+    channel_id: t("fields.channel"),
+    channel_slug: t("fields.channelSlug"),
+    client_msg_id: t("fields.clientRetryToken"),
+    content_json: t("fields.messageData"),
+    content_text: t("fields.messageText"),
+    content_type: t("fields.contentType"),
+    deleted_at: t("fields.deleted"),
+    edited_at: t("fields.edited"),
+    file_id: t("fields.upload"),
+    filename: t("fields.fileName"),
+    invite_id: t("fields.invite"),
+    is_pinned: t("fields.pinned"),
+    join_mode: t("fields.joinMode"),
+    last_error: t("fields.lastError"),
+    max_attempts: t("fields.maxAttempts"),
+    message_id: t("fields.message"),
+    new_role: t("fields.newRole"),
+    outbox_id: t("fields.deliveryJob"),
+    previous_attempt_count: t("fields.previousAttempts"),
+    previous_status: t("fields.previousStatus"),
+    reply_to_message_id: t("fields.replyTo"),
+    retry_in_seconds: t("fields.retryDelay"),
+    routing_key: t("fields.brokerRoute"),
+    sender_display_name: t("fields.senderDisplayName"),
+    sender_user_id: t("fields.sender"),
+    sender_username: t("fields.senderUsername"),
+    seq_id: t("fields.messageNumber"),
+    size_bytes: t("fields.fileSize"),
+    target_user_id: t("fields.targetMember"),
+    updated_at: t("fields.updated"),
+    user_id: t("fields.user"),
   };
   return labels[key] ?? titleCase(key);
 }
@@ -165,13 +163,14 @@ function userInitial(user?: UserPublicProfile | null) {
   return (user?.display_name || user?.username || "U").slice(0, 1).toUpperCase();
 }
 
-function messagePreview(message?: MessageResponse | null) {
+function messagePreview(message: MessageResponse | null | undefined, references: ReferenceMaps) {
+  const t = references.t;
   if (!message) return null;
-  if (message.deleted_at) return "Deleted message";
+  if (message.deleted_at) return t("references.deletedMessage");
   if (message.content_text?.trim()) return message.content_text.trim();
-  if (message.content_json) return "JSON message";
-  if (message.attachments?.length) return `${message.attachments.length} attachment${message.attachments.length === 1 ? "" : "s"}`;
-  return "Empty message";
+  if (message.content_json) return t("references.jsonMessage");
+  if (message.attachments?.length) return t("references.attachments", { count: message.attachments.length });
+  return t("references.emptyMessage");
 }
 
 function truncate(value: string, maxLength = 96) {
@@ -183,8 +182,8 @@ function maskInternalIds(value: string) {
   return value.replace(UUID_IN_TEXT_RE, "internal reference");
 }
 
-function formatBytes(value: unknown) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "Not available";
+function formatBytes(value: unknown, references?: ReferenceMaps) {
+  if (typeof value !== "number" || Number.isNaN(value)) return references?.commonT("notAvailable") ?? "N/A";
   if (value < 1024) return `${value} B`;
   const units = ["KB", "MB", "GB"];
   let current = value / 1024;
@@ -201,8 +200,13 @@ function normalizeStatus(value: unknown) {
   return value.replace(/_/g, " ");
 }
 
-function roleLabel(value: unknown) {
-  return typeof value === "string" ? titleCase(value) : String(value);
+function roleLabel(value: unknown, references: ReferenceMaps) {
+  if (typeof value !== "string") return String(value);
+  if (value === "owner") return references.commonT("roles.owner");
+  if (value === "admin") return references.commonT("roles.admin");
+  if (value === "member") return references.commonT("roles.member");
+  if (value === "pending") return references.commonT("roles.pending");
+  return titleCase(value);
 }
 
 function eventCategory(eventType: string) {
@@ -318,19 +322,20 @@ function LoadingReference({ label }: { label: string }) {
   );
 }
 
-function UserReference({ userId, references, fallback = "User not available" }: { userId?: string | null; references: ReferenceMaps; fallback?: string }) {
-  if (!userId) return <span className="text-muted-foreground">System</span>;
+function UserReference({ userId, references, fallback }: { userId?: string | null; references: ReferenceMaps; fallback?: string }) {
+  if (!userId) return <span className="text-muted-foreground">{references.t("references.system")}</span>;
   const user = references.users.get(userId);
-  if (!user && references.loadingUserIds.has(userId)) return <LoadingReference label="Loading user" />;
+  const fallbackLabel = fallback ?? references.t("references.userUnavailable");
+  if (!user && references.loadingUserIds.has(userId)) return <LoadingReference label={references.t("references.loadingUser")} />;
   const avatarUrl = resolveApiMediaUrl(user?.avatar_url);
 
   return (
     <span className="inline-flex min-h-7 max-w-full items-center gap-2 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium">
       <Avatar className="h-5 w-5">
-        {avatarUrl ? <AvatarImage src={avatarUrl} alt={userDisplayName(user) ?? fallback} /> : null}
+        {avatarUrl ? <AvatarImage src={avatarUrl} alt={userDisplayName(user) ?? fallbackLabel} /> : null}
         <AvatarFallback className="text-[10px]">{userInitial(user)}</AvatarFallback>
       </Avatar>
-      <span className="truncate">{userDisplayName(user) ?? fallback}</span>
+      <span className="truncate">{userDisplayName(user) ?? fallbackLabel}</span>
     </span>
   );
 }
@@ -361,18 +366,18 @@ function MessageReference({
   const message = id ? references.messages.get(id) : undefined;
 
   if (id && !message && references.loadingMessageIds.has(id)) {
-    return <LoadingReference label="Loading message" />;
+    return <LoadingReference label={references.t("references.loadingMessage")} />;
   }
 
   const seqId = message?.seq_id ?? (typeof payload.seq_id === "number" ? payload.seq_id : null);
   const sender = message?.sender_display_name || message?.sender_username || (typeof payload.sender_username === "string" ? payload.sender_username : null);
-  const preview = messagePreview(message) ?? (typeof payload.content_type === "string" ? `${titleCase(payload.content_type)} message` : "Message");
+  const preview = messagePreview(message, references) ?? (typeof payload.content_type === "string" ? references.t("references.typedMessage", { type: titleCase(payload.content_type) }) : references.t("references.message"));
 
   return (
     <span className="inline-flex min-h-7 max-w-full items-center gap-2 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs">
       <MessageSquare className="h-3.5 w-3.5 text-primary" />
-      <span className="font-medium">{seqId ? `Message #${seqId}` : "Message"}</span>
-      {sender ? <span className="text-muted-foreground">by {sender}</span> : null}
+      <span className="font-medium">{seqId ? references.t("references.messageNumber", { seq: seqId }) : references.t("references.message")}</span>
+      {sender ? <span className="text-muted-foreground">{references.t("references.bySender", { sender })}</span> : null}
       <span className="truncate text-muted-foreground">{truncate(preview, 48)}</span>
     </span>
   );
@@ -383,18 +388,24 @@ function UploadReference({ uploadId, references }: { uploadId?: string | null; r
   return (
     <span className="inline-flex min-h-7 max-w-full items-center gap-2 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs">
       <Inbox className="h-3.5 w-3.5 text-primary" />
-      <span className="truncate font-medium">{upload?.filename || "Upload file"}</span>
-      {upload?.size_bytes ? <span className="text-muted-foreground">{formatBytes(upload.size_bytes)}</span> : null}
+      <span className="truncate font-medium">{upload?.filename || references.t("references.uploadFile")}</span>
+      {upload?.size_bytes ? <span className="text-muted-foreground">{formatBytes(upload.size_bytes, references)}</span> : null}
     </span>
   );
 }
 
-function GenericReference({ kind }: { kind: Exclude<ReferenceKind, "user" | "channel" | "message" | "upload"> }) {
+function GenericReference({
+  kind,
+  references,
+}: {
+  kind: Exclude<ReferenceKind, "user" | "channel" | "message" | "upload">;
+  references: ReferenceMaps;
+}) {
   const labels: Record<typeof kind, string> = {
-    client: "Client retry token",
-    delivery: "Delivery job",
-    internal: "Internal reference",
-    invite: "Invite link",
+    client: references.t("references.clientRetryToken"),
+    delivery: references.t("references.deliveryJob"),
+    internal: references.t("references.internalReference"),
+    invite: references.t("references.inviteLink"),
   };
   return (
     <span className="inline-flex min-h-7 items-center gap-2 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs text-muted-foreground">
@@ -420,13 +431,13 @@ function ReferenceValue({
   if (kind === "channel") return <ChannelReference references={references} />;
   if (kind === "message") return <MessageReference messageId={stringValue} event={event} references={references} />;
   if (kind === "upload") return <UploadReference uploadId={stringValue} references={references} />;
-  return <GenericReference kind={kind} />;
+  return <GenericReference kind={kind} references={references} />;
 }
 
 function formatRoutingKey(value: string, references: ReferenceMaps) {
-  if (value.startsWith("channel.")) return `${references.channel.name} broker route`;
-  if (value.startsWith("user.")) return "User delivery route";
-  if (value.startsWith("dead.")) return "Dead-letter broker route";
+  if (value.startsWith("channel.")) return references.t("references.channelBrokerRoute", { name: references.channel.name });
+  if (value.startsWith("user.")) return references.t("references.userDeliveryRoute");
+  if (value.startsWith("dead.")) return references.t("references.deadLetterBrokerRoute");
   return maskInternalIds(value);
 }
 
@@ -447,33 +458,33 @@ function ScalarValue({
   }
 
   if (value === null || value === undefined || value === "") {
-    return <span className="text-muted-foreground">Not set</span>;
+    return <span className="text-muted-foreground">{references.t("values.notSet")}</span>;
   }
 
   if (typeof value === "boolean") {
-    return <Badge variant={value ? "default" : "secondary"}>{value ? "Yes" : "No"}</Badge>;
+    return <Badge variant={value ? "default" : "secondary"}>{value ? references.commonT("yes") : references.commonT("no")}</Badge>;
   }
 
   if (typeof value === "number") {
-    if (fieldKey === "size_bytes") return <span>{formatBytes(value)}</span>;
-    if (fieldKey === "retry_in_seconds") return <span>{value} seconds</span>;
-    return <span>{value.toLocaleString()}</span>;
+    if (fieldKey === "size_bytes") return <span>{formatBytes(value, references)}</span>;
+    if (fieldKey === "retry_in_seconds") return <span>{references.t("values.seconds", { count: value })}</span>;
+    return <span>{formatNumberLocalized(value, references.locale)}</span>;
   }
 
   if (typeof value === "string") {
     if (fieldKey === "routing_key") return <span>{formatRoutingKey(value, references)}</span>;
     if (fieldKey.endsWith("_url") || fieldKey === "url" || fieldKey === "public_url") {
-      return <span>{value.includes("/uploads/") ? "Private upload link" : maskInternalIds(value)}</span>;
+      return <span>{value.includes("/uploads/") ? references.t("values.privateUploadLink") : maskInternalIds(value)}</span>;
     }
     if (fieldKey === "content_text" && event) {
       const messageId = getEventMessageId(event);
       const message = messageId ? references.messages.get(messageId) : undefined;
-      return <span>{message?.content_text ? truncate(message.content_text, 180) : "Stored message text"}</span>;
+      return <span>{message?.content_text ? truncate(message.content_text, 180) : references.t("values.storedMessageText")}</span>;
     }
     if (fieldKey === "content_type") return <Badge variant="outline">{titleCase(value)}</Badge>;
-    if (fieldKey === "role" || fieldKey === "new_role") return <Badge variant="secondary">{roleLabel(value)}</Badge>;
+    if (fieldKey === "role" || fieldKey === "new_role") return <Badge variant="secondary">{roleLabel(value, references)}</Badge>;
     if (fieldKey.includes("status")) return <Badge variant="outline">{normalizeStatus(value)}</Badge>;
-    if (ISO_DATE_RE.test(value)) return <span>{formatDateTime(value)}</span>;
+    if (ISO_DATE_RE.test(value)) return <span>{formatDateTimeLocalized(value, references.locale, references.commonT("notAvailable"))}</span>;
     return <span className="break-words">{maskInternalIds(value)}</span>;
   }
 
@@ -494,7 +505,7 @@ function StructuredValue({
   depth?: number;
 }) {
   if (Array.isArray(value)) {
-    if (value.length === 0) return <span className="text-muted-foreground">None</span>;
+    if (value.length === 0) return <span className="text-muted-foreground">{references.t("values.none")}</span>;
 
     return (
       <div className="space-y-2">
@@ -509,7 +520,7 @@ function StructuredValue({
 
   if (isRecord(value)) {
     const entries = Object.entries(value).filter(([key]) => !(depth > 0 && HIDDEN_TECHNICAL_KEYS.has(key)));
-    if (entries.length === 0) return <span className="text-muted-foreground">No details</span>;
+    if (entries.length === 0) return <span className="text-muted-foreground">{references.t("values.noDetails")}</span>;
 
     if (fieldKey === "content_json" && "_enc_v1" in value) {
       const messageId = event ? getEventMessageId(event) : null;
@@ -517,14 +528,14 @@ function StructuredValue({
       if (message?.content_json) {
         return <StructuredValue fieldKey={fieldKey} value={message.content_json} references={references} event={event} depth={depth + 1} />;
       }
-      return <span className="text-muted-foreground">Encrypted JSON message content</span>;
+      return <span className="text-muted-foreground">{references.t("values.encryptedJsonContent")}</span>;
     }
 
     return (
       <div className={cn("grid gap-2", depth === 0 ? "sm:grid-cols-2" : "")}>
         {entries.map(([key, childValue]) => (
           <div key={key} className="rounded-md border border-border/60 bg-background/70 p-3">
-            <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">{humanizeKey(key)}</p>
+            <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">{humanizeKey(key, references)}</p>
             <StructuredValue fieldKey={key} value={childValue} references={references} event={event} depth={depth + 1} />
           </div>
         ))}
@@ -542,7 +553,7 @@ function StructuredPayload({ event, references }: { event: EventResponse; refere
   if (entries.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-        No additional details were recorded for this event.
+        {references.t("values.noAdditionalDetails")}
       </div>
     );
   }
@@ -551,7 +562,7 @@ function StructuredPayload({ event, references }: { event: EventResponse; refere
     <div className="grid gap-3 sm:grid-cols-2">
       {entries.map(([key, value]) => (
         <div key={key} className="rounded-md border border-border/60 bg-muted/20 p-3">
-          <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">{humanizeKey(key)}</p>
+          <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">{humanizeKey(key, references)}</p>
           <StructuredValue fieldKey={key} value={value} references={references} event={event} />
         </div>
       ))}
@@ -560,65 +571,66 @@ function StructuredPayload({ event, references }: { event: EventResponse; refere
 }
 
 function describeEvent(event: EventResponse, references: ReferenceMaps): { title: string; description: ReactNode } {
+  const t = references.t;
   const payload = event.payload ?? {};
-  const actor = <UserReference userId={event.actor_user_id} references={references} fallback="Unknown actor" />;
+  const actor = <UserReference userId={event.actor_user_id} references={references} fallback={t("references.unknownActor")} />;
   const subjectUserId = getEventSubjectUserId(event);
-  const subject = <UserReference userId={subjectUserId} references={references} fallback="Unknown user" />;
+  const subject = <UserReference userId={subjectUserId} references={references} fallback={t("references.unknownUser")} />;
   const target = isUuid(payload.target_user_id) ? (
-    <UserReference userId={payload.target_user_id} references={references} fallback="Unknown member" />
+    <UserReference userId={payload.target_user_id} references={references} fallback={t("references.unknownMember")} />
   ) : subject;
   const channel = <ChannelReference references={references} />;
   const message = <MessageReference event={event} references={references} />;
 
   switch (event.event_type) {
     case "channel.created":
-      return { title: "Channel created", description: <>{actor} created {channel}</> };
+      return { title: t("events.channelCreated.title"), description: <>{actor} {t("events.channelCreated.description")} {channel}</> };
     case "channel.updated":
-      return { title: "Channel settings updated", description: <>{actor} changed the channel settings for {channel}</> };
+      return { title: t("events.channelUpdated.title"), description: <>{actor} {t("events.channelUpdated.description")} {channel}</> };
     case "channel.deleted":
-      return { title: "Channel deleted", description: <>{actor} deleted {channel}</> };
+      return { title: t("events.channelDeleted.title"), description: <>{actor} {t("events.channelDeleted.description")} {channel}</> };
     case "channel.slug_collision_resolved":
-      return { title: "Channel slug adjusted", description: <>The requested channel slug was already taken, so a safe alternative was assigned.</> };
+      return { title: t("events.slugAdjusted.title"), description: <>{t("events.slugAdjusted.description")}</> };
     case "membership.joined":
-      return { title: "Member joined", description: <>{subject} joined {channel} as {roleLabel(payload.role)}</> };
+      return { title: t("events.memberJoined.title"), description: <>{subject} {t("events.memberJoined.joined")} {channel} {t("events.memberJoined.as")} {roleLabel(payload.role, references)}</> };
     case "membership.left":
-      return { title: "Member left", description: <>{subject} left {channel}</> };
+      return { title: t("events.memberLeft.title"), description: <>{subject} {t("events.memberLeft.description")} {channel}</> };
     case "membership.approved":
-      return { title: "Join request approved", description: <>{actor} approved {target}</> };
+      return { title: t("events.requestApproved.title"), description: <>{actor} {t("events.requestApproved.description")} {target}</> };
     case "membership.added":
-      return { title: "Member added", description: <>{actor} added {target}</> };
+      return { title: t("events.memberAdded.title"), description: <>{actor} {t("events.memberAdded.description")} {target}</> };
     case "member.promoted":
-      return { title: "Member promoted", description: <>{actor} promoted {target} to admin</> };
+      return { title: t("events.memberPromoted.title"), description: <>{actor} {t("events.memberPromoted.description")} {target}</> };
     case "member.demoted":
-      return { title: "Member demoted", description: <>{actor} changed {target} back to member</> };
+      return { title: t("events.memberDemoted.title"), description: <>{actor} {t("events.memberDemoted.description")} {target}</> };
     case "member.removed":
-      return { title: "Member removed", description: <>{actor} removed {target} from the channel</> };
+      return { title: t("events.memberRemoved.title"), description: <>{actor} {t("events.memberRemoved.description")} {target}</> };
     case "member.permissions.updated":
-      return { title: "Admin permissions updated", description: <>{actor} updated permissions for {target}</> };
+      return { title: t("events.permissionsUpdated.title"), description: <>{actor} {t("events.permissionsUpdated.description")} {target}</> };
     case "invite.created":
-      return { title: "Invite created", description: <>{actor} created a channel invite</> };
+      return { title: t("events.inviteCreated.title"), description: <>{actor} {t("events.inviteCreated.description")}</> };
     case "invite.revoked":
-      return { title: "Invite revoked", description: <>{actor} revoked a channel invite</> };
+      return { title: t("events.inviteRevoked.title"), description: <>{actor} {t("events.inviteRevoked.description")}</> };
     case "invite.accepted":
-      return { title: "Invite accepted", description: <>{subject} accepted a channel invite</> };
+      return { title: t("events.inviteAccepted.title"), description: <>{subject} {t("events.inviteAccepted.description")}</> };
     case "message.published":
-      return { title: "Message published", description: <>{actor} published {message}</> };
+      return { title: t("events.messagePublished.title"), description: <>{actor} {t("events.messagePublished.description")} {message}</> };
     case "message.encryption_failed":
-      return { title: "Message encryption failed", description: <>A message from {actor} could not be encrypted before storage.</> };
+      return { title: t("events.encryptionFailed.title"), description: <>{t("events.encryptionFailed.before")} {actor} {t("events.encryptionFailed.after")}</> };
     case "message.decryption_failed":
-      return { title: "Message decryption failed", description: <>A stored message could not be decrypted for delivery.</> };
+      return { title: t("events.decryptionFailed.title"), description: <>{t("events.decryptionFailed.description")}</> };
     case "security.unauthorized_publish":
-      return { title: "Publish blocked", description: <>{actor} tried to publish without permission.</> };
+      return { title: t("events.publishBlocked.title"), description: <>{actor} {t("events.publishBlocked.description")}</> };
     case "security.unauthorized_read":
-      return { title: "Read blocked", description: <>{actor} tried to read channel data without permission.</> };
+      return { title: t("events.readBlocked.title"), description: <>{actor} {t("events.readBlocked.description")}</> };
     case "broker.retry_scheduled":
-      return { title: "Broker retry scheduled", description: <>RabbitMQ delivery failed temporarily. The worker scheduled another attempt.</> };
+      return { title: t("events.brokerRetry.title"), description: <>{t("events.brokerRetry.description")}</> };
     case "broker.dead_lettered":
-      return { title: "Broker delivery dead-lettered", description: <>RabbitMQ delivery failed too many times and moved to the dead-letter flow.</> };
+      return { title: t("events.brokerDeadLettered.title"), description: <>{t("events.brokerDeadLettered.description")}</> };
     case "broker.manual_retry_requested":
-      return { title: "Manual retry requested", description: <>{actor} asked the worker to retry a failed delivery job.</> };
+      return { title: t("events.manualRetry.title"), description: <>{actor} {t("events.manualRetry.description")}</> };
     default:
-      return { title: titleCase(event.event_type), description: <>Audit event recorded for {channel}.</> };
+      return { title: titleCase(event.event_type), description: <>{t("events.default.description")} {channel}.</> };
   }
 }
 
@@ -631,13 +643,13 @@ function EventReferences({ event, references }: { event: EventResponse; referenc
 
   return (
     <div className="mt-3 flex flex-wrap gap-2">
-      <UserReference userId={event.actor_user_id} references={references} fallback="Unknown actor" />
+      <UserReference userId={event.actor_user_id} references={references} fallback={references.t("references.unknownActor")} />
       <ChannelReference references={references} />
       {targetUserId && targetUserId !== event.actor_user_id ? (
-        <UserReference userId={targetUserId} references={references} fallback="Unknown member" />
+        <UserReference userId={targetUserId} references={references} fallback={references.t("references.unknownMember")} />
       ) : null}
       {subjectUserId && subjectUserId !== event.actor_user_id && subjectUserId !== targetUserId ? (
-        <UserReference userId={subjectUserId} references={references} fallback="Unknown user" />
+        <UserReference userId={subjectUserId} references={references} fallback={references.t("references.unknownUser")} />
       ) : null}
       {messageId ? <MessageReference messageId={messageId} event={event} references={references} /> : null}
       {uploadIds.map((uploadId) => (
@@ -662,7 +674,7 @@ function EventLogItem({ event, references }: { event: EventResponse; references:
             <Badge variant={eventBadgeVariant(event.event_type)}>{titleCase(event.event_type)}</Badge>
             <Badge variant="outline">{titleCase(eventCategory(event.event_type))}</Badge>
           </div>
-          <time className="text-sm text-muted-foreground">{formatDateTime(event.created_at)}</time>
+          <time className="text-sm text-muted-foreground">{formatDateTimeLocalized(event.created_at, references.locale, references.commonT("notAvailable"))}</time>
         </div>
 
         <h3 className="mt-3 text-base font-semibold">{description.title}</h3>
@@ -673,7 +685,7 @@ function EventLogItem({ event, references }: { event: EventResponse; references:
         <Accordion type="single" collapsible className="mt-4 rounded-md border border-border/60 bg-muted/10 px-4">
           <AccordionItem value="details" className="border-b-0">
             <AccordionTrigger className="py-3 text-sm hover:no-underline">
-              Structured details
+              {references.t("structuredDetails")}
             </AccordionTrigger>
             <AccordionContent>
               <StructuredPayload event={event} references={references} />
@@ -689,13 +701,14 @@ function getIntegrityStatus(
   result: EventIntegrityResponse | undefined,
   isFetching: boolean,
   isError: boolean,
+  t: ReturnType<typeof useTranslations>,
 ): { label: string; variant: "default" | "secondary" | "destructive" | "outline" } {
-  if (isFetching) return { label: "Checking...", variant: "secondary" };
-  if (isError) return { label: "Check failed", variant: "destructive" };
-  if (!result) return { label: "Not checked", variant: "outline" };
-  if (result.valid) return { label: "Verified", variant: "default" };
-  if (result.reason === "missing_hash") return { label: "Not initialized", variant: "secondary" };
-  return { label: "Broken", variant: "destructive" };
+  if (isFetching) return { label: t("integrity.checking"), variant: "secondary" };
+  if (isError) return { label: t("integrity.checkFailed"), variant: "destructive" };
+  if (!result) return { label: t("integrity.notChecked"), variant: "outline" };
+  if (result.valid) return { label: t("integrity.verified"), variant: "default" };
+  if (result.reason === "missing_hash") return { label: t("integrity.notInitialized"), variant: "secondary" };
+  return { label: t("integrity.broken"), variant: "destructive" };
 }
 
 function ChannelEventLogSkeleton() {
@@ -731,6 +744,9 @@ export default function ChannelEventLogPage() {
   const channelId = Array.isArray(params?.channelId) ? params.channelId[0] : params?.channelId;
   const router = useRouter();
   const localePath = useLocalePath();
+  const locale = useLocale();
+  const t = useTranslations("eventLog");
+  const commonT = useTranslations("common");
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitializing = useAuthStore((state) => state.isInitializing);
   const authUser = useAuthStore((state) => state.user);
@@ -738,7 +754,7 @@ export default function ChannelEventLogPage() {
   const canManageMembers = channel?.permissions.can_manage_members ?? false;
   const eventsQuery = useChannelEvents(channel?.id || "", EVENT_LIMIT, canManageMembers);
   const integrityQuery = useChannelEventIntegrity(channel?.id || "", false);
-  const integrityStatus = getIntegrityStatus(integrityQuery.data, integrityQuery.isFetching, integrityQuery.isError);
+  const integrityStatus = getIntegrityStatus(integrityQuery.data, integrityQuery.isFetching, integrityQuery.isError, t);
   const detailsPath = channelId ? localePath(`/app/channels/${channelId}/details`) : localePath("/app");
 
   const collectedReferences = useMemo(() => collectEventReferences(eventsQuery.data?.items), [eventsQuery.data?.items]);
@@ -786,8 +802,11 @@ export default function ChannelEventLogPage() {
       messages,
       loadingMessageIds: new Set(collectedReferences.messageIds.filter((_, index) => messageQueries[index]?.isLoading)),
       uploads: collectedReferences.uploads,
+      locale,
+      t,
+      commonT,
     };
-  }, [authUser, channel, collectedReferences, messageQueries, userQueries]);
+  }, [authUser, channel, collectedReferences, commonT, locale, messageQueries, t, userQueries]);
 
   useEffect(() => {
     if (!isInitializing && !isAuthenticated) {
@@ -810,15 +829,15 @@ export default function ChannelEventLogPage() {
             onClick={() => router.push(detailsPath)}
             className="text-primary text-sm font-medium hover:underline"
           >
-            &larr; Back to details
+            {t("actions.backToDetails")}
           </button>
           <Card className="mt-6 rounded-md p-8 text-center">
-            <h1 className="text-2xl font-bold">We couldn&apos;t load this channel</h1>
+            <h1 className="text-2xl font-bold">{t("errors.loadChannelTitle")}</h1>
             <p className="mt-2 text-muted-foreground">
-              The channel may not exist anymore, or your session needs to be refreshed.
+              {t("errors.loadChannelDescription")}
             </p>
             <div className="mt-6">
-              <Button onClick={() => refetch()}>Try Again</Button>
+              <Button onClick={() => refetch()}>{commonT("actions.tryAgain")}</Button>
             </div>
           </Card>
         </div>
@@ -835,15 +854,15 @@ export default function ChannelEventLogPage() {
             onClick={() => router.push(localePath(`/app/channels/${channel.id}/details`))}
             className="text-primary text-sm font-medium hover:underline"
           >
-            &larr; Back to details
+            {t("actions.backToDetails")}
           </button>
           <Card className="mt-6 rounded-md p-8 text-center">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-md bg-muted text-muted-foreground">
               <Shield className="h-7 w-7" />
             </div>
-            <h1 className="mt-4 text-2xl font-bold">Event log unavailable</h1>
+            <h1 className="mt-4 text-2xl font-bold">{t("errors.unavailableTitle")}</h1>
             <p className="mt-2 text-muted-foreground">
-              You need member-management permission to view audit events for this channel.
+              {t("errors.unavailableDescription")}
             </p>
           </Card>
         </div>
@@ -862,20 +881,20 @@ export default function ChannelEventLogPage() {
               className="inline-flex items-center gap-1 text-primary text-sm font-medium hover:underline"
             >
               <ArrowLeft className="h-4 w-4" />
-              Back to details
+              {t("actions.backToDetails")}
             </button>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight">Event Log</h1>
-            <p className="mt-1 text-muted-foreground">Recent security and system events for {channel.name}.</p>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight">{t("title")}</h1>
+            <p className="mt-1 text-muted-foreground">{t("description", { name: channel.name })}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={integrityStatus.variant}>Audit integrity: {integrityStatus.label}</Badge>
+            <Badge variant={integrityStatus.variant}>{t("integrity.badge", { status: integrityStatus.label })}</Badge>
             <Button
               variant="outline"
               onClick={() => integrityQuery.refetch()}
               disabled={integrityQuery.isFetching}
             >
               <Shield className="mr-2 h-4 w-4" />
-              {integrityQuery.isFetching ? "Checking..." : "Verify integrity"}
+              {integrityQuery.isFetching ? t("integrity.checking") : t("actions.verifyIntegrity")}
             </Button>
             <Button
               variant="outline"
@@ -883,7 +902,7 @@ export default function ChannelEventLogPage() {
               disabled={eventsQuery.isFetching}
             >
               <RefreshCw className="mr-2 h-4 w-4" />
-              {eventsQuery.isFetching ? "Refreshing..." : "Refresh"}
+              {eventsQuery.isFetching ? commonT("actions.refreshing") : commonT("actions.refresh")}
             </Button>
           </div>
         </div>
@@ -897,14 +916,14 @@ export default function ChannelEventLogPage() {
                 </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">{channel.visibility}</Badge>
-                    <Badge>{channel.my_role}</Badge>
+                    <Badge variant="secondary">{commonT(`visibility.${channel.visibility}`)}</Badge>
+                    <Badge>{channel.my_role ? commonT(`roles.${channel.my_role}`) : commonT("roles.none")}</Badge>
                   </div>
                   <h2 className="mt-2 truncate text-xl font-semibold">{channel.name}</h2>
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">
-                Showing the latest {EVENT_LIMIT} channel-scoped events.
+                {t("latestEvents", { count: EVENT_LIMIT })}
               </p>
             </div>
           </div>
@@ -913,36 +932,36 @@ export default function ChannelEventLogPage() {
             {integrityQuery.data ? (
               <div className="grid gap-3 rounded-md border border-border/70 bg-muted/30 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
                 <div>
-                  <p className="text-xs uppercase text-muted-foreground">Status</p>
+                  <p className="text-xs uppercase text-muted-foreground">{t("integrity.status")}</p>
                   <p className="mt-1 flex items-center gap-2 font-medium">
                     {integrityQuery.data.valid ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <AlertTriangle className="h-4 w-4 text-destructive" />}
                     {integrityStatus.label}
                   </p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase text-muted-foreground">Checked events</p>
+                  <p className="text-xs uppercase text-muted-foreground">{t("integrity.checkedEvents")}</p>
                   <p className="mt-1 font-medium">{integrityQuery.data.checked_events}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase text-muted-foreground">Last hash</p>
+                  <p className="text-xs uppercase text-muted-foreground">{t("integrity.lastHash")}</p>
                   <p className="mt-1 break-all font-mono text-xs">{shortHash(integrityQuery.data.last_valid_hash)}</p>
                 </div>
                 <div>
-                  <p className="text-xs uppercase text-muted-foreground">Scope</p>
+                  <p className="text-xs uppercase text-muted-foreground">{t("integrity.scope")}</p>
                   <p className="mt-1 font-medium">{channel.name}</p>
                 </div>
                 {!integrityQuery.data.valid ? (
                   <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive sm:col-span-2 lg:col-span-4">
-                    <span className="font-medium">{integrityQuery.data.reason || "integrity check failed"}</span>
+                    <span className="font-medium">{integrityQuery.data.reason || t("integrity.failed")}</span>
                     {integrityQuery.data.broken_event_id ? (
-                      <span className="ml-2 text-xs">A damaged audit entry was found in this channel.</span>
+                      <span className="ml-2 text-xs">{t("integrity.damagedEntry")}</span>
                     ) : null}
                   </div>
                 ) : null}
               </div>
             ) : null}
             {integrityQuery.isError ? (
-              <p className="mt-3 text-sm text-destructive">Could not verify audit integrity. Please try again.</p>
+              <p className="mt-3 text-sm text-destructive">{t("errors.verifyFailed")}</p>
             ) : null}
           </div>
 
@@ -954,11 +973,11 @@ export default function ChannelEventLogPage() {
             </div>
           ) : eventsQuery.isError ? (
             <div className="border-t border-border/60 p-6">
-              <p className="text-sm text-destructive">Could not load event log. Please try again.</p>
+              <p className="text-sm text-destructive">{t("errors.loadEventsFailed")}</p>
             </div>
           ) : (eventsQuery.data?.items?.length ?? 0) === 0 ? (
             <div className="border-t border-border/60 p-6">
-              <p className="text-sm text-muted-foreground">No events recorded yet for this channel.</p>
+              <p className="text-sm text-muted-foreground">{t("empty")}</p>
             </div>
           ) : (
             <div className="divide-y divide-border/60 border-t border-border/60">
@@ -966,7 +985,7 @@ export default function ChannelEventLogPage() {
                 <EventLogItem key={item.id} event={item} references={references} />
               ))}
               {eventsQuery.data?.has_more ? (
-                <p className="px-6 py-4 text-xs text-muted-foreground">More events are available through the API.</p>
+                <p className="px-6 py-4 text-xs text-muted-foreground">{t("moreAvailable")}</p>
               ) : null}
             </div>
           )}
