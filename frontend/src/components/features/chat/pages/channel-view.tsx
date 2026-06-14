@@ -404,8 +404,13 @@ export default function ChannelView() {
         }}
         className={cn("relative", isNested ? "mt-0" : !showHeader ? "mt-1" : "mt-6")}
       >
-        <div className={cn("flex gap-3", isMe ? "justify-end" : "justify-start")}>
-          {!isNested && !isMe && showHeader ? (
+        <div className={cn("flex", isNested ? "gap-2" : "gap-3", isMe ? "justify-end" : "justify-start")}>
+          {isNested && !isMe ? (
+            <Avatar className="mt-1 h-6 w-6 flex-shrink-0 border border-border/70 shadow-sm">
+              <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
+              <AvatarFallback className="text-[10px]">{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
+            </Avatar>
+          ) : !isNested && !isMe && showHeader ? (
             <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
               <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
               <AvatarFallback>{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
@@ -629,7 +634,12 @@ export default function ChannelView() {
             )}
         </div>
 
-        {!isNested && isMe && showHeader ? (
+        {isNested && isMe ? (
+          <Avatar className="mt-1 h-6 w-6 flex-shrink-0 border border-primary/20 shadow-sm">
+            <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
+            <AvatarFallback className="text-[10px]">{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
+          </Avatar>
+        ) : !isNested && isMe && showHeader ? (
           <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
             <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
             <AvatarFallback>{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
