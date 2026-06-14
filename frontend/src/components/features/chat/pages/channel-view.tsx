@@ -4,7 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useChannel, useChannelMembers, useJoinChannel } from "@/hooks/use-channels";
 import { useMarkSeen, useMessages, useSendMessage, useToggleReaction } from "@/hooks/use-messages";
 import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight, Copy, ArrowUpRight } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,6 +14,7 @@ import { toast } from "@/hooks/use-toast";
 import type { MessageResponse } from "@/types/api";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
+import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 function ChannelViewSkeleton() {
@@ -55,7 +56,6 @@ function ChannelViewSkeleton() {
     </div>
   );
 }
-const MAX_REPLY_INDENT_DEPTH = 4;
 const MAX_REPLY_CHAIN_DEPTH = 12;
 const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E}", "\u{1F389}", "\u{1F44E}"] as const;
 
@@ -118,6 +118,7 @@ export default function ChannelView() {
   const [content, setContent] = useState("");
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null);
   const [collapsedReplyRoots, setCollapsedReplyRoots] = useState<Set<string>>(new Set());
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -259,20 +260,6 @@ export default function ChannelView() {
     return memberAvatarById.get(senderUserId);
   };
 
-  const getReplyDepth = (message: MessageResponse): number => {
-    let depth = 0;
-    let parentId = message.reply_to_message_id ?? null;
-    const visited = new Set<string>();
-    while (parentId && depth < MAX_REPLY_CHAIN_DEPTH && !visited.has(parentId)) {
-      visited.add(parentId);
-      const parent = messageById.get(parentId);
-      if (!parent) break;
-      depth += 1;
-      parentId = parent.reply_to_message_id ?? null;
-    }
-    return depth;
-  };
-
   const getDescendantReplyCount = (messageId: string): number => {
     let count = 0;
     const visited = new Set<string>();
@@ -289,20 +276,6 @@ export default function ChannelView() {
       }
     }
     return count;
-  };
-
-  const isHiddenByCollapsedAncestor = (message: MessageResponse): boolean => {
-    let parentId = message.reply_to_message_id ?? null;
-    const visited = new Set<string>();
-
-    while (parentId && !visited.has(parentId)) {
-      if (collapsedReplyRoots.has(parentId)) return true;
-      visited.add(parentId);
-      const parent = messageById.get(parentId);
-      if (!parent) break;
-      parentId = parent.reply_to_message_id ?? null;
-    }
-    return false;
   };
 
   const jumpToMessage = (messageId: string | null | undefined) => {
@@ -325,9 +298,12 @@ export default function ChannelView() {
       }
       return changed ? next : current;
     });
-    const node = messageRefs.current[messageId];
-    if (!node) return;
-    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    const scrollToTarget = () => {
+      const node = messageRefs.current[messageId];
+      if (node) node.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    scrollToTarget();
+    requestAnimationFrame(scrollToTarget);
   };
 
   const toggleCollapsedReplies = (messageId: string) => {
@@ -390,7 +366,281 @@ export default function ChannelView() {
   };
 
   const activeReplyTarget = replyingTo ? messageById.get(replyingTo.id) ?? replyingTo : null;
-  const visibleMessages = messages.filter((message) => !isHiddenByCollapsedAncestor(message));
+  const rootMessages = messages.filter((message) => !message.reply_to_message_id || !messageById.has(message.reply_to_message_id));
+
+  function renderMessageThread(
+    msg: MessageResponse,
+    previousSibling?: MessageResponse,
+    depth = 0,
+    ancestorIds = new Set<string>()
+  ): ReactNode {
+    if (ancestorIds.has(msg.id)) return null;
+
+    const isMe = msg.sender_user_id === user?.id;
+    const isNested = depth > 0;
+    const showHeader =
+      isNested ||
+      !previousSibling ||
+      previousSibling.sender_user_id !== msg.sender_user_id ||
+      new Date(msg.created_at).getTime() - new Date(previousSibling.created_at).getTime() > 300000;
+    const repliedMessage = msg.reply_to_message_id ? messageById.get(msg.reply_to_message_id) : undefined;
+    const showReplyContext = Boolean(msg.reply_to_message_id && !repliedMessage);
+    const nextAncestorIds = new Set(ancestorIds);
+    nextAncestorIds.add(msg.id);
+    const childMessages =
+      depth >= MAX_REPLY_CHAIN_DEPTH
+        ? []
+        : (replyChildrenById.get(msg.id) ?? []).filter((child) => !nextAncestorIds.has(child.id));
+    const nestedReplyCount = getDescendantReplyCount(msg.id);
+    const canCollapseReplies = nestedReplyCount > 0 && childMessages.length > 0;
+    const isRepliesCollapsed = collapsedReplyRoots.has(msg.id);
+    const isHovered = hoveredMessageId === msg.id;
+
+    return (
+      <div
+        key={msg.id}
+        ref={(node) => {
+          messageRefs.current[msg.id] = node;
+        }}
+        className={cn("relative", isNested ? "mt-0" : !showHeader ? "mt-1" : "mt-6")}
+      >
+        <div className={cn("flex gap-3", isMe ? "justify-end" : "justify-start")}>
+          {!isNested && !isMe && showHeader ? (
+            <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
+              <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
+              <AvatarFallback>{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
+            </Avatar>
+          ) : !isNested && !isMe ? (
+            <div className="w-10 flex-shrink-0" />
+          ) : null}
+
+          <div className={cn("flex min-w-0 flex-col", isNested ? "max-w-full" : "max-w-[min(85%,42rem)]", isMe ? "items-end" : "items-start")}>
+            {showHeader && !isNested && (
+              <div className={cn("mb-1 flex items-baseline gap-2", isMe && "justify-end")}>
+                <span className="font-semibold text-foreground text-sm">
+                  {resolveSenderName(msg.sender_user_id, msg)}
+                </span>
+                <span className="text-[11px] text-muted-foreground">{format(new Date(msg.created_at), "h:mm a")}</span>
+              </div>
+            )}
+
+            <div
+              className={cn(
+                "relative w-fit max-w-full rounded-2xl border px-4 py-2.5 shadow-sm transition-shadow",
+                isHovered && "shadow-md",
+                isNested && "rounded-xl px-3 py-2 shadow-none",
+                isMe
+                  ? cn(
+                      !isNested && "rounded-br-md shadow-primary/10",
+                      isNested ? "border-primary/20 bg-primary/90 text-primary-foreground" : "border-primary/30 bg-primary text-primary-foreground"
+                    )
+                  : cn(
+                      !isNested && "rounded-bl-md",
+                      isNested ? "border-border/60 bg-background text-card-foreground" : "border-border/70 bg-card text-card-foreground"
+                    )
+              )}
+              onMouseEnter={() => setHoveredMessageId(msg.id)}
+              onMouseMove={() => setHoveredMessageId(msg.id)}
+              onMouseLeave={() => setHoveredMessageId((current) => (current === msg.id ? null : current))}
+              onFocus={() => setHoveredMessageId(msg.id)}
+              onBlur={() => setHoveredMessageId((current) => (current === msg.id ? null : current))}
+            >
+            {showHeader && isNested && (
+              <div className="mb-1 flex items-baseline gap-2">
+                <span className={cn("text-xs font-semibold", isMe ? "text-primary-foreground" : "text-foreground")}>
+                  {resolveSenderName(msg.sender_user_id, msg)}
+                </span>
+                <span className={cn("text-[10px]", isMe ? "text-primary-foreground/70" : "text-muted-foreground")}>
+                  {format(new Date(msg.created_at), "h:mm a")}
+                </span>
+              </div>
+            )}
+
+            {showReplyContext && (
+              <button
+                type="button"
+                onClick={() => jumpToMessage(msg.reply_to_message_id)}
+                className={cn(
+                  "mb-2 block w-full rounded-md border px-2 py-1 text-left transition-colors",
+                  isMe
+                    ? "border-primary-foreground/20 bg-primary-foreground/10 hover:bg-primary-foreground/15"
+                    : "border-border/60 bg-background/80 hover:bg-background"
+                )}
+              >
+                <div className={cn("text-[11px] font-semibold", isMe ? "text-primary-foreground" : "text-primary")}>
+                  Replying to {resolveSenderLabel(repliedMessage)}
+                  {msg.reply_to_seq_id ? ` (#${msg.reply_to_seq_id})` : ""}
+                </div>
+                <div className={cn("truncate text-xs", isMe ? "text-primary-foreground/75" : "text-muted-foreground")}>{getMessageSnippet(repliedMessage)}</div>
+              </button>
+            )}
+
+            <div className={cn("whitespace-pre-wrap break-words text-sm leading-relaxed", isMe ? "text-primary-foreground" : "text-foreground/90")}>
+              {msg.deleted_at
+                ? "Message deleted"
+                : msg.content_type === "text"
+                  ? msg.content_text
+                  : JSON.stringify(msg.content_json ?? {}, null, 2)}
+            </div>
+
+            {!msg.deleted_at && Object.keys(msg.reactions_summary?.counts ?? {}).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {Object.entries(msg.reactions_summary.counts)
+                  .sort((a, b) => a[0].localeCompare(b[0]))
+                  .map(([emoji, count]) => {
+                    const isMine = (msg.reactions_summary?.my_reaction ?? []).includes(emoji);
+                    return (
+                      <button
+                        key={`${msg.id}-reaction-${emoji}`}
+                        type="button"
+                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors ${
+                          isMine
+                            ? isMe
+                              ? "border-primary-foreground/40 bg-primary-foreground/20 text-primary-foreground"
+                              : "border-primary/50 bg-primary/10 text-primary"
+                            : isMe
+                              ? "border-primary-foreground/25 bg-primary-foreground/10 text-primary-foreground/90 hover:bg-primary-foreground/15"
+                              : "border-border/70 bg-background/80 text-foreground/80 hover:bg-accent"
+                        }`}
+                        onClick={() => toggleMessageReaction(emoji, msg)}
+                        aria-label={`${isMine ? "Remove" : "Add"} reaction ${emoji} on message #${msg.seq_id}`}
+                      >
+                        <span>{emoji}</span>
+                        <span>{count}</span>
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
+
+            <div
+              className={cn(
+                "absolute -top-3 opacity-0 transition-opacity bg-card border border-border rounded-lg shadow-lg flex items-center p-0.5 z-10",
+                isHovered && "opacity-100",
+                isMe ? "left-0 -translate-x-2" : "right-0 translate-x-2"
+              )}
+            >
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                    aria-label={`Add reaction to message #${msg.seq_id}`}
+                  >
+                    <SmilePlus className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-auto min-w-0 p-1">
+                  <div className="flex items-center gap-1">
+                    {QUICK_REACTIONS.map((emoji) => (
+                      <DropdownMenuItem
+                        key={`${msg.id}-${emoji}`}
+                        className="h-8 w-8 p-0 flex items-center justify-center text-base"
+                        onSelect={() => toggleMessageReaction(emoji, msg)}
+                        aria-label={`React with ${emoji}`}
+                      >
+                        {emoji}
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {(canCompose || canReplyAsMember) && !msg.deleted_at && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                  onClick={() => setReplyingTo(msg)}
+                  aria-label={`Reply to message #${msg.seq_id}`}
+                >
+                  <Reply className="w-4 h-4" />
+                </Button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" aria-label={`Open options for message #${msg.seq_id}`}>
+                    <MoreVertical className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  {(canCompose || canReplyAsMember) && !msg.deleted_at && (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        setReplyingTo(msg);
+                        focusComposer();
+                      }}
+                    >
+                      <Reply className="mr-2 h-4 w-4" />
+                      Reply
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      void copyMessageText(msg);
+                    }}
+                    disabled={Boolean(msg.deleted_at) || msg.content_type !== "text" || !((msg.content_text || "").trim().length > 0)}
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy text
+                  </DropdownMenuItem>
+                  {msg.reply_to_message_id && (
+                    <DropdownMenuItem onSelect={() => jumpToMessage(msg.reply_to_message_id)}>
+                      <ArrowUpRight className="mr-2 h-4 w-4" />
+                      Jump to parent message
+                    </DropdownMenuItem>
+                  )}
+                  {canCollapseReplies && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => toggleCollapsedReplies(msg.id)}>
+                        {isRepliesCollapsed ? "Show replies" : "Hide replies"}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+
+            {canCollapseReplies && (
+              <button
+                type="button"
+                className="mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                onClick={() => toggleCollapsedReplies(msg.id)}
+                aria-expanded={!isRepliesCollapsed}
+                aria-label={`${isRepliesCollapsed ? "Show" : "Hide"} replies for message #${msg.seq_id}`}
+              >
+                {isRepliesCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                <span>{isRepliesCollapsed ? "Show" : "Hide"} {nestedReplyCount} repl{nestedReplyCount === 1 ? "y" : "ies"}</span>
+              </button>
+            )}
+
+            {!isRepliesCollapsed && childMessages.length > 0 && (
+              <div
+                className={cn(
+                  "mt-2 flex w-fit max-w-full flex-col gap-2",
+                  isMe ? "self-end border-r border-border/60 pr-4" : "self-start border-l border-border/60 pl-4",
+                  isNested && (isMe ? "mr-2" : "ml-2")
+                )}
+              >
+                {childMessages.map((child, index) => renderMessageThread(child, childMessages[index - 1], depth + 1, nextAncestorIds))}
+              </div>
+            )}
+        </div>
+
+        {!isNested && isMe && showHeader ? (
+          <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
+            <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
+            <AvatarFallback>{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
+          </Avatar>
+        ) : !isNested && isMe ? (
+          <div className="w-10 flex-shrink-0" />
+        ) : null}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col h-full bg-background relative z-0">
@@ -470,191 +720,7 @@ export default function ChannelView() {
                 <p className="text-muted-foreground text-sm">This is the start of the channel history.</p>
               </div>
             ) : (
-              visibleMessages.map((msg, i) => {
-                const isMe = msg.sender_user_id === user?.id;
-                const prevMsg = visibleMessages[i - 1];
-                const showHeader = !prevMsg || prevMsg.sender_user_id !== msg.sender_user_id || new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() > 300000;
-                const repliedMessage = msg.reply_to_message_id ? messageById.get(msg.reply_to_message_id) : undefined;
-                const replyDepth = Math.min(getReplyDepth(msg), MAX_REPLY_INDENT_DEPTH);
-                const replyIndent = replyDepth > 0 ? { marginLeft: `${replyDepth * 20}px` } : undefined;
-                const nestedReplyCount = getDescendantReplyCount(msg.id);
-                const canCollapseReplies = nestedReplyCount > 0;
-                const isRepliesCollapsed = collapsedReplyRoots.has(msg.id);
-
-                return (
-                  <div
-                    key={msg.id}
-                    ref={(node) => {
-                      messageRefs.current[msg.id] = node;
-                    }}
-                    className={`flex gap-4 group ${!showHeader ? 'mt-1' : 'mt-6'}`}
-                    style={replyIndent}
-                  >
-                    {showHeader ? (
-                      <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
-                        <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
-                        <AvatarFallback>{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || '#'}</AvatarFallback>
-                      </Avatar>
-                    ) : (
-                      <div className="w-10 flex-shrink-0" />
-                    )}
-                    
-                    <div className="flex-1 min-w-0">
-                      {canCollapseReplies && (
-                        <button
-                          type="button"
-                          className="mb-1 inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                          onClick={() => toggleCollapsedReplies(msg.id)}
-                          aria-expanded={!isRepliesCollapsed}
-                          aria-label={`${isRepliesCollapsed ? "Show" : "Hide"} replies for message #${msg.seq_id}`}
-                        >
-                          {isRepliesCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                          <span>{isRepliesCollapsed ? "Show" : "Hide"} {nestedReplyCount} repl{nestedReplyCount === 1 ? "y" : "ies"}</span>
-                        </button>
-                      )}
-                      {showHeader && (
-                        <div className="flex items-baseline gap-2 mb-1">
-                          <span className="font-semibold text-foreground text-sm">
-                            {resolveSenderName(msg.sender_user_id, msg)}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground">{format(new Date(msg.created_at), 'h:mm a')}</span>
-                        </div>
-                      )}
-                      <div className="relative inline-block max-w-[85%] group-hover:bg-accent/50 rounded-lg -mx-2 px-2 py-1 transition-colors">
-                        {msg.reply_to_message_id && (
-                          <button
-                            type="button"
-                            onClick={() => jumpToMessage(msg.reply_to_message_id)}
-                            className="mb-2 block w-full text-left rounded-md border border-border/60 bg-background/80 px-2 py-1 hover:bg-background transition-colors"
-                          >
-                            <div className="text-[11px] font-semibold text-primary">
-                              Replying to {resolveSenderLabel(repliedMessage)}
-                              {msg.reply_to_seq_id ? ` (#${msg.reply_to_seq_id})` : ""}
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate">{getMessageSnippet(repliedMessage)}</div>
-                          </button>
-                        )}
-                        <div className="text-sm text-foreground/90 whitespace-pre-wrap break-words leading-relaxed">
-                          {msg.deleted_at
-                            ? "Message deleted"
-                            : msg.content_type === "text"
-                              ? msg.content_text
-                              : JSON.stringify(msg.content_json ?? {}, null, 2)}
-                        </div>
-                        {!msg.deleted_at && Object.keys(msg.reactions_summary?.counts ?? {}).length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {Object.entries(msg.reactions_summary.counts)
-                              .sort((a, b) => a[0].localeCompare(b[0]))
-                              .map(([emoji, count]) => {
-                                const isMine = (msg.reactions_summary?.my_reaction ?? []).includes(emoji);
-                                return (
-                                  <button
-                                    key={`${msg.id}-reaction-${emoji}`}
-                                    type="button"
-                                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors ${
-                                      isMine
-                                        ? "border-primary/50 bg-primary/10 text-primary"
-                                        : "border-border/70 bg-background/80 text-foreground/80 hover:bg-accent"
-                                    }`}
-                                    onClick={() => toggleMessageReaction(emoji, msg)}
-                                    aria-label={`${isMine ? "Remove" : "Add"} reaction ${emoji} on message #${msg.seq_id}`}
-                                  >
-                                    <span>{emoji}</span>
-                                    <span>{count}</span>
-                                  </button>
-                                );
-                              })}
-                          </div>
-                        )}
-                        
-                        {/* Hover Actions */}
-                        <div className="absolute -top-3 right-0 opacity-0 group-hover:opacity-100 transition-opacity bg-card border border-border rounded-lg shadow-lg flex items-center p-0.5 z-10 translate-x-2">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                                aria-label={`Add reaction to message #${msg.seq_id}`}
-                              >
-                                <SmilePlus className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-auto min-w-0 p-1">
-                              <div className="flex items-center gap-1">
-                                {QUICK_REACTIONS.map((emoji) => (
-                                  <DropdownMenuItem
-                                    key={`${msg.id}-${emoji}`}
-                                    className="h-8 w-8 p-0 flex items-center justify-center text-base"
-                                    onSelect={() => toggleMessageReaction(emoji, msg)}
-                                    aria-label={`React with ${emoji}`}
-                                  >
-                                    {emoji}
-                                  </DropdownMenuItem>
-                                ))}
-                              </div>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          {(canCompose || canReplyAsMember) && !msg.deleted_at && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                              onClick={() => setReplyingTo(msg)}
-                              aria-label={`Reply to message #${msg.seq_id}`}
-                            >
-                              <Reply className="w-4 h-4" />
-                            </Button>
-                          )}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-foreground" aria-label={`Open options for message #${msg.seq_id}`}>
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
-                              {(canCompose || canReplyAsMember) && !msg.deleted_at && (
-                                <DropdownMenuItem
-                                  onSelect={() => {
-                                    setReplyingTo(msg);
-                                    focusComposer();
-                                  }}
-                                >
-                                  <Reply className="mr-2 h-4 w-4" />
-                                  Reply
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem
-                                onSelect={() => {
-                                  void copyMessageText(msg);
-                                }}
-                                disabled={Boolean(msg.deleted_at) || msg.content_type !== "text" || !((msg.content_text || "").trim().length > 0)}
-                              >
-                                <Copy className="mr-2 h-4 w-4" />
-                                Copy text
-                              </DropdownMenuItem>
-                              {msg.reply_to_message_id && (
-                                <DropdownMenuItem onSelect={() => jumpToMessage(msg.reply_to_message_id)}>
-                                  <ArrowUpRight className="mr-2 h-4 w-4" />
-                                  Jump to replied message
-                                </DropdownMenuItem>
-                              )}
-                              {canCollapseReplies && (
-                                <>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem onSelect={() => toggleCollapsedReplies(msg.id)}>
-                                    {isRepliesCollapsed ? "Show replies" : "Hide replies"}
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
+              rootMessages.map((msg, i) => renderMessageThread(msg, rootMessages[i - 1]))
             )}
             <div ref={messagesEndRef} />
           </>
