@@ -107,7 +107,7 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
       ```bash
       docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
       ```
-11. Open the sidebar Delivery Monitor as User A.
+11. Open the Delivery Monitor from User A's Profile page.
     - Normal demo state should show published/pending counters and empty failed/dead-lettered tables.
     - If a delivery has failed in the environment, use the per-row Retry button or Retry all button to move it back to pending.
     - Worker logs show retry scheduling and dead-letter transitions when RabbitMQ publish failures occur.

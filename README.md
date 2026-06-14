@@ -129,7 +129,7 @@ This opens User B's WebSocket while pending, approves User B, verifies membershi
 6. User B receives/reads.
 7. Open the event log subpage from channel details.
 8. Click Verify integrity and show the Audit integrity badge.
-9. Open Delivery Monitor from the sidebar as a channel owner/admin.
+9. Open Delivery Monitor from the Profile page as a channel owner/admin.
 10. Show unauthorized access denial on private channel.
 11. Show private upload access is denied to a non-member.
 12. Show ciphertext at rest:

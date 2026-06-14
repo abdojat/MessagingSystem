@@ -23,7 +23,7 @@
 10. Show that User B receives the message live through the WebSocket-backed UI. If the live socket is unavailable in the environment, show the REST sync/backfill result instead.
 11. Open the event log and show `channel.created`, `membership.joined`, and `message.published`.
 12. Click Verify integrity and show the Audit integrity badge/check.
-13. Open Delivery Monitor as User A and show delivery counters plus empty or retryable failure tables.
+13. Open Delivery Monitor from User A's Profile page and show delivery counters plus empty or retryable failure tables.
 14. Create a private upload owned by User A, attach it to a message, and show that User C receives `403 Forbidden` when trying to download the file.
 15. If RabbitMQ management is available, show the exchange/queue activity, worker logs, or the `q.dead.messages` queue as extra proof of the broker path.
 

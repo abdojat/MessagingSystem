@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, ChevronDown, ChevronRight, Hash, LogOut, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Hash, LogOut, Plus, Search } from "lucide-react";
 import { useChannels } from "@/hooks/use-channels";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useLogout } from "@/hooks/use-auth";
@@ -265,29 +265,6 @@ export function AppSidebar() {
             </SidebarSection>
           ) : null}
 
-          {myChannels.length > 0 ? (
-            <div className="space-y-1">
-              <Link
-                href={localePath("/app/delivery")}
-                className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 ${
-                  pathname === localePath("/app/delivery")
-                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
-                    : "hover:bg-sidebar-accent text-sidebar-foreground/80 hover:text-sidebar-foreground"
-                }`}
-              >
-                <div
-                  className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-                    pathname === localePath("/app/delivery")
-                      ? "bg-primary-foreground/20 text-white"
-                      : "bg-sidebar-accent-foreground/10 text-sidebar-foreground/60"
-                  }`}
-                >
-                  <Activity className="h-4 w-4" />
-                </div>
-                <span className="text-sm font-medium">Delivery Monitor</span>
-              </Link>
-            </div>
-          ) : null}
         </div>
 
         <div className="p-4 border-t border-sidebar-border bg-sidebar/50">

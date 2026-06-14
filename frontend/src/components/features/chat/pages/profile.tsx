@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import {
+  Activity,
   CheckCircle2,
   CircleDashed,
   Clock3,
@@ -21,7 +22,7 @@ import { useSessions } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -569,6 +570,10 @@ export default function ProfilePage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
+                <Link href={localePath("/app/delivery")} className={buttonVariants({ variant: "outline" })}>
+                  <Activity className="mr-2 h-4 w-4" />
+                  Delivery Monitor
+                </Link>
                 <Button variant="secondary" onClick={() => void handleCopy("Username", user.username)}>
                   <Copy className="mr-2 h-4 w-4" />
                   Copy Username
