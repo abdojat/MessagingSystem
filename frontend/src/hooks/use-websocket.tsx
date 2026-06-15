@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChannelResponse, MessageResponse } from '../types/api';
 import { getWsUrl } from '@/services/api/runtime';
+import { isChannelListQueryKey } from '@/hooks/query-keys';
 
 interface WSContextType {
   status: 'connecting' | 'connected' | 'disconnected';
@@ -69,9 +70,11 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
               (old: ChannelResponse | undefined) => (old ? updater(old) : old)
             );
             queryClient.setQueriesData(
-              { queryKey: ['/channels'] },
+              { predicate: (query) => isChannelListQueryKey(query.queryKey) },
               (old: ChannelResponse[] | undefined) =>
-                old?.map((channel) => (channel.id === channelId ? updater(channel) : channel))
+                Array.isArray(old)
+                  ? old.map((channel) => (channel.id === channelId ? updater(channel) : channel))
+                  : old
             );
           };
 

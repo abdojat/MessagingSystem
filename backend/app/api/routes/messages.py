@@ -386,6 +386,17 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
     path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
     if not path.exists():
         raise to_http_exception(AppError("upload content not found", 404, code="NOT_FOUND"))
+    await MessageService._safe_log_event(
+        db,
+        "upload.accessed",
+        {
+            "upload_id": str(file_id),
+            "content_type": upload.content_type,
+            "size_bytes": int(upload.size_bytes),
+        },
+        actor_user_id=user.id,
+        commit=True,
+    )
     return Response(content=path.read_bytes(), media_type=upload.content_type)
 
 

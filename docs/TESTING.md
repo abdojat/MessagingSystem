@@ -7,6 +7,11 @@ Backend P0 tests:
 - `test_upload_download_requires_channel_membership`
 - `test_media_attachments_can_be_published_without_text_and_synced`
 - `test_publishing_attachment_requires_stored_upload_content`
+- `test_publish_request_rejects_duplicate_attachment_references`
+- `test_publish_request_rejects_extra_attachment_metadata`
+- `test_upload_store_errors_are_logged_and_do_not_mark_content_stored`
+- `test_upload_checksum_mismatch_is_logged_and_keeps_upload_pending`
+- `test_svg_uploads_are_rejected_for_protected_media`
 - `test_upload_storage_path_sanitizes_filename_and_stays_within_base_dir`
 - `test_avatar_url_validation_rejects_unsafe_values`
 - `test_avatar_url_validation_accepts_safe_values`
@@ -114,7 +119,9 @@ Verifies:
 - Event log contains core events
 - Event integrity is checked from `GET /v1/channels/{id}/events/integrity` for the fresh demo channel
 - Private upload access is denied to an unauthorized user
-- Backend regression coverage verifies attachment-only photo/video/audio messages are syncable by a subscriber and that messages cannot reference upload records before file bytes are stored
+- Backend regression coverage verifies attachment-only photo/video/audio messages are syncable by a subscriber, that messages cannot reference upload records before file bytes are stored, that client-supplied attachment metadata is rejected, and that duplicate attachment references are rejected
+- Upload create/store/access audit events are covered, and size/checksum upload store failures are logged without marking the upload content as stored
+- SVG image uploads are rejected for protected media/avatar safety
 - Unsafe avatar URLs are rejected before storage
 - Uploaded profile avatars are visible to authenticated users through the protected media path
 - Private channel avatar uploads remain restricted to approved channel members
@@ -130,7 +137,7 @@ python -m pytest backend\tests\test_p0_requirements.py -q
 cd frontend
 npm run typecheck
 ```
-Result on 2026-06-16: backend P0 tests passed (`31 passed, 10 skipped`) and frontend typecheck passed.
+Result on 2026-06-16 multimedia audit: backend P0 tests passed (`33 passed, 13 skipped`) and frontend typecheck passed.
 
 ## Approval-Required Membership Verifier
 ```bash

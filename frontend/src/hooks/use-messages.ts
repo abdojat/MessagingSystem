@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api/client';
 import { AttachmentItem, ChannelResponse, MessageResponse, ReactionSummaryResponse } from '../types/api';
+import { isChannelListQueryKey } from '@/hooks/query-keys';
 
 export function useMessages(channelId: string) {
   return useQuery({
@@ -54,17 +55,19 @@ export function useSendMessage() {
           : old
       );
       queryClient.setQueriesData(
-        { queryKey: ['/channels'] },
+        { predicate: (query) => isChannelListQueryKey(query.queryKey) },
         (old: ChannelResponse[] | undefined) =>
-          old?.map((channel) =>
-            channel.id === variables.channelId
-              ? {
-                  ...channel,
-                  last_message: newMessage,
-                  last_message_at: newMessage.created_at,
-                }
-              : channel
-          )
+          Array.isArray(old)
+            ? old.map((channel) =>
+                channel.id === variables.channelId
+                  ? {
+                      ...channel,
+                      last_message: newMessage,
+                      last_message_at: newMessage.created_at,
+                    }
+                  : channel
+              )
+            : old
       );
     }
   });
@@ -98,9 +101,11 @@ export function useMarkSeen() {
         (old: ChannelResponse | undefined) => (old ? applySeenState(old) : old)
       );
       queryClient.setQueriesData(
-        { queryKey: ['/channels'] },
+        { predicate: (query) => isChannelListQueryKey(query.queryKey) },
         (old: ChannelResponse[] | undefined) =>
-          old?.map((channel) => (channel.id === variables.channelId ? applySeenState(channel) : channel))
+          Array.isArray(old)
+            ? old.map((channel) => (channel.id === variables.channelId ? applySeenState(channel) : channel))
+            : old
       );
     },
   });

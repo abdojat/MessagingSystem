@@ -14,10 +14,13 @@
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
 - The upload route allows content only to the owner, and the download route only allows the owner or a user who is a member of a channel that references the upload.
 - Message media attachments use the same protected upload route. A message can reference uploaded photo, video, or audio content only after the uploader has stored the bytes; subscribers fetch/play that media through authenticated requests.
+- Publish requests accept only attachment `file_id` references from clients. Filename, content type, size, and protected URL are derived from trusted upload records by the backend before the message is stored.
+- Upload content types are normalized before storage. SVG image uploads are rejected because they are not needed for the multimedia demo and are riskier to render than ordinary photo/video/audio files.
 - Profile and channel avatar uploads stay behind the same authenticated upload route. Stored avatar URLs are validated to allow only `http`, `https`, or protected upload-content paths; internal avatar uploads must be owned by the updater, already stored, and be non-SVG images.
 - Avatar upload downloads have explicit access rules: profile avatars are visible to authenticated users, public channel avatars are visible to authenticated users, and private channel avatars are visible only to approved channel members or the upload owner.
 - Unauthorized publish/read attempts are logged as security events.
 - Unauthorized upload download attempts are logged as `security.unauthorized_upload_access`.
+- Upload creation, successful content storage, successful content access, and size/checksum store failures are logged as `upload.created`, `upload.content_stored`, `upload.accessed`, and `upload.store_failed`.
 - Delivery monitoring endpoints under `/v1/admin/delivery/*` require authentication and are scoped to channels where the caller is an owner or an admin with management permissions.
 - Manual delivery retry is authorized through the same scoped channel-manager rule.
 
@@ -60,3 +63,4 @@ This protects against accidental or unauthorized event modification, insertion, 
 - The project does not claim end-to-end encryption; it uses server-side encryption at rest.
 - Event integrity is tamper-evident inside PostgreSQL, but it does not prove that the database itself was never rewritten by a fully privileged operator.
 - The verifier does not prove tail deletion unless the previous last hash was stored or witnessed outside the database.
+- Successful upload access logging is best-effort so a temporary audit-log failure does not break protected media playback; unauthorized access logging still blocks the request with `403 Forbidden`.

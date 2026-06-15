@@ -221,10 +221,18 @@ async def test_upload_download_requires_channel_membership(db_session, monkeypat
         await get_upload_content(upload.id, db_session, outsider)
     assert exc_info.value.status_code == 403
 
+    owner_response = await get_upload_content(upload.id, db_session, owner)
+    assert owner_response.body == b"hello world"
+
     unauthorized_events = (
         await db_session.execute(select(Event).where(Event.event_type == "security.unauthorized_upload_access"))
     ).scalars().all()
     assert len(unauthorized_events) == 1
+    accessed_events = (
+        await db_session.execute(select(Event).where(Event.event_type == "upload.accessed"))
+    ).scalars().all()
+    assert len(accessed_events) == 1
+    assert accessed_events[0].payload["upload_id"] == str(upload.id)
 
 
 @pytest.mark.asyncio
@@ -286,6 +294,12 @@ async def test_media_attachments_can_be_published_without_text_and_synced(db_ses
     assert synced_message is not None
     assert synced_message.attachments and len(synced_message.attachments) == 3
 
+    upload_event_types = {
+        event.event_type
+        for event in (await db_session.execute(select(Event).where(Event.actor_user_id == owner.id))).scalars().all()
+    }
+    assert {"upload.created", "upload.content_stored", "message.published"}.issubset(upload_event_types)
+
 
 @pytest.mark.asyncio
 async def test_publishing_attachment_requires_stored_upload_content(db_session, monkeypatch, tmp_path):
@@ -316,6 +330,91 @@ async def test_publishing_attachment_requires_stored_upload_content(db_session, 
             channel.id,
             owner.id,
             PublishMessageRequest(attachments=[{"file_id": str(upload.id)}]),
+        )
+    assert exc_info.value.status_code == 400
+
+
+def test_publish_request_rejects_duplicate_attachment_references():
+    file_id = "00000000-0000-0000-0000-000000000001"
+    with pytest.raises(ValidationError):
+        PublishMessageRequest(attachments=[{"file_id": file_id}, {"file_id": file_id}])
+
+
+def test_publish_request_rejects_extra_attachment_metadata():
+    with pytest.raises(ValidationError):
+        PublishMessageRequest(
+            attachments=[
+                {
+                    "file_id": "00000000-0000-0000-0000-000000000001",
+                    "url": "https://example.com/not-trusted.png",
+                }
+            ]
+        )
+
+
+@pytest.mark.asyncio
+async def test_upload_store_errors_are_logged_and_do_not_mark_content_stored(db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    owner = await AuthService.register(db_session, RegisterRequest(username="media_error", email="media_error@x.com", password="password123"))
+    upload = await MessageService.create_upload(
+        db_session,
+        owner.id,
+        UploadCreateRequest(filename="clip.mp4", content_type="video/mp4", size_bytes=7),
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        await MessageService.store_upload_content(db_session, owner.id, upload.id, b"short")
+    assert exc_info.value.status_code == 400
+
+    await db_session.refresh(upload)
+    assert upload.public_url is None
+    assert not MessageService._resolve_upload_path(str(tmp_path), upload.storage_path).exists()
+    failed_event = (
+        await db_session.execute(select(Event).where(Event.event_type == "upload.store_failed"))
+    ).scalars().one()
+    assert failed_event.payload["upload_id"] == str(upload.id)
+    assert failed_event.payload["reason"] == "size_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_upload_checksum_mismatch_is_logged_and_keeps_upload_pending(db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    owner = await AuthService.register(
+        db_session,
+        RegisterRequest(username="media_checksum", email="media_checksum@x.com", password="password123"),
+    )
+    upload = await MessageService.create_upload(
+        db_session,
+        owner.id,
+        UploadCreateRequest(filename="song.mp3", content_type="audio/mpeg", size_bytes=4, checksum="0" * 64),
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        await MessageService.store_upload_content(db_session, owner.id, upload.id, b"data")
+    assert exc_info.value.status_code == 400
+
+    await db_session.refresh(upload)
+    assert upload.public_url is None
+    failed_event = (
+        await db_session.execute(select(Event).where(Event.event_type == "upload.store_failed"))
+    ).scalars().one()
+    assert failed_event.payload["upload_id"] == str(upload.id)
+    assert failed_event.payload["reason"] == "checksum_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_svg_uploads_are_rejected_for_protected_media(db_session):
+    owner = await AuthService.register(db_session, RegisterRequest(username="media_svg", email="media_svg@x.com", password="password123"))
+
+    with pytest.raises(AppError) as exc_info:
+        await MessageService.create_upload(
+            db_session,
+            owner.id,
+            UploadCreateRequest(filename="script.svg", content_type="image/svg+xml", size_bytes=10),
         )
     assert exc_info.value.status_code == 400
 

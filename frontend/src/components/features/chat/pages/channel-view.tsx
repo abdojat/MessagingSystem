@@ -187,10 +187,12 @@ function AuthenticatedPlaybackMedia({
   src,
   kind,
   className,
+  fallbackLabel,
 }: {
   src?: string;
   kind: Exclude<MediaKind, "image">;
   className?: string;
+  fallbackLabel: string;
 }) {
   const accessToken = useAuthStore((state) => state.accessToken);
   const needsAuth = isProtectedApiMediaUrl(src);
@@ -200,7 +202,7 @@ function AuthenticatedPlaybackMedia({
   useEffect(() => {
     setFailed(false);
     setObjectUrl(undefined);
-  }, [accessToken, needsAuth, src]);
+  }, [accessToken, kind, needsAuth, src]);
 
   useEffect(() => {
     if (!src || !needsAuth || !accessToken) {
@@ -220,7 +222,15 @@ function AuthenticatedPlaybackMedia({
         if (!response.ok) {
           throw new Error(`media request failed: ${response.status}`);
         }
+        const expectedPrefix = `${kind}/`;
+        const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+        if (contentType && !contentType.startsWith(expectedPrefix)) {
+          throw new Error(`media response is not ${kind}`);
+        }
         const blob = await response.blob();
+        if (blob.type && !blob.type.toLowerCase().startsWith(expectedPrefix)) {
+          throw new Error(`media blob is not ${kind}`);
+        }
         localObjectUrl = URL.createObjectURL(blob);
         setObjectUrl(localObjectUrl);
       } catch {
@@ -242,7 +252,11 @@ function AuthenticatedPlaybackMedia({
 
   const mediaSrc = needsAuth ? objectUrl : src;
   if (failed) {
-    return null;
+    return (
+      <div className={cn("flex h-20 items-center justify-center text-xs text-muted-foreground", className)}>
+        {fallbackLabel}
+      </div>
+    );
   }
   if (!mediaSrc) {
     return (
@@ -260,6 +274,7 @@ function AuthenticatedPlaybackMedia({
 }
 
 function MessageAttachments({ attachments, isMe }: { attachments: AttachmentItem[]; isMe: boolean }) {
+  const commonT = useTranslations("common");
   const visibleAttachments = attachments.filter((attachment) => getAttachmentUrl(attachment));
   if (visibleAttachments.length === 0) return null;
 
@@ -281,10 +296,10 @@ function MessageAttachments({ attachments, isMe }: { attachments: AttachmentItem
             {kind === "image" && url ? (
               <AuthenticatedImage src={url} alt={filename} className="max-h-80 w-full min-w-64 object-contain" />
             ) : kind === "video" && url ? (
-              <AuthenticatedPlaybackMedia src={url} kind="video" className="max-h-80 w-full min-w-64 bg-black" />
+              <AuthenticatedPlaybackMedia src={url} kind="video" className="max-h-80 w-full min-w-64 bg-black" fallbackLabel={commonT("notAvailable")} />
             ) : kind === "audio" && url ? (
               <div className="px-3 pt-3">
-                <AuthenticatedPlaybackMedia src={url} kind="audio" className="w-full min-w-64" />
+                <AuthenticatedPlaybackMedia src={url} kind="audio" className="w-full min-w-64" fallbackLabel={commonT("notAvailable")} />
               </div>
             ) : null}
             <div className={cn("flex min-w-0 items-center gap-2 px-3 py-2 text-xs", labelColor)}>
@@ -424,6 +439,11 @@ export default function ChannelView() {
       }),
     });
 
+    const uploadAccessToken = useAuthStore.getState().accessToken;
+    if (!uploadAccessToken) {
+      throw new Error("missing access token");
+    }
+
     const apiBaseUrl = getApiBaseUrl();
     const uploadUrl = /^https?:\/\//i.test(created.upload_url)
       ? created.upload_url
@@ -432,7 +452,7 @@ export default function ChannelView() {
         : created.upload_url;
 
     const uploadHeaders = new Headers(created.headers || {});
-    uploadHeaders.set("Authorization", `Bearer ${accessToken}`);
+    uploadHeaders.set("Authorization", `Bearer ${uploadAccessToken}`);
     uploadHeaders.set("Content-Type", item.contentType);
 
     const response = await fetch(uploadUrl, {

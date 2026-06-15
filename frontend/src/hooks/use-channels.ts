@@ -9,6 +9,7 @@ import {
   JoinOutcomeResponse,
 } from '../types/api';
 import { useWS } from '@/hooks/use-websocket';
+import { isChannelListQueryKey } from '@/hooks/query-keys';
 
 type ChannelScope = 'my' | 'discover';
 
@@ -52,10 +53,11 @@ export function useChannel(channelId: string) {
     queryFn: () => apiClient<ChannelResponse>(`/channels/${channelId}`),
     initialData: () => {
       const channelQueries = queryClient.getQueriesData<ChannelResponse[]>({
-        queryKey: ['/channels'],
+        predicate: (query) => isChannelListQueryKey(query.queryKey),
       });
 
       for (const [, channels] of channelQueries) {
+        if (!Array.isArray(channels)) continue;
         const match = channels?.find((channel) => channel.id === channelId);
         if (match) {
           return match;

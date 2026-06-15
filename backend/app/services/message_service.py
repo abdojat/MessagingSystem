@@ -26,7 +26,7 @@ from app.db.models import (
     UserChannelState,
     Event,
 )
-from app.schemas.messages import MessagePatchRequest, PublishMessageRequest, SeenRequest, SyncRequest, UploadCreateRequest
+from app.schemas.messages import AttachmentReference, MessagePatchRequest, PublishMessageRequest, SeenRequest, SyncRequest, UploadCreateRequest
 from app.services.event_service import log_event
 from app.services.outbox_service import enqueue_channel_event_outbox, enqueue_message_outbox
 from app.services.rbac import can_publish, can_read
@@ -723,22 +723,40 @@ class MessageService:
         settings = get_settings()
         if req.size_bytes > settings.upload_max_size_bytes:
             raise AppError("file too large", 400, code="VALIDATION_ERROR")
-        if "/" not in req.content_type:
+        content_type = req.content_type.strip().lower()
+        media_type = content_type.split(";", 1)[0].strip()
+        if "/" not in media_type:
             raise AppError("invalid content_type", 400, code="VALIDATION_ERROR")
-        allowed_prefixes = ("image/", "video/", "audio/", "text/", "application/json", "application/pdf")
-        if not req.content_type.startswith(allowed_prefixes):
+        allowed_prefixes = ("image/", "video/", "audio/", "text/")
+        allowed_exact = {"application/json", "application/pdf"}
+        if not (media_type.startswith(allowed_prefixes) or media_type in allowed_exact):
             raise AppError("content_type not allowed", 400, code="VALIDATION_ERROR")
+        if media_type == "image/svg+xml":
+            raise AppError("svg uploads are not allowed", 400, code="VALIDATION_ERROR")
         safe_filename = normalize_upload_filename(req.filename)
         upload = Upload(
             owner_user_id=actor_user_id,
             filename=req.filename,
-            content_type=req.content_type,
+            content_type=media_type,
             size_bytes=req.size_bytes,
             checksum=req.checksum,
             storage_path=f"{actor_user_id}/{uuid4()}-{safe_filename}",
             public_url=None,
         )
         db.add(upload)
+        await db.flush()
+        await log_event(
+            db,
+            "upload.created",
+            {
+                "upload_id": str(upload.id),
+                "filename": upload.filename,
+                "content_type": upload.content_type,
+                "size_bytes": int(upload.size_bytes),
+                "has_checksum": bool(upload.checksum),
+            },
+            actor_user_id=actor_user_id,
+        )
         await db.commit()
         await db.refresh(upload)
         return upload
@@ -833,16 +851,49 @@ class MessageService:
         if not upload or upload.owner_user_id != actor_user_id:
             raise AppError("upload not found", 404, code="NOT_FOUND")
         if len(content) != upload.size_bytes:
+            await MessageService._safe_log_event(
+                db,
+                "upload.store_failed",
+                {
+                    "upload_id": str(file_id),
+                    "reason": "size_mismatch",
+                    "expected_size_bytes": int(upload.size_bytes),
+                    "actual_size_bytes": len(content),
+                },
+                actor_user_id=actor_user_id,
+                commit=True,
+            )
             raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
         if upload.checksum:
             digest = hashlib.sha256(content).hexdigest()
             if digest != upload.checksum:
+                await MessageService._safe_log_event(
+                    db,
+                    "upload.store_failed",
+                    {
+                        "upload_id": str(file_id),
+                        "reason": "checksum_mismatch",
+                    },
+                    actor_user_id=actor_user_id,
+                    commit=True,
+                )
                 raise AppError("checksum mismatch", 400, code="VALIDATION_ERROR")
 
         full_path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(content)
         upload.public_url = f"/v1/uploads/{upload.id}/content"
+        await log_event(
+            db,
+            "upload.content_stored",
+            {
+                "upload_id": str(upload.id),
+                "filename": upload.filename,
+                "content_type": upload.content_type,
+                "size_bytes": int(upload.size_bytes),
+            },
+            actor_user_id=actor_user_id,
+        )
         await db.commit()
         await db.refresh(upload)
         return upload
@@ -934,21 +985,25 @@ class MessageService:
     async def _normalize_attachments(
         db: AsyncSession,
         actor_user_id: UUID,
-        attachments: list[dict] | None,
+        attachments: list[AttachmentReference | dict] | None,
     ) -> list[dict] | None:
         if not attachments:
             return attachments
         if len(attachments) > 10:
             raise AppError("too many attachments", 400, code="VALIDATION_ERROR")
         normalized: list[dict] = []
+        seen_file_ids: set[UUID] = set()
         for raw_item in attachments:
-            file_id_raw = raw_item.get("file_id")
+            file_id_raw = raw_item.file_id if isinstance(raw_item, AttachmentReference) else raw_item.get("file_id")
             if not file_id_raw:
                 raise AppError("attachment.file_id is required", 400, code="VALIDATION_ERROR")
             try:
                 file_id = UUID(str(file_id_raw))
             except ValueError as exc:
                 raise AppError("invalid attachment file_id", 400, code="VALIDATION_ERROR") from exc
+            if file_id in seen_file_ids:
+                raise AppError("duplicate attachment file_id", 400, code="VALIDATION_ERROR")
+            seen_file_ids.add(file_id)
             upload = await db.get(Upload, file_id)
             if upload is None:
                 raise AppError("attachment file not found", 404, code="NOT_FOUND")

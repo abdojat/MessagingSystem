@@ -2,7 +2,13 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class AttachmentReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: UUID
 
 
 class PublishMessageRequest(BaseModel):
@@ -10,7 +16,7 @@ class PublishMessageRequest(BaseModel):
     content_json: dict[str, Any] | None = None
     reply_to_message_id: UUID | None = None
     reply_to_seq_id: int | None = Field(default=None, ge=1)
-    attachments: list[dict[str, Any]] | None = None
+    attachments: list[AttachmentReference] | None = Field(default=None, max_length=10)
     client_msg_id: UUID | None = None
 
     @model_validator(mode="after")
@@ -24,6 +30,10 @@ class PublishMessageRequest(BaseModel):
             raise ValueError("provide content_text, content_json, or at least one attachment")
         if has_text and not self.content_text.strip():
             raise ValueError("content_text cannot be empty")
+        if self.attachments:
+            file_ids = [item.file_id for item in self.attachments]
+            if len(file_ids) != len(set(file_ids)):
+                raise ValueError("attachments cannot contain duplicate file_id values")
         return self
 
 

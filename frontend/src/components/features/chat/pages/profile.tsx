@@ -312,6 +312,11 @@ export default function ProfilePage() {
         }),
       });
 
+      const uploadAccessToken = useAuthStore.getState().accessToken;
+      if (!uploadAccessToken) {
+        throw new Error(t("errors.signInBeforeUpload"));
+      }
+
       const apiBaseUrl = getApiBaseUrl();
       const uploadUrl = /^https?:\/\//i.test(created.upload_url)
         ? created.upload_url
@@ -320,7 +325,7 @@ export default function ProfilePage() {
           : created.upload_url;
 
       const uploadHeaders = new Headers(created.headers || {});
-      uploadHeaders.set("Authorization", `Bearer ${accessToken}`);
+      uploadHeaders.set("Authorization", `Bearer ${uploadAccessToken}`);
       if (!uploadHeaders.has("Content-Type")) {
         uploadHeaders.set("Content-Type", file.type || "application/octet-stream");
       }
