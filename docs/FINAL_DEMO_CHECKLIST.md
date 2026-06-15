@@ -19,17 +19,19 @@
 6. User A creates a channel.
 7. User B joins that channel.
 8. Open the channel page for User B and keep the WebSocket-connected view visible.
-9. User A publishes a message.
-10. Show that User B receives the message live through the WebSocket-backed UI. If the live socket is unavailable in the environment, show the REST sync/backfill result instead.
-11. Open the event log and show `channel.created`, `membership.joined`, and `message.published`.
-12. Click Verify integrity and show the Audit integrity badge/check.
-13. Open Delivery Monitor from User A's Profile page and show delivery counters plus empty or retryable failure tables.
-14. Create a private upload owned by User A, attach it to a message, and show that User C receives `403 Forbidden` when trying to download the file.
-15. If RabbitMQ management is available, show the exchange/queue activity, worker logs, or the `q.dead.messages` queue as extra proof of the broker path.
+9. User A publishes a text message.
+10. User A publishes a small photo, video, or audio file from the paperclip composer control.
+11. Show that User B receives the text and media messages live through the WebSocket-backed UI. If the live socket is unavailable in the environment, show the REST sync/backfill result instead.
+12. Open the event log and show `channel.created`, `membership.joined`, and `message.published`.
+13. Click Verify integrity and show the Audit integrity badge/check.
+14. Open Delivery Monitor from User A's Profile page and show delivery counters plus empty or retryable failure tables.
+15. Create a private upload owned by User A, attach it to a message, and show that User C receives `403 Forbidden` when trying to download the file.
+16. If RabbitMQ management is available, show the exchange/queue activity, worker logs, or the `q.dead.messages` queue as extra proof of the broker path.
 
 ## Proof To Show
 - The channel exists and persists.
 - The subscriber receives the message.
+- The subscriber can view/play protected photo, video, or audio attachments.
 - The event log records the activity.
 - The event log integrity check reports Verified for initialized events.
 - The Delivery Monitor shows outbox delivery status for managed channels.

@@ -13,6 +13,7 @@
 - Channel reads and writes check membership/role permissions.
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
 - The upload route allows content only to the owner, and the download route only allows the owner or a user who is a member of a channel that references the upload.
+- Message media attachments use the same protected upload route. A message can reference uploaded photo, video, or audio content only after the uploader has stored the bytes; subscribers fetch/play that media through authenticated requests.
 - Profile and channel avatar uploads stay behind the same authenticated upload route. Stored avatar URLs are validated to allow only `http`, `https`, or protected upload-content paths; internal avatar uploads must be owned by the updater, already stored, and be non-SVG images.
 - Avatar upload downloads have explicit access rules: profile avatars are visible to authenticated users, public channel avatars are visible to authenticated users, and private channel avatars are visible only to approved channel members or the upload owner.
 - Unauthorized publish/read attempts are logged as security events.

@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useChannel, useChannelMembers, useJoinChannel } from "@/hooks/use-channels";
 import { useMarkSeen, useMessages, useSendMessage, useToggleReaction } from "@/hooks/use-messages";
-import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight, Copy, ArrowUpRight } from "lucide-react";
+import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight, Copy, ArrowUpRight, ImageIcon, Video, Music2, Loader2 } from "lucide-react";
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -12,11 +12,13 @@ import { AuthenticatedImage } from "@/components/shared/AuthenticatedImage";
 import { useAuthStore } from "@/store/authStore";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/hooks/use-toast";
-import type { MessageResponse } from "@/types/api";
+import type { AttachmentItem, MessageResponse, UploadContentResponse, UploadCreateResponse } from "@/types/api";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
-import { resolveApiMediaUrl } from "@/lib/mediaUrl";
+import { isProtectedApiMediaUrl, resolveApiMediaUrl } from "@/lib/mediaUrl";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { apiClient } from "@/services/api/client";
+import { getApiBaseUrl } from "@/services/api/runtime";
 
 function ChannelViewSkeleton() {
   return (
@@ -59,12 +61,94 @@ function ChannelViewSkeleton() {
 }
 const MAX_REPLY_CHAIN_DEPTH = 12;
 const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E}", "\u{1F389}", "\u{1F44E}"] as const;
+const MEDIA_ACCEPT = "image/*,video/*,audio/*";
+const MAX_MEDIA_ATTACHMENTS = 6;
+const MAX_MEDIA_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+
+type MediaKind = "image" | "video" | "audio";
+
+type PendingMediaAttachment = {
+  id: string;
+  file: File;
+  contentType: string;
+  kind: MediaKind;
+};
+
+const MEDIA_EXTENSION_TYPES: Record<string, string> = {
+  aac: "audio/aac",
+  bmp: "image/bmp",
+  flac: "audio/flac",
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  m4a: "audio/mp4",
+  mov: "video/quicktime",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+  ogg: "audio/ogg",
+  ogv: "video/ogg",
+  png: "image/png",
+  wav: "audio/wav",
+  webm: "video/webm",
+  webp: "image/webp",
+};
+
+function getMessageMediaKind(contentType?: string | null): MediaKind | null {
+  const normalized = contentType?.toLowerCase() || "";
+  if (normalized.startsWith("image/")) return "image";
+  if (normalized.startsWith("video/")) return "video";
+  if (normalized.startsWith("audio/")) return "audio";
+  return null;
+}
+
+function inferMediaContentType(file: File): string | null {
+  const declaredType = file.type?.toLowerCase();
+  if (getMessageMediaKind(declaredType)) {
+    return declaredType;
+  }
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
+  const inferredType = MEDIA_EXTENSION_TYPES[extension];
+  return getMessageMediaKind(inferredType) ? inferredType : null;
+}
+
+function createPendingAttachmentId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatBytes(value?: number | null): string {
+  if (!value || value < 1) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function getAttachmentUrl(attachment: AttachmentItem): string | undefined {
+  return resolveApiMediaUrl(attachment.url || attachment.public_url);
+}
+
+function AttachmentIcon({ kind }: { kind: MediaKind | null }) {
+  if (kind === "image") return <ImageIcon className="h-4 w-4" />;
+  if (kind === "video") return <Video className="h-4 w-4" />;
+  if (kind === "audio") return <Music2 className="h-4 w-4" />;
+  return <Paperclip className="h-4 w-4" />;
+}
 
 function getMessageSnippet(message: MessageResponse | undefined, t: ReturnType<typeof useTranslations>): string {
   if (!message) return t("messages.snippet.notLoaded");
   if (message.deleted_at) return t("messages.snippet.deleted");
   if (message.content_type === "text") {
     const text = (message.content_text || "").trim();
+    if (!text && message.attachments && message.attachments.length > 0) {
+      return t("messages.snippet.attachments", { count: message.attachments.length });
+    }
     if (!text) return t("messages.snippet.empty");
     return text.length > 90 ? `${text.slice(0, 90)}...` : text;
   }
@@ -99,6 +183,122 @@ async function copyToClipboard(value: string) {
   }
 }
 
+function AuthenticatedPlaybackMedia({
+  src,
+  kind,
+  className,
+}: {
+  src?: string;
+  kind: Exclude<MediaKind, "image">;
+  className?: string;
+}) {
+  const accessToken = useAuthStore((state) => state.accessToken);
+  const needsAuth = isProtectedApiMediaUrl(src);
+  const [objectUrl, setObjectUrl] = useState<string | undefined>();
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+    setObjectUrl(undefined);
+  }, [accessToken, needsAuth, src]);
+
+  useEffect(() => {
+    if (!src || !needsAuth || !accessToken) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const fetchSrc = src;
+    let localObjectUrl: string | undefined;
+
+    async function loadProtectedMedia() {
+      try {
+        const response = await fetch(fetchSrc, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`media request failed: ${response.status}`);
+        }
+        const blob = await response.blob();
+        localObjectUrl = URL.createObjectURL(blob);
+        setObjectUrl(localObjectUrl);
+      } catch {
+        if (!controller.signal.aborted) {
+          setFailed(true);
+        }
+      }
+    }
+
+    void loadProtectedMedia();
+
+    return () => {
+      controller.abort();
+      if (localObjectUrl) {
+        URL.revokeObjectURL(localObjectUrl);
+      }
+    };
+  }, [accessToken, needsAuth, src]);
+
+  const mediaSrc = needsAuth ? objectUrl : src;
+  if (failed) {
+    return null;
+  }
+  if (!mediaSrc) {
+    return (
+      <div className={cn("flex h-20 items-center justify-center", className)}>
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (kind === "video") {
+    return <video src={mediaSrc} controls preload="metadata" className={className} />;
+  }
+
+  return <audio src={mediaSrc} controls preload="metadata" className={className} />;
+}
+
+function MessageAttachments({ attachments, isMe }: { attachments: AttachmentItem[]; isMe: boolean }) {
+  const visibleAttachments = attachments.filter((attachment) => getAttachmentUrl(attachment));
+  if (visibleAttachments.length === 0) return null;
+
+  return (
+    <div className="mt-3 grid max-w-full gap-2">
+      {visibleAttachments.map((attachment) => {
+        const kind = getMessageMediaKind(attachment.content_type);
+        const url = getAttachmentUrl(attachment);
+        const filename = attachment.filename || "attachment";
+        const sizeLabel = formatBytes(attachment.size_bytes);
+        const labelColor = isMe ? "text-primary-foreground/80" : "text-muted-foreground";
+        const shellClassName = cn(
+          "overflow-hidden rounded-xl border",
+          isMe ? "border-primary-foreground/20 bg-primary-foreground/10" : "border-border/70 bg-background/80"
+        );
+
+        return (
+          <div key={`${attachment.file_id}-${attachment.filename || "media"}`} className={shellClassName}>
+            {kind === "image" && url ? (
+              <AuthenticatedImage src={url} alt={filename} className="max-h-80 w-full min-w-64 object-contain" />
+            ) : kind === "video" && url ? (
+              <AuthenticatedPlaybackMedia src={url} kind="video" className="max-h-80 w-full min-w-64 bg-black" />
+            ) : kind === "audio" && url ? (
+              <div className="px-3 pt-3">
+                <AuthenticatedPlaybackMedia src={url} kind="audio" className="w-full min-w-64" />
+              </div>
+            ) : null}
+            <div className={cn("flex min-w-0 items-center gap-2 px-3 py-2 text-xs", labelColor)}>
+              <AttachmentIcon kind={kind} />
+              <span className="truncate font-medium">{filename}</span>
+              {sizeLabel ? <span className="shrink-0 opacity-80">{sizeLabel}</span> : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ChannelView() {
   const params = useParams<{ channelId?: string | string[] }>();
   const channelId = Array.isArray(params?.channelId) ? params.channelId[0] : params?.channelId;
@@ -120,15 +320,20 @@ export default function ChannelView() {
   const markSeen = useMarkSeen();
   
   const [content, setContent] = useState("");
+  const [pendingMedia, setPendingMedia] = useState<PendingMediaAttachment[]>([]);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageResponse | null>(null);
   const [collapsedReplyRoots, setCollapsedReplyRoots] = useState<Set<string>>(new Set());
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const lastMarkedSeenSeqRef = useRef<number | null>(null);
+  const pendingMediaRef = useRef<PendingMediaAttachment[]>([]);
   const user = useAuthStore(s => s.user);
+  const accessToken = useAuthStore(s => s.accessToken);
   const isMember = ['owner', 'admin', 'member'].includes(channel?.my_role || '');
   const canCompose = ['owner', 'admin'].includes(channel?.my_role || '');
   const canReplyAsMember = isMember && !canCompose;
@@ -147,7 +352,18 @@ export default function ChannelView() {
   useEffect(() => {
     setReplyingTo(null);
     setCollapsedReplyRoots(new Set());
+    setPendingMedia([]);
   }, [channelId]);
+
+  useEffect(() => {
+    pendingMediaRef.current = pendingMedia;
+  }, [pendingMedia]);
+
+  useEffect(() => {
+    return () => {
+      pendingMediaRef.current = [];
+    };
+  }, []);
 
   useEffect(() => {
     if (!channelId || !isMember || messages.length === 0) return;
@@ -194,26 +410,146 @@ export default function ChannelView() {
   const channelAvatarUrl = resolveApiMediaUrl(channel.avatar_url);
   const userAvatarUrl = resolveApiMediaUrl(user?.avatar_url);
 
-  const handleSend = (e?: React.FormEvent) => {
+  const uploadPendingMedia = async (item: PendingMediaAttachment): Promise<{ file_id: string }> => {
+    if (!accessToken) {
+      throw new Error("missing access token");
+    }
+
+    const created = await apiClient<UploadCreateResponse>("/uploads", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: item.file.name,
+        content_type: item.contentType,
+        size_bytes: item.file.size,
+      }),
+    });
+
+    const apiBaseUrl = getApiBaseUrl();
+    const uploadUrl = /^https?:\/\//i.test(created.upload_url)
+      ? created.upload_url
+      : /^https?:\/\//i.test(apiBaseUrl)
+        ? `${new URL(apiBaseUrl).origin}${created.upload_url.startsWith("/") ? created.upload_url : `/${created.upload_url}`}`
+        : created.upload_url;
+
+    const uploadHeaders = new Headers(created.headers || {});
+    uploadHeaders.set("Authorization", `Bearer ${accessToken}`);
+    uploadHeaders.set("Content-Type", item.contentType);
+
+    const response = await fetch(uploadUrl, {
+      method: created.method || "PUT",
+      headers: uploadHeaders,
+      body: item.file,
+    });
+    if (!response.ok) {
+      throw new Error(`upload failed: ${response.status}`);
+    }
+    await response.json() as UploadContentResponse;
+    return { file_id: created.file_id };
+  };
+
+  const handleMediaSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.currentTarget.value = "";
+    if (files.length === 0) return;
+
+    const availableSlots = Math.max(0, MAX_MEDIA_ATTACHMENTS - pendingMedia.length);
+    if (availableSlots === 0) {
+      toast({
+        title: t("toasts.mediaLimitTitle"),
+        description: t("toasts.mediaLimitDescription", { count: MAX_MEDIA_ATTACHMENTS }),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let rejectedTypeCount = 0;
+    let rejectedSizeCount = 0;
+    const accepted: PendingMediaAttachment[] = [];
+    for (const file of files.slice(0, availableSlots)) {
+      const contentType = inferMediaContentType(file);
+      const kind = getMessageMediaKind(contentType);
+      if (!contentType || !kind) {
+        rejectedTypeCount += 1;
+        continue;
+      }
+      if (file.size > MAX_MEDIA_FILE_SIZE_BYTES) {
+        rejectedSizeCount += 1;
+        continue;
+      }
+      accepted.push({
+        id: createPendingAttachmentId(),
+        file,
+        contentType,
+        kind,
+      });
+    }
+
+    if (files.length > availableSlots) {
+      toast({
+        title: t("toasts.mediaLimitTitle"),
+        description: t("toasts.mediaLimitDescription", { count: MAX_MEDIA_ATTACHMENTS }),
+        variant: "destructive",
+      });
+    }
+    if (rejectedTypeCount > 0) {
+      toast({
+        title: t("toasts.mediaUnsupportedTitle"),
+        description: t("toasts.mediaUnsupportedDescription"),
+        variant: "destructive",
+      });
+    }
+    if (rejectedSizeCount > 0) {
+      toast({
+        title: t("toasts.mediaTooLargeTitle"),
+        description: t("toasts.mediaTooLargeDescription", { size: formatBytes(MAX_MEDIA_FILE_SIZE_BYTES) }),
+        variant: "destructive",
+      });
+    }
+    if (accepted.length > 0) {
+      setPendingMedia((current) => [...current, ...accepted]);
+    }
+  };
+
+  const removePendingMedia = (id: string) => {
+    setPendingMedia((current) => current.filter((item) => item.id !== id));
+  };
+
+  const handleSend = async (e?: React.FormEvent | React.MouseEvent<HTMLButtonElement>) => {
     e?.preventDefault();
     const currentReplyTarget = replyingTo ? messages.find((item) => item.id === replyingTo.id) ?? replyingTo : null;
     const canReplyToTarget = currentReplyTarget && !currentReplyTarget.deleted_at;
     const canSend = canCompose || (canReplyAsMember && !!canReplyToTarget);
-    if (!canSend || !content.trim() || !channelId) return;
-    sendMessage.mutate({
-      channelId,
-      content_text: content,
-      reply_to_message_id: canReplyToTarget ? currentReplyTarget.id : undefined,
-      reply_to_seq_id: canReplyToTarget ? currentReplyTarget.seq_id : undefined,
-    });
-    setContent("");
-    setReplyingTo(null);
+    const trimmedContent = content.trim();
+    if (!canSend || (!trimmedContent && pendingMedia.length === 0) || !channelId || sendMessage.isPending || isUploadingMedia) return;
+
+    setIsUploadingMedia(true);
+    try {
+      const attachments = pendingMedia.length > 0 ? await Promise.all(pendingMedia.map(uploadPendingMedia)) : undefined;
+      await sendMessage.mutateAsync({
+        channelId,
+        content_text: trimmedContent || undefined,
+        attachments,
+        reply_to_message_id: canReplyToTarget ? currentReplyTarget.id : undefined,
+        reply_to_seq_id: canReplyToTarget ? currentReplyTarget.seq_id : undefined,
+      });
+      setContent("");
+      setPendingMedia([]);
+      setReplyingTo(null);
+    } catch {
+      toast({
+        title: t("toasts.mediaPublishFailedTitle"),
+        description: t("toasts.mediaPublishFailedDescription"),
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingMedia(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
 
@@ -372,6 +708,8 @@ export default function ChannelView() {
 
   const activeReplyTarget = replyingTo ? messageById.get(replyingTo.id) ?? replyingTo : null;
   const rootMessages = messages.filter((message) => !message.reply_to_message_id || !messageById.has(message.reply_to_message_id));
+  const hasComposerDraft = content.trim().length > 0 || pendingMedia.length > 0;
+  const isComposerBusy = sendMessage.isPending || isUploadingMedia;
 
   function renderMessageThread(
     msg: MessageResponse,
@@ -400,6 +738,9 @@ export default function ChannelView() {
     const canCollapseReplies = nestedReplyCount > 0 && childMessages.length > 0;
     const isRepliesCollapsed = collapsedReplyRoots.has(msg.id);
     const isHovered = hoveredMessageId === msg.id;
+    const textBody = msg.content_type === "text" ? (msg.content_text || "").trim() : "";
+    const hasVisibleBody = Boolean(msg.deleted_at || (msg.content_type === "text" ? textBody : msg.content_json));
+    const attachments = msg.attachments ?? [];
 
     return (
       <div
@@ -485,13 +826,17 @@ export default function ChannelView() {
               </button>
             )}
 
-            <div className={cn("whitespace-pre-wrap break-words text-sm leading-relaxed", isMe ? "text-primary-foreground" : "text-foreground/90")}>
-              {msg.deleted_at
-                ? t("messages.deleted")
-                : msg.content_type === "text"
-                  ? msg.content_text
-                  : JSON.stringify(msg.content_json ?? {}, null, 2)}
-            </div>
+            {hasVisibleBody && (
+              <div className={cn("whitespace-pre-wrap break-words text-sm leading-relaxed", isMe ? "text-primary-foreground" : "text-foreground/90")}>
+                {msg.deleted_at
+                  ? t("messages.deleted")
+                  : msg.content_type === "text"
+                    ? msg.content_text
+                    : JSON.stringify(msg.content_json ?? {}, null, 2)}
+              </div>
+            )}
+
+            {!msg.deleted_at && attachments.length > 0 && <MessageAttachments attachments={attachments} isMe={isMe} />}
 
             {!msg.deleted_at && Object.keys(msg.reactions_summary?.counts ?? {}).length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -781,8 +1126,47 @@ export default function ChannelView() {
                 </Button>
               </div>
             )}
+            {pendingMedia.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {pendingMedia.map((item) => (
+                  <div
+                    key={item.id}
+                    className="inline-flex max-w-full items-center gap-2 rounded-xl border border-border/70 bg-background/80 px-2.5 py-1.5 text-xs text-foreground shadow-sm"
+                  >
+                    <AttachmentIcon kind={item.kind} />
+                    <span className="max-w-44 truncate font-medium">{item.file.name}</span>
+                    <span className="shrink-0 text-muted-foreground">{formatBytes(item.file.size)}</span>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
+                      onClick={() => removePendingMedia(item.id)}
+                      disabled={isComposerBusy}
+                      aria-label={t("aria.removeAttachment", { name: item.file.name })}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex items-end gap-2">
-              <Button size="icon" variant="ghost" className="h-10 w-10 text-muted-foreground hover:bg-background rounded-xl flex-shrink-0 mb-1" aria-label={t("aria.attachFile")}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={MEDIA_ACCEPT}
+                multiple
+                className="hidden"
+                onChange={handleMediaSelected}
+              />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-10 w-10 text-muted-foreground hover:bg-background rounded-xl flex-shrink-0 mb-1"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isComposerBusy || pendingMedia.length >= MAX_MEDIA_ATTACHMENTS}
+                aria-label={t("aria.attachFile")}
+              >
                 <Paperclip className="w-5 h-5" />
               </Button>
               
@@ -798,12 +1182,12 @@ export default function ChannelView() {
 
               <Button 
                 size="icon" 
-                className={`h-10 w-10 rounded-xl flex-shrink-0 mb-1 transition-all ${content.trim() ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:scale-105' : 'bg-muted text-muted-foreground'}`}
+                className={`h-10 w-10 rounded-xl flex-shrink-0 mb-1 transition-all ${hasComposerDraft ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20 hover:scale-105' : 'bg-muted text-muted-foreground'}`}
                 onClick={handleSend}
-                disabled={!content.trim() || sendMessage.isPending || (canReplyAsMember && !activeReplyTarget)}
+                disabled={!hasComposerDraft || isComposerBusy || (canReplyAsMember && !activeReplyTarget)}
                 aria-label={t("composer.send")}
               >
-                <Send className="w-4 h-4 translate-x-0.5 -translate-y-0.5" />
+                {isComposerBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 translate-x-0.5 -translate-y-0.5" />}
               </Button>
             </div>
           </div>

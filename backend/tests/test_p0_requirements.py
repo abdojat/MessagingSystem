@@ -228,6 +228,99 @@ async def test_upload_download_requires_channel_membership(db_session, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_media_attachments_can_be_published_without_text_and_synced(db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    async def _noop_bind(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
+
+    owner = await AuthService.register(db_session, RegisterRequest(username="media_owner", email="media_owner@x.com", password="password123"))
+    subscriber = await AuthService.register(db_session, RegisterRequest(username="media_sub", email="media_sub@x.com", password="password123"))
+    amqp = _FakeAmqpConnection()
+    channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="Media Channel", visibility="public", join_mode="open"),
+        amqp,
+    )
+    await ChannelService.join_channel(db_session, amqp, channel.id, subscriber.id, JoinRequest())
+
+    media_files = [
+        ("photo.png", "image/png", b"pngdata"),
+        ("clip.mp4", "video/mp4", b"mp4data"),
+        ("song.mp3", "audio/mpeg", b"mp3data"),
+    ]
+    upload_ids = []
+    for filename, content_type, content in media_files:
+        upload = await MessageService.create_upload(
+            db_session,
+            owner.id,
+            UploadCreateRequest(filename=filename, content_type=content_type, size_bytes=len(content)),
+        )
+        stored = await MessageService.store_upload_content(db_session, owner.id, upload.id, content)
+        assert stored.public_url == f"/v1/uploads/{upload.id}/content"
+        upload_ids.append(upload.id)
+
+    published = await MessageService.publish_message(
+        db_session,
+        channel.id,
+        owner.id,
+        PublishMessageRequest(attachments=[{"file_id": str(file_id)} for file_id in upload_ids]),
+    )
+
+    assert published.content_type.value == "text"
+    assert published.content_text is None
+    assert [item["content_type"] for item in published.attachments] == ["image/png", "video/mp4", "audio/mpeg"]
+    assert all(item["url"].startswith("/v1/uploads/") for item in published.attachments)
+    assert await MessageService.can_access_upload(db_session, subscriber.id, upload_ids[0]) is True
+
+    sync = await MessageService.sync(
+        db_session,
+        subscriber.id,
+        SyncRequest(channels=[{"channel_id": channel.id, "last_seen_seq_id": 0}], limit=20),
+    )
+    synced_message = next((message for message in sync["messages"] if message.id == published.id), None)
+    assert synced_message is not None
+    assert synced_message.attachments and len(synced_message.attachments) == 3
+
+
+@pytest.mark.asyncio
+async def test_publishing_attachment_requires_stored_upload_content(db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    async def _noop_bind(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
+
+    owner = await AuthService.register(db_session, RegisterRequest(username="media_pending", email="media_pending@x.com", password="password123"))
+    channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="Pending Media", visibility="public", join_mode="open"),
+        _FakeAmqpConnection(),
+    )
+    upload = await MessageService.create_upload(
+        db_session,
+        owner.id,
+        UploadCreateRequest(filename="pending.mp4", content_type="video/mp4", size_bytes=7),
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        await MessageService.publish_message(
+            db_session,
+            channel.id,
+            owner.id,
+            PublishMessageRequest(attachments=[{"file_id": str(upload.id)}]),
+        )
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_profile_avatar_upload_is_accessible_to_authenticated_users(db_session, monkeypatch, tmp_path):
     monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
     get_settings.cache_clear()

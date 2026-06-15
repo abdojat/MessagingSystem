@@ -5,6 +5,8 @@ Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`
 - `test_message_encryption_round_trip_and_authz_and_event`
 - `test_upload_download_requires_channel_membership`
+- `test_media_attachments_can_be_published_without_text_and_synced`
+- `test_publishing_attachment_requires_stored_upload_content`
 - `test_upload_storage_path_sanitizes_filename_and_stays_within_base_dir`
 - `test_avatar_url_validation_rejects_unsafe_values`
 - `test_avatar_url_validation_accepts_safe_values`
@@ -112,6 +114,7 @@ Verifies:
 - Event log contains core events
 - Event integrity is checked from `GET /v1/channels/{id}/events/integrity` for the fresh demo channel
 - Private upload access is denied to an unauthorized user
+- Backend regression coverage verifies attachment-only photo/video/audio messages are syncable by a subscriber and that messages cannot reference upload records before file bytes are stored
 - Unsafe avatar URLs are rejected before storage
 - Uploaded profile avatars are visible to authenticated users through the protected media path
 - Private channel avatar uploads remain restricted to approved channel members
@@ -120,6 +123,14 @@ Verifies:
 The verifier does not currently force a RabbitMQ failure or DLQ transition; use the backend delivery reliability tests and worker logs for that path.
 Note: the verifier is the best single proof of the pub/sub chain in this repo, but it is still a scripted demo flow rather than a CI-level full-stack integration suite.
 Do not run the Docker backend test suite and `scripts/verify_demo_flow.py` concurrently against the same Docker database; the tests reset database state and can invalidate live verifier users mid-flow.
+
+Latest focused media verification:
+```bash
+python -m pytest backend\tests\test_p0_requirements.py -q
+cd frontend
+npm run typecheck
+```
+Result on 2026-06-16: backend P0 tests passed (`31 passed, 10 skipped`) and frontend typecheck passed.
 
 ## Approval-Required Membership Verifier
 ```bash

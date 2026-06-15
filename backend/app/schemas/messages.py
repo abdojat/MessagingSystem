@@ -17,8 +17,11 @@ class PublishMessageRequest(BaseModel):
     def validate_content(self) -> "PublishMessageRequest":
         has_text = self.content_text is not None
         has_json = self.content_json is not None
-        if has_text == has_json:
-            raise ValueError("provide exactly one of content_text or content_json")
+        has_attachments = bool(self.attachments)
+        if has_text and has_json:
+            raise ValueError("provide at most one of content_text or content_json")
+        if not has_text and not has_json and not has_attachments:
+            raise ValueError("provide content_text, content_json, or at least one attachment")
         if has_text and not self.content_text.strip():
             raise ValueError("content_text cannot be empty")
         return self

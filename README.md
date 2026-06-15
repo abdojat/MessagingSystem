@@ -125,21 +125,22 @@ This opens User B's WebSocket while pending, approves User B, verifies membershi
 2. User B register/login.
 3. User A creates channel.
 4. User B joins/subscribes.
-5. User A publishes.
-6. User B receives/reads.
-7. Open the event log subpage from channel details.
-8. Click Verify integrity and show the Audit integrity badge.
-9. Open Delivery Monitor from the Profile page as a channel owner/admin.
-10. Show unauthorized access denial on private channel.
-11. Show private upload access is denied to a non-member.
-12. Show ciphertext at rest:
+5. User A publishes a text message.
+6. User A uses the paperclip composer button to publish a photo, video, or audio file, with or without caption text.
+7. User B receives/reads the text and media messages.
+8. Open the event log subpage from channel details.
+9. Click Verify integrity and show the Audit integrity badge.
+10. Open Delivery Monitor from the Profile page as a channel owner/admin.
+11. Show unauthorized access denial on private channel.
+12. Show private upload access is denied to a non-member.
+13. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
 
 ## Final MVP Status
 - Complete:
-  - Authentication, authorization, membership management, channel CRUD, encrypted message storage, event logging, upload access checks, safe identifier validation, and backend regression tests.
+  - Authentication, authorization, membership management, channel CRUD, encrypted message storage, media attachments for photos/videos/audio, event logging, upload access checks, safe identifier validation, and backend regression tests.
 - Mostly complete:
   - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier and approval verifier, including join-after-connect and approval-after-connect WebSocket resubscribe paths, but there is still no broad CI suite around it.
   - Delivery reliability monitoring with retry scheduling, dead-letter status, admin APIs, frontend Delivery Monitor, and a controlled verifier for normal publish plus manual retry. Full broker-outage CI coverage remains future work.
@@ -163,6 +164,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Membership/permission authorization checks.
 - Message encryption at rest (Fernet).
 - Private uploads require authentication and channel/ownership checks before download.
+- Message attachments support protected photo, video, and audio publishing through the existing upload API.
 - Profile/channel avatar uploads use validated image references and protected authenticated media loading.
 - Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.
 - Unauthorized read/publish events logged.

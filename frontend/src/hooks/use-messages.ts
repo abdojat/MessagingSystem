@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api/client';
-import { ChannelResponse, MessageResponse, ReactionSummaryResponse } from '../types/api';
+import { AttachmentItem, ChannelResponse, MessageResponse, ReactionSummaryResponse } from '../types/api';
 
 export function useMessages(channelId: string) {
   return useQuery({
@@ -15,21 +15,29 @@ export function useSendMessage() {
 
   type SendMessageInput = {
     channelId: string;
-    content_text: string;
+    content_text?: string | null;
+    attachments?: Pick<AttachmentItem, "file_id">[] | null;
     reply_to_message_id?: string | null;
     reply_to_seq_id?: number | null;
   };
 
   return useMutation({
-    mutationFn: ({ channelId, content_text, reply_to_message_id, reply_to_seq_id }: SendMessageInput) =>
-      apiClient<MessageResponse>(`/channels/${channelId}/messages`, {
+    mutationFn: ({ channelId, content_text, attachments, reply_to_message_id, reply_to_seq_id }: SendMessageInput) => {
+      const body: Record<string, unknown> = {
+        reply_to_message_id,
+        reply_to_seq_id,
+      };
+      if (content_text?.trim()) {
+        body.content_text = content_text;
+      }
+      if (attachments?.length) {
+        body.attachments = attachments;
+      }
+      return apiClient<MessageResponse>(`/channels/${channelId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({
-          content_text,
-          reply_to_message_id,
-          reply_to_seq_id,
-        }),
-      }),
+        body: JSON.stringify(body),
+      });
+    },
     onSuccess: (newMessage, variables) => {
       queryClient.setQueryData(
         ['/channels', variables.channelId, 'messages'],

@@ -59,8 +59,22 @@ export interface AttachmentItem {
   file_id: string;
   filename?: string;
   content_type?: string;
-  public_url: string;
+  url?: string;
+  public_url?: string;
   size_bytes?: number;
+}
+
+export interface UploadCreateResponse {
+  file_id: string;
+  upload_url: string;
+  method: "PUT" | string;
+  headers: Record<string, string>;
+  public_url?: string | null;
+}
+
+export interface UploadContentResponse {
+  file_id: string;
+  public_url?: string | null;
 }
 
 export interface MessageResponse {

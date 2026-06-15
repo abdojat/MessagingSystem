@@ -1,10 +1,19 @@
 # Stabilization Status
 
-Last updated: 2026-06-15
+Last updated: 2026-06-16
 
 ## Summary
 
-This status file now includes the 2026-06-15 avatar/image audit. The latest pass hardened avatar URL validation, protected avatar upload authorization, authenticated frontend image rendering, and regression tests while preserving private upload controls.
+This status file now includes the 2026-06-16 media publishing pass. The latest pass adds protected photo/video/audio message attachments, attachment-only publish support, authenticated frontend playback, and regression tests while preserving private upload controls.
+
+## Media Publishing Pass - 2026-06-16
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Attachment-only media publish | Passed | `backend/app/schemas/messages.py` allows attachments as message content; `backend/app/services/message_service.py` stores attachment-only messages as text-type messages with no text body; covered by `test_media_attachments_can_be_published_without_text_and_synced` | Existing `content_type` enum still has `text/json`; media type is carried by attachment metadata, not by the message content type | Keep this explanation in demo/report notes if asked why the message row says `text` |
+| Stored-upload requirement | Passed | `MessageService._normalize_attachments` rejects attachment references whose upload bytes have not been stored; covered by `test_publishing_attachment_requires_stored_upload_content` | Upload metadata can still exist without content if the user abandons an upload before publishing | Add cleanup for abandoned upload records only if needed |
+| Frontend media composer/playback | Passed | `frontend/src/components/features/chat/pages/channel-view.tsx` supports paperclip selection for `image/*`, `video/*`, and `audio/*`, uploads through `/v1/uploads`, and renders protected image/video/audio media with authenticated requests; `npm run typecheck` passed | No browser e2e test verifies actual media playback pixels/audio | Manually publish a small photo, video, and audio clip during final UI rehearsal |
+| Focused verification | Passed | `python -m pytest backend\tests\test_p0_requirements.py -q` -> `31 passed, 10 skipped`; `cd frontend && npm run typecheck` passed; `docker compose up -d --build` completed; `GET /health` returned database/Redis/RabbitMQ OK; frontend returned HTTP 200 | Local backend test skips depend on database availability; no browser e2e test has clicked through media playback | Run the manual UI media step in the already-started stack before supervisor review |
 
 ## Avatar/Image Audit - 2026-06-15
 

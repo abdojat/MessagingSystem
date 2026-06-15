@@ -98,10 +98,11 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
 5. Register/login User C in a third window or separate profile.
 6. User A creates a channel.
 7. User B joins/subscribes.
-8. User A publishes a message.
-9. User B receives/reads message.
-10. Open channel details -> Event Log.
-11. Click Verify integrity and show `Audit integrity: Verified`.
+8. User A publishes a text message.
+9. User A uses the paperclip composer button to attach and publish a small photo, video, or audio file; caption text is optional.
+10. User B receives/reads the text and media messages.
+11. Open channel details -> Event Log.
+12. Click Verify integrity and show `Audit integrity: Verified`.
     - If the database contains pre-upgrade legacy events, run the canonical Docker backfill command first or explain the Not initialized state honestly.
     - Dry-run first:
       ```bash
@@ -111,19 +112,19 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
       ```bash
       docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
       ```
-12. Open the Delivery Monitor from User A's Profile page.
+13. Open the Delivery Monitor from User A's Profile page.
     - Normal demo state should show published/pending counters and empty failed/dead-lettered tables.
     - If a delivery has failed in the environment, use the per-row Retry button or Retry all button to move it back to pending.
     - Worker logs show retry scheduling and dead-letter transitions when RabbitMQ publish failures occur.
-13. Show unauthorized behavior:
+14. Show unauthorized behavior:
    - Use a private upload download blocked for User C.
    - Optionally show a private channel where non-member read/publish is denied.
-14. Show ciphertext at rest:
+15. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
 Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not plaintext.
-15. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
+16. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
 
 Developer-only tamper test:
 ```bash

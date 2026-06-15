@@ -68,7 +68,7 @@ class MessageService:
             return encrypt_message(req.content_text), None
         if req.content_json is not None:
             return None, encrypt_json_payload(req.content_json)
-        raise AppError("message content is required", 400, code="VALIDATION_ERROR")
+        return None, None
 
     @staticmethod
     def _serialize_message(
@@ -204,7 +204,7 @@ class MessageService:
                 actor_user_id=sender_id,
             )
             raise
-        content_type = ContentType.text if req.content_text is not None else ContentType.json
+        content_type = ContentType.json if req.content_json is not None else ContentType.text
         message = Message(
             channel_id=channel_id,
             sender_user_id=sender_id,
@@ -938,6 +938,8 @@ class MessageService:
     ) -> list[dict] | None:
         if not attachments:
             return attachments
+        if len(attachments) > 10:
+            raise AppError("too many attachments", 400, code="VALIDATION_ERROR")
         normalized: list[dict] = []
         for raw_item in attachments:
             file_id_raw = raw_item.get("file_id")
@@ -952,6 +954,8 @@ class MessageService:
                 raise AppError("attachment file not found", 404, code="NOT_FOUND")
             if upload.owner_user_id != actor_user_id:
                 raise AppError("forbidden attachment", 403, code="FORBIDDEN")
+            if not upload.public_url:
+                raise AppError("attachment content has not been uploaded", 400, code="VALIDATION_ERROR")
             normalized.append(
                 {
                     "file_id": str(file_id),

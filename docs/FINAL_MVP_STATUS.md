@@ -8,6 +8,7 @@
 - Tamper-evident audit log integrity for new events through a per-scope SHA-256 hash chain.
 - Message encryption at rest on the server side.
 - Private upload download protection with authentication and authorization checks.
+- Message attachments support protected photo, video, and audio publishing, including attachment-only messages.
 - Profile and channel avatar uploads use validated image references and protected-media access rules.
 - Safe identifier validation for usernames, channel slugs, and broker-facing routing identifiers.
 - Docker Compose run path for PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend.
@@ -17,6 +18,7 @@
 - Verified during Stabilization Pass 2 on 2026-06-10: Docker Compose config passed, Docker stack rebuilt and stayed healthy, Docker-backed backend tests passed (`37 passed, 2 warnings`), frontend typecheck passed, main demo verifier passed, approval-required membership verifier passed with live WebSocket delivery, Docker event-integrity dry-run passed, delivery reliability verifier passed, container compileall passed, and `git diff --check` reported no whitespace errors beyond line-ending notices.
 - Verified during frontend i18n pass on 2026-06-14: frontend typecheck passed, frontend production build passed, English/Arabic locale JSON parsing passed, English/Arabic key-set alignment passed, placeholder scan found no `???` entries, and `git diff --check` reported no whitespace errors beyond line-ending notices.
 - Verified during avatar/image audit on 2026-06-15: backend tests passed (`31 passed, 20 skipped`) and frontend typecheck passed after hardening avatar URL validation, protected avatar upload access, and authenticated image rendering.
+- Verified during media publishing pass on 2026-06-16: backend P0 tests passed (`31 passed, 10 skipped`) and frontend typecheck passed after adding attachment-only photo/video/audio publishing and authenticated playback rendering.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 - Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.
@@ -53,6 +55,7 @@
 - Browser-managed token storage and WebSocket token transport.
 - This is acceptable for a university demo, but it is not production-grade session security.
 - Protected upload-backed avatars are fetched by the frontend with the bearer token and rendered through temporary object URLs; this is suitable for the demo but is not a production CDN/media pipeline.
+- Protected message video/audio media is also fetched into temporary object URLs for browser playback; this is suitable for the demo but not a production streaming/transcoding pipeline.
 - Arabic/RTL frontend coverage is demo-oriented and verified by typecheck plus translation-file parsing; there is no automated visual regression suite for RTL layout yet.
 
 ## Future Work
