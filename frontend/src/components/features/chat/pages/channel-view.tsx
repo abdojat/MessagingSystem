@@ -273,13 +273,13 @@ function AuthenticatedPlaybackMedia({
   return <audio src={mediaSrc} controls preload="metadata" className={className} />;
 }
 
-function MessageAttachments({ attachments, isMe }: { attachments: AttachmentItem[]; isMe: boolean }) {
+function MessageAttachments({ attachments, isMe, className }: { attachments: AttachmentItem[]; isMe: boolean; className?: string }) {
   const commonT = useTranslations("common");
   const visibleAttachments = attachments.filter((attachment) => getAttachmentUrl(attachment));
   if (visibleAttachments.length === 0) return null;
 
   return (
-    <div className="mt-3 grid max-w-full gap-2">
+    <div className={cn("grid max-w-full gap-2", className)}>
       {visibleAttachments.map((attachment) => {
         const kind = getMessageMediaKind(attachment.content_type);
         const url = getAttachmentUrl(attachment);
@@ -761,6 +761,7 @@ export default function ChannelView() {
     const textBody = msg.content_type === "text" ? (msg.content_text || "").trim() : "";
     const hasVisibleBody = Boolean(msg.deleted_at || (msg.content_type === "text" ? textBody : msg.content_json));
     const attachments = msg.attachments ?? [];
+    const hasVisibleAttachments = !msg.deleted_at && attachments.some((attachment) => getAttachmentUrl(attachment));
 
     return (
       <div
@@ -846,8 +847,10 @@ export default function ChannelView() {
               </button>
             )}
 
+            {hasVisibleAttachments && <MessageAttachments attachments={attachments} isMe={isMe} />}
+
             {hasVisibleBody && (
-              <div className={cn("whitespace-pre-wrap break-words text-sm leading-relaxed", isMe ? "text-primary-foreground" : "text-foreground/90")}>
+              <div className={cn("whitespace-pre-wrap break-words text-sm leading-relaxed", hasVisibleAttachments && "mt-3", isMe ? "text-primary-foreground" : "text-foreground/90")}>
                 {msg.deleted_at
                   ? t("messages.deleted")
                   : msg.content_type === "text"
@@ -855,8 +858,6 @@ export default function ChannelView() {
                     : JSON.stringify(msg.content_json ?? {}, null, 2)}
               </div>
             )}
-
-            {!msg.deleted_at && attachments.length > 0 && <MessageAttachments attachments={attachments} isMe={isMe} />}
 
             {!msg.deleted_at && Object.keys(msg.reactions_summary?.counts ?? {}).length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
