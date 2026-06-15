@@ -8,14 +8,17 @@ from sqlalchemy import select
 from app.api.routes.messages import get_upload_content
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.db.models import Event, MembershipRole, Message, Outbox
+from app.db.models import ChannelMembership, Event, MembershipRole, Message, Outbox
 from app.schemas.auth import RegisterRequest
-from app.schemas.channels import ChannelCreateRequest
+from app.schemas.channels import ChannelCreateRequest, ChannelPatchRequest
 from app.schemas.messages import PublishMessageRequest, SyncRequest, UploadCreateRequest
 from app.schemas.channels import JoinRequest
+from app.schemas.users import UpdateMeRequest
 from app.services.auth_service import AuthService
 from app.services.channel_service import ChannelService
 from app.services.message_service import MessageService
+from app.api.routes.users import update_me
+from app.core.utils import utcnow
 
 
 class _FakeAmqpChannel:
@@ -145,6 +148,39 @@ def test_channel_slug_validation_rejects_unsafe_identifiers(slug):
         ChannelCreateRequest(name="Channel", channel_slug=slug, visibility="public", join_mode="open")
 
 
+@pytest.mark.parametrize(
+    "avatar_url",
+    [
+        "javascript:alert(1)",
+        "data:image/png;base64,AAAA",
+        "file:///tmp/avatar.png",
+        "//example.com/avatar.png",
+        "/uploads/not-a-uuid/content",
+        "/v1/uploads/00000000-0000-0000-0000-000000000000/content?token=x",
+        "/static/avatar.png",
+    ],
+)
+def test_avatar_url_validation_rejects_unsafe_values(avatar_url):
+    with pytest.raises(ValidationError):
+        UpdateMeRequest(avatar_url=avatar_url)
+    with pytest.raises(ValidationError):
+        ChannelPatchRequest(avatar_url=avatar_url)
+
+
+@pytest.mark.parametrize(
+    "avatar_url",
+    [
+        "https://example.com/avatar.png",
+        "http://localhost:8000/v1/uploads/00000000-0000-0000-0000-000000000000/content",
+        "/v1/uploads/00000000-0000-0000-0000-000000000000/content",
+        "/uploads/00000000-0000-0000-0000-000000000000/content",
+    ],
+)
+def test_avatar_url_validation_accepts_safe_values(avatar_url):
+    assert UpdateMeRequest(avatar_url=avatar_url).avatar_url == avatar_url
+    assert ChannelPatchRequest(avatar_url=avatar_url).avatar_url == avatar_url
+
+
 @pytest.mark.asyncio
 async def test_upload_download_requires_channel_membership(db_session, monkeypatch, tmp_path):
     monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
@@ -184,6 +220,108 @@ async def test_upload_download_requires_channel_membership(db_session, monkeypat
     with pytest.raises(HTTPException) as exc_info:
         await get_upload_content(upload.id, db_session, outsider)
     assert exc_info.value.status_code == 403
+
+    unauthorized_events = (
+        await db_session.execute(select(Event).where(Event.event_type == "security.unauthorized_upload_access"))
+    ).scalars().all()
+    assert len(unauthorized_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_profile_avatar_upload_is_accessible_to_authenticated_users(db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    owner = await AuthService.register(db_session, RegisterRequest(username="avatar_owner", email="avatar_owner@x.com", password="password123"))
+    viewer = await AuthService.register(db_session, RegisterRequest(username="avatar_viewer", email="avatar_viewer@x.com", password="password123"))
+    upload = await MessageService.create_upload(
+        db_session,
+        owner.id,
+        UploadCreateRequest(filename="avatar.png", content_type="image/png", size_bytes=7),
+    )
+    stored = await MessageService.store_upload_content(db_session, owner.id, upload.id, b"pngdata")
+
+    updated = await update_me(UpdateMeRequest(avatar_url=stored.public_url), db_session, owner)
+
+    assert updated.avatar_url == stored.public_url
+    assert await MessageService.can_access_upload(db_session, viewer.id, upload.id) is True
+
+
+@pytest.mark.asyncio
+async def test_avatar_update_rejects_unowned_or_non_image_uploads(db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    owner = await AuthService.register(db_session, RegisterRequest(username="image_owner", email="image_owner@x.com", password="password123"))
+    other = await AuthService.register(db_session, RegisterRequest(username="image_other", email="image_other@x.com", password="password123"))
+
+    text_upload = await MessageService.create_upload(
+        db_session,
+        owner.id,
+        UploadCreateRequest(filename="notes.txt", content_type="text/plain", size_bytes=5),
+    )
+    stored_text = await MessageService.store_upload_content(db_session, owner.id, text_upload.id, b"hello")
+    with pytest.raises(HTTPException) as non_image_exc:
+        await update_me(UpdateMeRequest(avatar_url=stored_text.public_url), db_session, owner)
+    assert non_image_exc.value.status_code == 400
+
+    other_upload = await MessageService.create_upload(
+        db_session,
+        other.id,
+        UploadCreateRequest(filename="other.png", content_type="image/png", size_bytes=5),
+    )
+    stored_other = await MessageService.store_upload_content(db_session, other.id, other_upload.id, b"12345")
+    with pytest.raises(HTTPException) as unowned_exc:
+        await update_me(UpdateMeRequest(avatar_url=stored_other.public_url), db_session, owner)
+    assert unowned_exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_private_channel_avatar_upload_requires_channel_membership(db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    async def _noop_bind(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
+
+    owner = await AuthService.register(db_session, RegisterRequest(username="chan_owner", email="chan_owner@x.com", password="password123"))
+    member = await AuthService.register(db_session, RegisterRequest(username="chan_member", email="chan_member@x.com", password="password123"))
+    outsider = await AuthService.register(db_session, RegisterRequest(username="chan_outside", email="chan_outside@x.com", password="password123"))
+    upload = await MessageService.create_upload(
+        db_session,
+        owner.id,
+        UploadCreateRequest(filename="channel.jpg", content_type="image/jpeg", size_bytes=6),
+    )
+    stored = await MessageService.store_upload_content(db_session, owner.id, upload.id, b"jpgjpg")
+
+    channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(
+            name="Private Avatar",
+            avatar_url=stored.public_url,
+            visibility="private",
+            join_mode="invite_only",
+        ),
+        _FakeAmqpConnection(),
+    )
+
+    assert await MessageService.can_access_upload(db_session, outsider.id, upload.id) is False
+
+    db_session.add(
+        ChannelMembership(
+            channel_id=channel.id,
+            user_id=member.id,
+            role=MembershipRole.member,
+            created_by_user_id=owner.id,
+            approved_at=utcnow(),
+        )
+    )
+    await db_session.commit()
+
+    assert await MessageService.can_access_upload(db_session, member.id, upload.id) is True
 
 
 @pytest.mark.asyncio

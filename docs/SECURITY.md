@@ -13,7 +13,10 @@
 - Channel reads and writes check membership/role permissions.
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
 - The upload route allows content only to the owner, and the download route only allows the owner or a user who is a member of a channel that references the upload.
+- Profile and channel avatar uploads stay behind the same authenticated upload route. Stored avatar URLs are validated to allow only `http`, `https`, or protected upload-content paths; internal avatar uploads must be owned by the updater, already stored, and be non-SVG images.
+- Avatar upload downloads have explicit access rules: profile avatars are visible to authenticated users, public channel avatars are visible to authenticated users, and private channel avatars are visible only to approved channel members or the upload owner.
 - Unauthorized publish/read attempts are logged as security events.
+- Unauthorized upload download attempts are logged as `security.unauthorized_upload_access`.
 - Delivery monitoring endpoints under `/v1/admin/delivery/*` require authentication and are scoped to channels where the caller is an owner or an admin with management permissions.
 - Manual delivery retry is authorized through the same scoped channel-manager rule.
 
@@ -32,6 +35,7 @@
 - RabbitMQ routing keys and Redis channels are normalized before use.
 - Safe usernames and channel slugs are restricted to `^[A-Za-z0-9_-]{3,50}$`.
 - Upload storage paths are derived from sanitized filename components and validated to stay inside the uploads directory.
+- Avatar URL fields reject unsafe schemes such as `javascript:`, `data:`, `file:`, and protocol-relative URLs before storage.
 - Raw user input is not used directly in broker routing keys, Redis pub/sub channels, or filesystem paths.
 
 ## Delivery Error Handling

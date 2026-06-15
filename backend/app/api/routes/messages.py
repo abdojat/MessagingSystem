@@ -374,6 +374,13 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
     if not upload:
         raise to_http_exception(AppError("upload not found", 404, code="NOT_FOUND"))
     if not await MessageService.can_access_upload(db, user.id, file_id):
+        await log_event(
+            db,
+            "security.unauthorized_upload_access",
+            {"upload_id": str(file_id)},
+            actor_user_id=user.id,
+        )
+        await db.commit()
         raise to_http_exception(AppError("forbidden", 403, code="FORBIDDEN"))
     settings = get_settings()
     path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)

@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.core.identifiers import normalize_avatar_url
+
 
 class UserPublicProfile(BaseModel):
     id: UUID
@@ -37,13 +39,18 @@ class UpdateMeRequest(BaseModel):
     avatar_url: str | None = Field(default=None, max_length=2048)
     bio: str | None = Field(default=None, max_length=2000)
 
-    @field_validator("display_name", "avatar_url", "bio")
+    @field_validator("display_name", "bio")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()
         return normalized or None
+
+    @field_validator("avatar_url")
+    @classmethod
+    def normalize_optional_avatar_url(cls, value: str | None) -> str | None:
+        return normalize_avatar_url(value)
 
     @field_validator("email", mode="before")
     @classmethod

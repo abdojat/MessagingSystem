@@ -10,6 +10,7 @@ from app.core.errors import AppError, to_http_exception
 from app.db.models import User
 from app.schemas.auth import MeResponse
 from app.schemas.users import UpdateMeRequest, UserPublicProfile, UserSearchItem, UserSearchResponse
+from app.services.message_service import MessageService
 
 router = APIRouter(tags=["users"])
 
@@ -33,6 +34,12 @@ async def update_me(req: UpdateMeRequest, db: DBDep, user: CurrentUserDep) -> Me
     payload = req.model_dump(exclude_unset=True)
     if not payload:
         return await me(user)
+
+    try:
+        if "avatar_url" in payload:
+            await MessageService.validate_avatar_upload_reference(db, user.id, payload["avatar_url"])
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
 
     for field, value in payload.items():
         setattr(user, field, value)

@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
-from app.core.identifiers import validate_channel_slug as validate_channel_slug_value
+from app.core.identifiers import normalize_avatar_url, validate_channel_slug as validate_channel_slug_value
 from app.db.models import ChannelJoinMode, ChannelVisibility, MembershipRole
 from app.schemas.messages import MessageResponse
 
@@ -24,6 +24,11 @@ class ChannelCreateRequest(BaseModel):
             return None
         return validate_channel_slug_value(value)
 
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url(cls, value: str | None) -> str | None:
+        return normalize_avatar_url(value)
+
 
 class ChannelPatchRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
@@ -39,6 +44,11 @@ class ChannelPatchRequest(BaseModel):
         if value is None:
             return None
         return validate_channel_slug_value(value)
+
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url(cls, value: str | None) -> str | None:
+        return normalize_avatar_url(value)
 
     @model_validator(mode="after")
     def validate_non_empty(self) -> "ChannelPatchRequest":

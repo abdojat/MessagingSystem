@@ -139,6 +139,11 @@ class ChannelService:
 
     @staticmethod
     async def create_channel(db: AsyncSession, owner_user_id: UUID, req: ChannelCreateRequest, amqp: aio_pika.RobustConnection) -> Channel:
+        if req.avatar_url is not None:
+            from app.services.message_service import MessageService
+
+            await MessageService.validate_avatar_upload_reference(db, owner_user_id, req.avatar_url)
+
         provided_slug = normalize_channel_slug(req.channel_slug) if req.channel_slug else ""
         slug_base = provided_slug if provided_slug else ChannelService._slugify(req.name)
         slug = await ChannelService._next_available_slug(db, slug_base)
@@ -456,6 +461,11 @@ class ChannelService:
 
         old_channel_slug = channel.channel_slug
         provided_fields = req.model_fields_set
+        if "avatar_url" in provided_fields and req.avatar_url is not None:
+            from app.services.message_service import MessageService
+
+            await MessageService.validate_avatar_upload_reference(db, actor_user_id, req.avatar_url)
+
         if req.name is not None:
             channel.name = req.name
         if req.channel_slug is not None:

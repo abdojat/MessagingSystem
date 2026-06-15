@@ -13,6 +13,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthStore } from "@/store/authStore";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageToggle } from "@/components/LanguageToggle";
+import { AuthenticatedImage } from "@/components/shared/AuthenticatedImage";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 import { ChannelResponse } from "@/types/api";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -64,7 +65,7 @@ function ChannelListItem({
         }`}
       >
         {channelAvatarUrl ? (
-          <img src={channelAvatarUrl} alt={channel.name} className="w-full h-full rounded-lg object-cover" />
+          <AuthenticatedImage src={channelAvatarUrl} alt={channel.name} className="w-full h-full rounded-lg object-cover" />
         ) : (
           <Hash className="w-4 h-4" />
         )}

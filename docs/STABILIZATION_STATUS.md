@@ -1,10 +1,20 @@
 # Stabilization Status
 
-Last updated: 2026-06-10
+Last updated: 2026-06-15
 
 ## Summary
 
-This pass focused on demo determinism for the distributed publish/subscribe path. The main code change fixes the join-after-WebSocket-connect edge case by making socket subscriptions refresh explicitly after membership changes and by keeping idle Redis pub/sub timeouts from closing healthy WebSockets.
+This status file now includes the 2026-06-15 avatar/image audit. The latest pass hardened avatar URL validation, protected avatar upload authorization, authenticated frontend image rendering, and regression tests while preserving private upload controls.
+
+## Avatar/Image Audit - 2026-06-15
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Avatar URL validation | Passed | `backend/app/core/identifiers.py`, `backend/app/schemas/users.py`, and `backend/app/schemas/channels.py` reject unsafe schemes and malformed protected upload paths; covered by `test_avatar_url_validation_rejects_unsafe_values` and `test_avatar_url_validation_accepts_safe_values` | Existing legacy database rows are not automatically rewritten by this validation | If legacy unsafe avatar rows exist, clean them with an explicit migration/script before final demo |
+| Avatar upload authorization | Passed | `backend/app/services/message_service.py` validates owned, stored, non-SVG image uploads before profile/channel avatar updates; `can_access_upload` now recognizes profile avatars, public channel avatars, and private channel avatars with membership checks | External `http(s)` avatar URLs are allowed and depend on the external host staying available | Prefer uploaded avatars for the supervisor demo |
+| Authenticated frontend image rendering | Passed | `frontend/src/components/shared/AuthenticatedImage.tsx`, `frontend/src/components/ui/avatar.tsx`, sidebar, channel view, channel details, and profile preview path; frontend typecheck passed | No browser e2e test verifies actual rendered pixels | Manually check profile avatar, channel avatar, sidebar avatar, and message sender avatar during demo |
+| Regression tests | Passed | `python -m pytest -q` -> `31 passed, 20 skipped`; focused P0 run -> `31 passed, 8 skipped` | PostgreSQL-dependent tests still skip if the configured test database is unreachable | Use Docker-backed tests for final verification if local DB credentials are inconsistent |
+| Upload audit event | Passed | Unauthorized upload download attempts now log `security.unauthorized_upload_access`; covered by `test_upload_download_requires_channel_membership` | Event logging is best-effort and depends on database availability | Keep event-log evidence visible in demo guide/status notes |
 
 ## Stabilization Pass 2 — Approval Flow, Backfill, Delivery Reliability
 

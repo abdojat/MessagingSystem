@@ -1,4 +1,5 @@
 import * as React from "react"
+import { AuthenticatedImage } from "@/components/shared/AuthenticatedImage"
 import { cn } from "./button"
 
 const Avatar = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
@@ -13,14 +14,19 @@ const Avatar = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElem
 Avatar.displayName = "Avatar"
 
 const AvatarImage = React.forwardRef<HTMLImageElement, React.ImgHTMLAttributes<HTMLImageElement>>(
-  ({ className, src, ...props }, ref) => {
+  ({ className, src, onError, ...props }, ref) => {
+    const imageSrc = typeof src === "string" ? src : undefined
     const [error, setError] = React.useState(false)
-    if (!src || error) return null
+    React.useEffect(() => setError(false), [imageSrc])
+    if (!imageSrc || error) return null
     return (
-      <img
+      <AuthenticatedImage
         ref={ref}
-        src={src}
-        onError={() => setError(true)}
+        src={imageSrc}
+        onError={(event) => {
+          setError(true)
+          onError?.(event)
+        }}
         className={cn("aspect-square h-full w-full object-cover", className)}
         {...props}
       />

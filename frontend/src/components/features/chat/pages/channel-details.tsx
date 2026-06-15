@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { AuthenticatedImage } from "@/components/shared/AuthenticatedImage";
 import {
   Select,
   SelectContent,
@@ -453,7 +454,7 @@ export default function ChannelDetailsPage() {
               <div className="flex items-center gap-4">
                 <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10 text-primary">
                   {channelAvatarUrl ? (
-                    <img src={channelAvatarUrl} alt={channel.name} className="h-full w-full rounded-3xl object-cover" />
+                    <AuthenticatedImage src={channelAvatarUrl} alt={channel.name} className="h-full w-full rounded-3xl object-cover" />
                   ) : (
                     <Hash className="h-10 w-10" />
                   )}

@@ -9,12 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.core.identifiers import normalize_upload_filename
+from app.core.identifiers import extract_upload_id_from_url, normalize_upload_filename
 from app.core.encryption import decrypt_json_payload, decrypt_message, encrypt_json_payload, encrypt_message
 from app.core.utils import utcnow
 from app.db.models import (
     Channel,
     ChannelMembership,
+    ChannelVisibility,
     ContentType,
     MembershipRole,
     Message,
@@ -847,6 +848,21 @@ class MessageService:
         return upload
 
     @staticmethod
+    async def validate_avatar_upload_reference(db: AsyncSession, actor_user_id: UUID, avatar_url: str | None) -> None:
+        upload_id = extract_upload_id_from_url(avatar_url)
+        if upload_id is None:
+            return
+
+        upload = await db.get(Upload, upload_id)
+        if not upload or upload.owner_user_id != actor_user_id:
+            raise AppError("avatar upload not found", 404, code="NOT_FOUND")
+        content_type = (upload.content_type or "").lower()
+        if not content_type.startswith("image/") or content_type == "image/svg+xml":
+            raise AppError("avatar upload must be a non-SVG image", 400, code="VALIDATION_ERROR")
+        if not upload.public_url:
+            raise AppError("avatar upload content has not been stored", 400, code="VALIDATION_ERROR")
+
+    @staticmethod
     def _resolve_upload_path(base_dir_value: str, storage_path: str) -> Path:
         base_dir = Path(base_dir_value).resolve()
         full_path = (base_dir / storage_path).resolve()
@@ -862,6 +878,8 @@ class MessageService:
         if not upload:
             return False
         if upload.owner_user_id == actor_user_id:
+            return True
+        if await MessageService._can_access_avatar_upload(db, actor_user_id, file_id):
             return True
         memberships = await db.execute(
             select(ChannelMembership.channel_id).where(
@@ -881,6 +899,35 @@ class MessageService:
                 item_file_id = str(item.get("file_id") or "")
                 if item_file_id == file_id_raw:
                     return True
+        return False
+
+    @staticmethod
+    async def _can_access_avatar_upload(db: AsyncSession, actor_user_id: UUID, file_id: UUID) -> bool:
+        file_id_raw = str(file_id)
+        user_rows = await db.execute(
+            select(User.avatar_url).where(
+                User.avatar_url.is_not(None),
+                User.avatar_url.contains(file_id_raw),
+            )
+        )
+        if any(extract_upload_id_from_url(avatar_url) == file_id for avatar_url in user_rows.scalars().all()):
+            return True
+
+        channel_rows = await db.execute(
+            select(Channel).where(
+                Channel.deleted_at.is_(None),
+                Channel.avatar_url.is_not(None),
+                Channel.avatar_url.contains(file_id_raw),
+            )
+        )
+        for channel in channel_rows.scalars().all():
+            if extract_upload_id_from_url(channel.avatar_url) != file_id:
+                continue
+            if channel.visibility == ChannelVisibility.public:
+                return True
+            membership = await db.get(ChannelMembership, {"channel_id": channel.id, "user_id": actor_user_id})
+            if membership and membership.role in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member}:
+                return True
         return False
 
     @staticmethod

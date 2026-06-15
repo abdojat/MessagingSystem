@@ -8,6 +8,7 @@ import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { AuthenticatedImage } from "@/components/shared/AuthenticatedImage";
 import { useAuthStore } from "@/store/authStore";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/hooks/use-toast";
@@ -670,7 +671,11 @@ export default function ChannelView() {
       <header className="h-16 border-b border-border bg-background/80 backdrop-blur-md flex items-center justify-between px-6 flex-shrink-0 z-10">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-            {channelAvatarUrl ? <img src={channelAvatarUrl} className="w-full h-full rounded-xl object-cover" /> : <Hash className="w-5 h-5" />}
+            {channelAvatarUrl ? (
+              <AuthenticatedImage src={channelAvatarUrl} alt={channel.name} className="w-full h-full rounded-xl object-cover" />
+            ) : (
+              <Hash className="w-5 h-5" />
+            )}
           </div>
           <div>
             <h2 className="font-bold text-foreground leading-tight">{channel.name}</h2>

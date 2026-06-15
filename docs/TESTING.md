@@ -6,6 +6,11 @@ Backend P0 tests:
 - `test_message_encryption_round_trip_and_authz_and_event`
 - `test_upload_download_requires_channel_membership`
 - `test_upload_storage_path_sanitizes_filename_and_stays_within_base_dir`
+- `test_avatar_url_validation_rejects_unsafe_values`
+- `test_avatar_url_validation_accepts_safe_values`
+- `test_profile_avatar_upload_is_accessible_to_authenticated_users`
+- `test_avatar_update_rejects_unowned_or_non_image_uploads`
+- `test_private_channel_avatar_upload_requires_channel_membership`
 - `test_username_validation_rejects_unsafe_identifiers`
 - `test_channel_slug_validation_rejects_unsafe_identifiers`
 - `test_smoke_flow_channel_join_publish_sync_and_events`
@@ -107,6 +112,10 @@ Verifies:
 - Event log contains core events
 - Event integrity is checked from `GET /v1/channels/{id}/events/integrity` for the fresh demo channel
 - Private upload access is denied to an unauthorized user
+- Unsafe avatar URLs are rejected before storage
+- Uploaded profile avatars are visible to authenticated users through the protected media path
+- Private channel avatar uploads remain restricted to approved channel members
+- Avatar updates reject unowned uploads and non-image uploads
 - Final PASS/FAIL summary with visible step names and timeouts
 The verifier does not currently force a RabbitMQ failure or DLQ transition; use the backend delivery reliability tests and worker logs for that path.
 Note: the verifier is the best single proof of the pub/sub chain in this repo, but it is still a scripted demo flow rather than a CI-level full-stack integration suite.
@@ -152,6 +161,7 @@ This is an automated supervisor proof for the normal worker path and controlled 
 - Ciphertext-at-rest SQL check.
 - Unauthorized publish/read denial behavior.
 - Private upload download denial for a non-member.
+- Profile and channel avatar upload/display behavior, including fallback initials/icons while protected images load.
 
 ## Current Limitations
 - Local Windows `npm run build` passed during the 2026-06-14 frontend i18n pass. Docker Compose remains the canonical evaluator path if local Node dependency behavior differs on another machine.

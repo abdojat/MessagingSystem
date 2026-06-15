@@ -355,6 +355,16 @@ export default function ProfilePage() {
     },
   });
 
+  const avatarPreviewUrl = useMemo(() => {
+    if (avatarFile) return URL.createObjectURL(avatarFile);
+    return resolveApiMediaUrl(user?.avatar_url);
+  }, [avatarFile, user?.avatar_url]);
+
+  useEffect(() => {
+    if (!avatarFile || !avatarPreviewUrl) return;
+    return () => URL.revokeObjectURL(avatarPreviewUrl);
+  }, [avatarFile, avatarPreviewUrl]);
+
   if (isInitializing) {
     return <ProfileSkeleton />;
   }
@@ -363,16 +373,6 @@ export default function ProfilePage() {
 
   const updatePayload = buildUpdatePayload(user);
   const hasProfileChanges = Object.keys(updatePayload).length > 0 || Boolean(avatarFile);
-
-  const avatarPreviewUrl = useMemo(() => {
-    if (avatarFile) return URL.createObjectURL(avatarFile);
-    return resolveApiMediaUrl(user.avatar_url);
-  }, [avatarFile, user.avatar_url]);
-
-  useEffect(() => {
-    if (!avatarFile || !avatarPreviewUrl) return;
-    return () => URL.revokeObjectURL(avatarPreviewUrl);
-  }, [avatarFile, avatarPreviewUrl]);
 
   const displayName = user.display_name?.trim() || user.username;
   const initials =
