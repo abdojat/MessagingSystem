@@ -12,6 +12,7 @@
 - Attachment publish requests accept only upload `file_id` references, with trusted attachment metadata generated server-side.
 - Upload create/store/access and upload store failure events are logged for audit visibility.
 - Profile and channel avatar uploads use validated image references and protected-media access rules.
+- Profile chat wallpaper uploads are stored through the backend upload API and saved on the current user's profile.
 - Safe identifier validation for usernames, channel slugs, and broker-facing routing identifiers.
 - Docker Compose run path for PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend.
 - Backend P0 regression tests for the main security and demo-flow behavior.
@@ -21,6 +22,7 @@
 - Verified during frontend i18n pass on 2026-06-14: frontend typecheck passed, frontend production build passed, English/Arabic locale JSON parsing passed, English/Arabic key-set alignment passed, placeholder scan found no `???` entries, and `git diff --check` reported no whitespace errors beyond line-ending notices.
 - Verified during avatar/image audit on 2026-06-15: backend tests passed (`31 passed, 20 skipped`) and frontend typecheck passed after hardening avatar URL validation, protected avatar upload access, and authenticated image rendering.
 - Verified during multimedia publishing audit on 2026-06-16: backend P0 tests passed (`33 passed, 13 skipped`) and frontend typecheck passed after tightening attachment references, upload error handling, SVG rejection, upload audit events, and refreshed-token PUT uploads.
+- Verified during profile wallpaper upload pass on 2026-06-17: backend P0 tests passed (`33 passed, 14 skipped`), frontend typecheck passed, locale key alignment passed, Docker Compose rebuilt and started successfully, Alembic applied `0014_user_wallpaper_url`, and `git diff --check` reported only line-ending warnings.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 - Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.
@@ -56,7 +58,7 @@
 ## What Is Demo-Grade
 - Browser-managed token storage and WebSocket token transport.
 - This is acceptable for a university demo, but it is not production-grade session security.
-- Protected upload-backed avatars are fetched by the frontend with the bearer token and rendered through temporary object URLs; this is suitable for the demo but is not a production CDN/media pipeline.
+- Protected upload-backed avatars and chat wallpapers are fetched by the frontend with the bearer token and rendered through temporary object URLs; this is suitable for the demo but is not a production CDN/media pipeline.
 - Protected message video/audio media is also fetched into temporary object URLs for browser playback; this is suitable for the demo but not a production streaming/transcoding pipeline.
 - Arabic/RTL frontend coverage is demo-oriented and verified by typecheck plus translation-file parsing; there is no automated visual regression suite for RTL layout yet.
 

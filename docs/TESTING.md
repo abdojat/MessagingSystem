@@ -16,6 +16,7 @@ Backend P0 tests:
 - `test_avatar_url_validation_rejects_unsafe_values`
 - `test_avatar_url_validation_accepts_safe_values`
 - `test_profile_avatar_upload_is_accessible_to_authenticated_users`
+- `test_profile_wallpaper_upload_is_saved_to_current_user`
 - `test_avatar_update_rejects_unowned_or_non_image_uploads`
 - `test_private_channel_avatar_upload_requires_channel_membership`
 - `test_username_validation_rejects_unsafe_identifiers`
@@ -124,8 +125,9 @@ Verifies:
 - SVG image uploads are rejected for protected media/avatar safety
 - Unsafe avatar URLs are rejected before storage
 - Uploaded profile avatars are visible to authenticated users through the protected media path
+- Uploaded profile wallpapers are saved on the current user's backend profile and remain readable only by the owning user through the protected media path
 - Private channel avatar uploads remain restricted to approved channel members
-- Avatar updates reject unowned uploads and non-image uploads
+- Avatar and wallpaper updates reject unowned uploads and non-image uploads
 - Final PASS/FAIL summary with visible step names and timeouts
 The verifier does not currently force a RabbitMQ failure or DLQ transition; use the backend delivery reliability tests and worker logs for that path.
 Note: the verifier is the best single proof of the pub/sub chain in this repo, but it is still a scripted demo flow rather than a CI-level full-stack integration suite.
@@ -179,7 +181,7 @@ This is an automated supervisor proof for the normal worker path and controlled 
 - Ciphertext-at-rest SQL check.
 - Unauthorized publish/read denial behavior.
 - Private upload download denial for a non-member.
-- Profile and channel avatar upload/display behavior, including fallback initials/icons while protected images load.
+- Profile/channel avatar upload and chat wallpaper upload/display behavior, including fallback initials/icons and protected-image loading.
 
 ## Current Limitations
 - Local Windows `npm run build` passed during the 2026-06-14 frontend i18n pass. Docker Compose remains the canonical evaluator path if local Node dependency behavior differs on another machine.

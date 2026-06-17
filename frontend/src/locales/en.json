@@ -260,11 +260,13 @@
       "cancelReply": "Cancel reply",
       "hideRepliesFor": "Hide replies for message #{seq}",
       "openDetails": "Open channel details",
+      "openWallpaperPicker": "Choose chat wallpaper",
       "openOptions": "Open options for message #{seq}",
       "reactWith": "React with {emoji}",
       "removeAttachment": "Remove {name}",
       "removeReaction": "Remove reaction {emoji} on message #{seq}",
       "replyToMessage": "Reply to message #{seq}",
+      "selectWallpaper": "Use {name} chat wallpaper",
       "showRepliesFor": "Show replies for message #{seq}"
     },
     "composer": {
@@ -286,6 +288,23 @@
     },
     "header": {
       "members": "{count, plural, one {# member} other {# members}}"
+    },
+    "wallpaper": {
+      "custom": "Uploaded wallpaper",
+      "customDescription": "Saved to your profile in the backend.",
+      "description": "Saved for your account on this device.",
+      "options": {
+        "aurora": "Aurora",
+        "default": "Default",
+        "dots": "Dots",
+        "grid": "Grid",
+        "meadow": "Meadow",
+        "paper": "Paper"
+      },
+      "removeCustom": "Remove",
+      "uploadCustom": "Upload image",
+      "uploading": "Uploading...",
+      "title": "Wallpaper"
     },
     "joinPrompt": {
       "description": "Join {name} to see history and start messaging with the team.",
@@ -326,7 +345,21 @@
       "nothingToCopyDescription": "Only text content can be copied from this message.",
       "nothingToCopyTitle": "Nothing to copy",
       "reactBlockedDescription": "Join this channel to react to messages.",
-      "reactBlockedTitle": "Cannot react right now"
+      "reactBlockedTitle": "Cannot react right now",
+      "wallpaperClearFailedDescription": "The saved wallpaper could not be removed. Please try again.",
+      "wallpaperClearFailedTitle": "Could not remove wallpaper",
+      "wallpaperClearedDescription": "The chat is using your selected built-in wallpaper again.",
+      "wallpaperClearedTitle": "Wallpaper removed",
+      "wallpaperMissingUrl": "Upload succeeded but no wallpaper URL was returned.",
+      "wallpaperSignInRequired": "You need to be signed in before uploading a wallpaper.",
+      "wallpaperTooLargeDescription": "Wallpaper images must be {size} or smaller.",
+      "wallpaperTooLargeTitle": "Wallpaper image is too large",
+      "wallpaperUnsupportedDescription": "Choose a non-SVG image file for your wallpaper.",
+      "wallpaperUnsupportedTitle": "Unsupported wallpaper file",
+      "wallpaperUploadFailedDescription": "The wallpaper could not be uploaded or saved. Please try again.",
+      "wallpaperUploadFailedTitle": "Wallpaper upload failed",
+      "wallpaperUploadedDescription": "Your wallpaper was uploaded and saved to your backend profile.",
+      "wallpaperUploadedTitle": "Wallpaper saved"
     }
   },
   "invite": {

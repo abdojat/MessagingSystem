@@ -79,7 +79,7 @@ def extract_upload_id_from_url(value: str | None) -> UUID | None:
         return None
 
 
-def normalize_avatar_url(value: str | None) -> str | None:
+def normalize_profile_image_url(value: str | None, *, field_name: str = "image_url") -> str | None:
     if value is None:
         return None
 
@@ -88,23 +88,31 @@ def normalize_avatar_url(value: str | None) -> str | None:
         return None
 
     if any(ch.isspace() or ord(ch) < 32 for ch in normalized):
-        raise ValueError("avatar_url cannot contain whitespace or control characters")
+        raise ValueError(f"{field_name} cannot contain whitespace or control characters")
 
     parsed = urlsplit(normalized)
     if parsed.scheme:
         if parsed.scheme.lower() not in {"http", "https"}:
-            raise ValueError("avatar_url must use http, https, or a protected upload path")
+            raise ValueError(f"{field_name} must use http, https, or a protected upload path")
         if not parsed.netloc:
-            raise ValueError("avatar_url must include a host")
+            raise ValueError(f"{field_name} must include a host")
         return normalized
 
     if parsed.netloc or normalized.startswith("//"):
-        raise ValueError("avatar_url must not be protocol-relative")
+        raise ValueError(f"{field_name} must not be protocol-relative")
 
     if parsed.query or parsed.fragment:
-        raise ValueError("protected upload avatar URLs cannot include query strings or fragments")
+        raise ValueError(f"protected upload {field_name} URLs cannot include query strings or fragments")
 
     if extract_upload_id_from_url(normalized) is None:
-        raise ValueError("avatar_url must be an http(s) URL or /v1/uploads/{file_id}/content")
+        raise ValueError(f"{field_name} must be an http(s) URL or /v1/uploads/{{file_id}}/content")
 
     return normalized
+
+
+def normalize_avatar_url(value: str | None) -> str | None:
+    return normalize_profile_image_url(value, field_name="avatar_url")
+
+
+def normalize_wallpaper_url(value: str | None) -> str | None:
+    return normalize_profile_image_url(value, field_name="wallpaper_url")

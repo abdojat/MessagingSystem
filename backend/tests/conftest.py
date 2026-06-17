@@ -42,6 +42,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             await conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS hash_algorithm varchar(32)"))
             await conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS integrity_version integer"))
             await conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS integrity_scope varchar(128)"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS wallpaper_url text"))
     except Exception as exc:
         await engine.dispose()
         pytest.skip(f"PostgreSQL test database is not reachable for DATABASE_URL={database_url!r}: {exc}")

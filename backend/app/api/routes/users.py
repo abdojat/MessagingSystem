@@ -23,6 +23,7 @@ async def me(user: CurrentUserDep) -> MeResponse:
         email=user.email,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
+        wallpaper_url=user.wallpaper_url,
         bio=user.bio,
         created_at=user.created_at,
         updated_at=user.updated_at,
@@ -38,6 +39,13 @@ async def update_me(req: UpdateMeRequest, db: DBDep, user: CurrentUserDep) -> Me
     try:
         if "avatar_url" in payload:
             await MessageService.validate_avatar_upload_reference(db, user.id, payload["avatar_url"])
+        if "wallpaper_url" in payload:
+            await MessageService.validate_profile_image_upload_reference(
+                db,
+                user.id,
+                payload["wallpaper_url"],
+                label="wallpaper",
+            )
     except AppError as exc:
         raise to_http_exception(exc) from exc
 

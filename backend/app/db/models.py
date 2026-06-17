@@ -68,6 +68,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    wallpaper_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

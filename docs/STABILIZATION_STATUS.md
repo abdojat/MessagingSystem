@@ -1,10 +1,19 @@
 # Stabilization Status
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 ## Summary
 
-This status file now includes the 2026-06-16 multimedia publishing audit. The latest pass keeps protected photo/video/audio message attachments working, tightens attachment references, logs upload success/failure events, rejects SVG uploads, and fixes stale-token file PUTs after access-token refresh while preserving private upload controls.
+This status file now includes the 2026-06-17 profile wallpaper upload pass. The latest pass adds a server-saved user wallpaper field, reuses protected upload storage and validation, and keeps the chat wallpaper picker working with authenticated image loading while preserving private upload controls.
+
+## Profile Wallpaper Upload Pass - 2026-06-17
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Backend persistence | Passed | `users.wallpaper_url` model/schema support and Alembic migration `0014_user_wallpaper_url`; `/me` returns and updates the field | Existing running databases need `alembic upgrade head` before the field is available | Use the canonical Docker startup or run Alembic before manual backend testing |
+| Upload validation and access | Passed | `MessageService.validate_profile_image_upload_reference` requires owned, stored, non-SVG image uploads for wallpaper updates; `test_profile_wallpaper_upload_is_saved_to_current_user` verifies persistence and owner-only media access | External `http(s)` wallpaper URLs are still allowed by schema, but the UI uses backend uploads for the demo | Prefer uploaded wallpapers during supervisor demos |
+| Frontend wallpaper picker | Passed | `frontend/src/components/features/chat/pages/channel-view.tsx` uploads custom wallpapers through `/v1/uploads`, saves `wallpaper_url` through `/me`, clears it when a built-in wallpaper is selected, and renders protected images through temporary object URLs | No browser e2e test clicks the upload control or checks rendered background pixels | Manually upload and remove one small wallpaper image during UI rehearsal |
+| Focused verification | Passed | `python -m pytest tests\test_p0_requirements.py -q` -> `33 passed, 14 skipped`; `npm run typecheck` passed; locale key alignment passed; `docker compose up -d --build` rebuilt and started the stack; backend logs show Alembic applied `0014_user_wallpaper_url`; `git diff --check` reported only line-ending warnings | Local backend tests can skip when PostgreSQL is unavailable; no Docker-backed full verifier was rerun for this narrow UI preference change | Run Docker-backed tests and the main demo verifier before final submission |
 
 ## Media Publishing Pass - 2026-06-16
 

@@ -42,6 +42,7 @@ class MeResponse(BaseModel):
     email: EmailStr | None
     display_name: str | None = None
     avatar_url: str | None = None
+    wallpaper_url: str | None = None
     bio: str | None = None
     created_at: datetime
     updated_at: datetime | None = None

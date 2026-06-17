@@ -165,7 +165,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Message encryption at rest (Fernet).
 - Private uploads require authentication and channel/ownership checks before download.
 - Message attachments support protected photo, video, and audio publishing through the existing upload API.
-- Profile/channel avatar uploads use validated image references and protected authenticated media loading.
+- Profile/channel avatar uploads and profile chat wallpaper uploads use validated image references and protected authenticated media loading.
 - Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.
 - Unauthorized read/publish events logged.
 - Event logs include tamper-evident hash-chain metadata for new events.

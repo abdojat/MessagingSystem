@@ -899,19 +899,34 @@ class MessageService:
         return upload
 
     @staticmethod
-    async def validate_avatar_upload_reference(db: AsyncSession, actor_user_id: UUID, avatar_url: str | None) -> None:
-        upload_id = extract_upload_id_from_url(avatar_url)
+    async def validate_profile_image_upload_reference(
+        db: AsyncSession,
+        actor_user_id: UUID,
+        image_url: str | None,
+        *,
+        label: str = "image",
+    ) -> None:
+        upload_id = extract_upload_id_from_url(image_url)
         if upload_id is None:
             return
 
         upload = await db.get(Upload, upload_id)
         if not upload or upload.owner_user_id != actor_user_id:
-            raise AppError("avatar upload not found", 404, code="NOT_FOUND")
+            raise AppError(f"{label} upload not found", 404, code="NOT_FOUND")
         content_type = (upload.content_type or "").lower()
         if not content_type.startswith("image/") or content_type == "image/svg+xml":
-            raise AppError("avatar upload must be a non-SVG image", 400, code="VALIDATION_ERROR")
+            raise AppError(f"{label} upload must be a non-SVG image", 400, code="VALIDATION_ERROR")
         if not upload.public_url:
-            raise AppError("avatar upload content has not been stored", 400, code="VALIDATION_ERROR")
+            raise AppError(f"{label} upload content has not been stored", 400, code="VALIDATION_ERROR")
+
+    @staticmethod
+    async def validate_avatar_upload_reference(db: AsyncSession, actor_user_id: UUID, avatar_url: str | None) -> None:
+        await MessageService.validate_profile_image_upload_reference(
+            db,
+            actor_user_id,
+            avatar_url,
+            label="avatar",
+        )
 
     @staticmethod
     def _resolve_upload_path(base_dir_value: str, storage_path: str) -> Path:

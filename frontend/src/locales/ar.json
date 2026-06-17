@@ -260,11 +260,13 @@
       "cancelReply": "إلغاء الرد",
       "hideRepliesFor": "إخفاء الردود للرسالة #{seq}",
       "openDetails": "فتح تفاصيل القناة",
+      "openWallpaperPicker": "اختيار خلفية المحادثة",
       "openOptions": "فتح خيارات الرسالة #{seq}",
       "reactWith": "تفاعل باستخدام {emoji}",
       "removeAttachment": "إزالة {name}",
       "removeReaction": "إزالة التفاعل {emoji} من الرسالة #{seq}",
       "replyToMessage": "الرد على الرسالة #{seq}",
+      "selectWallpaper": "استخدام خلفية {name} للمحادثة",
       "showRepliesFor": "عرض الردود للرسالة #{seq}"
     },
     "composer": {
@@ -286,6 +288,23 @@
     },
     "header": {
       "members": "{count, plural, zero {لا أعضاء} one {عضو واحد} two {عضوان} few {# أعضاء} many {# عضوا} other {# عضو}}"
+    },
+    "wallpaper": {
+      "custom": "خلفية مرفوعة",
+      "customDescription": "محفوظة في ملفك الشخصي على الخادم.",
+      "description": "يتم حفظها لحسابك على هذا الجهاز.",
+      "options": {
+        "aurora": "شفق",
+        "default": "افتراضية",
+        "dots": "نقاط",
+        "grid": "شبكة",
+        "meadow": "مرج",
+        "paper": "ورق"
+      },
+      "removeCustom": "إزالة",
+      "uploadCustom": "رفع صورة",
+      "uploading": "جار الرفع...",
+      "title": "الخلفية"
     },
     "joinPrompt": {
       "description": "انضم إلى {name} لرؤية السجل وبدء المراسلة مع الفريق.",
@@ -326,7 +345,21 @@
       "nothingToCopyDescription": "يمكن نسخ محتوى النص فقط من هذه الرسالة.",
       "nothingToCopyTitle": "لا يوجد ما ينسخ",
       "reactBlockedDescription": "انضم إلى هذه القناة للتفاعل مع الرسائل.",
-      "reactBlockedTitle": "لا يمكن التفاعل الآن"
+      "reactBlockedTitle": "لا يمكن التفاعل الآن",
+      "wallpaperClearFailedDescription": "تعذرت إزالة الخلفية المحفوظة. يرجى المحاولة مرة أخرى.",
+      "wallpaperClearFailedTitle": "تعذرت إزالة الخلفية",
+      "wallpaperClearedDescription": "تستخدم المحادثة الخلفية الجاهزة التي اخترتها مرة أخرى.",
+      "wallpaperClearedTitle": "تمت إزالة الخلفية",
+      "wallpaperMissingUrl": "نجح الرفع لكن لم يتم إرجاع رابط للخلفية.",
+      "wallpaperSignInRequired": "يجب تسجيل الدخول قبل رفع خلفية.",
+      "wallpaperTooLargeDescription": "يجب ألا يتجاوز حجم صورة الخلفية {size}.",
+      "wallpaperTooLargeTitle": "صورة الخلفية كبيرة جدا",
+      "wallpaperUnsupportedDescription": "اختر ملف صورة غير SVG للخلفية.",
+      "wallpaperUnsupportedTitle": "ملف خلفية غير مدعوم",
+      "wallpaperUploadFailedDescription": "تعذر رفع الخلفية أو حفظها. يرجى المحاولة مرة أخرى.",
+      "wallpaperUploadFailedTitle": "فشل رفع الخلفية",
+      "wallpaperUploadedDescription": "تم رفع الخلفية وحفظها في ملفك الشخصي على الخادم.",
+      "wallpaperUploadedTitle": "تم حفظ الخلفية"
     }
   },
   "invite": {

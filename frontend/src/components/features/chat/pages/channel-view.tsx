@@ -3,20 +3,23 @@
 import { useParams, useRouter } from "next/navigation";
 import { useChannel, useChannelMembers, useJoinChannel } from "@/hooks/use-channels";
 import { useMarkSeen, useMessages, useSendMessage, useToggleReaction } from "@/hooks/use-messages";
-import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight, Copy, ArrowUpRight, ImageIcon, Video, Music2, Loader2 } from "lucide-react";
+import { Hash, Settings, Paperclip, Send, SmilePlus, Reply, MoreVertical, X, ChevronDown, ChevronRight, Copy, ArrowUpRight, ImageIcon, Video, Music2, Loader2, Check, UploadCloud, Trash2 } from "lucide-react";
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AuthenticatedImage } from "@/components/shared/AuthenticatedImage";
 import { useAuthStore } from "@/store/authStore";
+import { CHAT_WALLPAPERS, getChatWallpaperById, useChatPreferencesStore } from "@/store/chatPreferencesStore";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/hooks/use-toast";
-import type { AttachmentItem, MessageResponse, UploadContentResponse, UploadCreateResponse } from "@/types/api";
+import type { AttachmentItem, MeResponse, MessageResponse, UpdateMeRequest, UploadContentResponse, UploadCreateResponse } from "@/types/api";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { isProtectedApiMediaUrl, resolveApiMediaUrl } from "@/lib/mediaUrl";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiClient } from "@/services/api/client";
 import { getApiBaseUrl } from "@/services/api/runtime";
 
@@ -64,6 +67,7 @@ const QUICK_REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F602}", "\u{1F62E
 const MEDIA_ACCEPT = "image/*,video/*,audio/*";
 const MAX_MEDIA_ATTACHMENTS = 6;
 const MAX_MEDIA_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+const MAX_WALLPAPER_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 type MediaKind = "image" | "video" | "audio";
 
@@ -132,6 +136,97 @@ function formatBytes(value?: number | null): string {
 
 function getAttachmentUrl(attachment: AttachmentItem): string | undefined {
   return resolveApiMediaUrl(attachment.url || attachment.public_url);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+}
+
+function resolveUploadTargetUrl(uploadUrl: string): string {
+  const apiBaseUrl = getApiBaseUrl();
+  if (/^https?:\/\//i.test(uploadUrl)) {
+    return uploadUrl;
+  }
+  if (/^https?:\/\//i.test(apiBaseUrl)) {
+    return `${new URL(apiBaseUrl).origin}${uploadUrl.startsWith("/") ? uploadUrl : `/${uploadUrl}`}`;
+  }
+  return uploadUrl;
+}
+
+function cssUrl(value: string): string {
+  return `url("${value.replace(/"/g, "%22")}")`;
+}
+
+function useAuthenticatedBackgroundImage(src?: string | null, accessToken?: string | null): string | undefined {
+  const resolvedSrc = resolveApiMediaUrl(src);
+  const needsAuth = isProtectedApiMediaUrl(resolvedSrc);
+  const [objectUrl, setObjectUrl] = useState<string | undefined>();
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+    setObjectUrl(undefined);
+  }, [resolvedSrc, needsAuth, accessToken]);
+
+  useEffect(() => {
+    if (!resolvedSrc || !needsAuth || !accessToken) {
+      return;
+    }
+
+    const fetchSrc = resolvedSrc;
+    const controller = new AbortController();
+    let localObjectUrl: string | undefined;
+
+    async function loadProtectedImage() {
+      try {
+        const response = await fetch(fetchSrc, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`wallpaper request failed: ${response.status}`);
+        }
+        const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+        if (contentType && !contentType.startsWith("image/")) {
+          throw new Error("wallpaper response is not an image");
+        }
+        const blob = await response.blob();
+        if (blob.type && !blob.type.toLowerCase().startsWith("image/")) {
+          throw new Error("wallpaper blob is not an image");
+        }
+        localObjectUrl = URL.createObjectURL(blob);
+        setObjectUrl(localObjectUrl);
+      } catch {
+        if (!controller.signal.aborted) {
+          setFailed(true);
+        }
+      }
+    }
+
+    void loadProtectedImage();
+
+    return () => {
+      controller.abort();
+      if (localObjectUrl) {
+        URL.revokeObjectURL(localObjectUrl);
+      }
+    };
+  }, [accessToken, needsAuth, resolvedSrc]);
+
+  useEffect(() => {
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [objectUrl]);
+
+  if (!resolvedSrc || failed) {
+    return undefined;
+  }
+
+  return needsAuth ? objectUrl : resolvedSrc;
 }
 
 function AttachmentIcon({ kind }: { kind: MediaKind | null }) {
@@ -344,11 +439,19 @@ export default function ChannelView() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const wallpaperFileInputRef = useRef<HTMLInputElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const lastMarkedSeenSeqRef = useRef<number | null>(null);
   const pendingMediaRef = useRef<PendingMediaAttachment[]>([]);
   const user = useAuthStore(s => s.user);
   const accessToken = useAuthStore(s => s.accessToken);
+  const updateUser = useAuthStore(s => s.updateUser);
+  const chatWallpaperId = useChatPreferencesStore((state) => state.chatWallpaperId);
+  const chatWallpaperByUserId = useChatPreferencesStore((state) => state.chatWallpaperByUserId);
+  const setChatWallpaperId = useChatPreferencesStore((state) => state.setChatWallpaperId);
+  const setChatWallpaperForUser = useChatPreferencesStore((state) => state.setChatWallpaperForUser);
+  const [isUpdatingWallpaper, setIsUpdatingWallpaper] = useState(false);
+  const uploadedWallpaperImageUrl = useAuthenticatedBackgroundImage(user?.wallpaper_url, accessToken);
   const isMember = ['owner', 'admin', 'member'].includes(channel?.my_role || '');
   const canCompose = ['owner', 'admin'].includes(channel?.my_role || '');
   const canReplyAsMember = isMember && !canCompose;
@@ -444,18 +547,11 @@ export default function ChannelView() {
       throw new Error("missing access token");
     }
 
-    const apiBaseUrl = getApiBaseUrl();
-    const uploadUrl = /^https?:\/\//i.test(created.upload_url)
-      ? created.upload_url
-      : /^https?:\/\//i.test(apiBaseUrl)
-        ? `${new URL(apiBaseUrl).origin}${created.upload_url.startsWith("/") ? created.upload_url : `/${created.upload_url}`}`
-        : created.upload_url;
-
     const uploadHeaders = new Headers(created.headers || {});
     uploadHeaders.set("Authorization", `Bearer ${uploadAccessToken}`);
     uploadHeaders.set("Content-Type", item.contentType);
 
-    const response = await fetch(uploadUrl, {
+    const response = await fetch(resolveUploadTargetUrl(created.upload_url), {
       method: created.method || "PUT",
       headers: uploadHeaders,
       body: item.file,
@@ -465,6 +561,120 @@ export default function ChannelView() {
     }
     await response.json() as UploadContentResponse;
     return { file_id: created.file_id };
+  };
+
+  const saveUserWallpaperUrl = async (wallpaperUrl: string | null): Promise<MeResponse> => {
+    const payload: UpdateMeRequest = { wallpaper_url: wallpaperUrl };
+    const updatedUser = await apiClient<MeResponse>("/me", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    updateUser(updatedUser);
+    return updatedUser;
+  };
+
+  const uploadWallpaperFile = async (file: File, contentType: string): Promise<string> => {
+    if (!accessToken) {
+      throw new Error(t("toasts.wallpaperSignInRequired"));
+    }
+
+    const created = await apiClient<UploadCreateResponse>("/uploads", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: contentType,
+        size_bytes: file.size,
+      }),
+    });
+
+    const uploadAccessToken = useAuthStore.getState().accessToken;
+    if (!uploadAccessToken) {
+      throw new Error(t("toasts.wallpaperSignInRequired"));
+    }
+
+    const uploadHeaders = new Headers(created.headers || {});
+    uploadHeaders.set("Authorization", `Bearer ${uploadAccessToken}`);
+    uploadHeaders.set("Content-Type", contentType);
+
+    const response = await fetch(resolveUploadTargetUrl(created.upload_url), {
+      method: created.method || "PUT",
+      headers: uploadHeaders,
+      body: file,
+    });
+    if (!response.ok) {
+      throw new Error(`upload failed: ${response.status}`);
+    }
+
+    const uploaded = (await response.json()) as UploadContentResponse;
+    const nextWallpaperUrl = (uploaded.public_url || created.public_url || "").trim();
+    if (!nextWallpaperUrl) {
+      throw new Error(t("toasts.wallpaperMissingUrl"));
+    }
+    return nextWallpaperUrl;
+  };
+
+  const handleWallpaperSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    event.currentTarget.value = "";
+    if (!file) return;
+
+    const contentType = inferMediaContentType(file);
+    if (!contentType || getMessageMediaKind(contentType) !== "image" || contentType === "image/svg+xml") {
+      toast({
+        title: t("toasts.wallpaperUnsupportedTitle"),
+        description: t("toasts.wallpaperUnsupportedDescription"),
+        variant: "destructive",
+      });
+      return;
+    }
+    if (file.size > MAX_WALLPAPER_FILE_SIZE_BYTES) {
+      toast({
+        title: t("toasts.wallpaperTooLargeTitle"),
+        description: t("toasts.wallpaperTooLargeDescription", { size: formatBytes(MAX_WALLPAPER_FILE_SIZE_BYTES) }),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUpdatingWallpaper(true);
+    try {
+      const wallpaperUrl = await uploadWallpaperFile(file, contentType);
+      await saveUserWallpaperUrl(wallpaperUrl);
+      toast({
+        title: t("toasts.wallpaperUploadedTitle"),
+        description: t("toasts.wallpaperUploadedDescription"),
+      });
+    } catch (error) {
+      toast({
+        title: t("toasts.wallpaperUploadFailedTitle"),
+        description: getErrorMessage(error, t("toasts.wallpaperUploadFailedDescription")),
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingWallpaper(false);
+    }
+  };
+
+  const clearCustomWallpaper = async (showToast = true) => {
+    if (!user?.wallpaper_url || isUpdatingWallpaper) return;
+    setIsUpdatingWallpaper(true);
+    try {
+      await saveUserWallpaperUrl(null);
+      if (showToast) {
+        toast({
+          title: t("toasts.wallpaperClearedTitle"),
+          description: t("toasts.wallpaperClearedDescription"),
+        });
+      }
+    } catch (error) {
+      toast({
+        title: t("toasts.wallpaperClearFailedTitle"),
+        description: getErrorMessage(error, t("toasts.wallpaperClearFailedDescription")),
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingWallpaper(false);
+    }
   };
 
   const handleMediaSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -730,6 +940,29 @@ export default function ChannelView() {
   const rootMessages = messages.filter((message) => !message.reply_to_message_id || !messageById.has(message.reply_to_message_id));
   const hasComposerDraft = content.trim().length > 0 || pendingMedia.length > 0;
   const isComposerBusy = sendMessage.isPending || isUploadingMedia;
+  const selectedWallpaperId = user?.id ? (chatWallpaperByUserId[user.id] ?? chatWallpaperId) : chatWallpaperId;
+  const activeWallpaper = getChatWallpaperById(selectedWallpaperId);
+  const hasCustomWallpaper = Boolean(user?.wallpaper_url);
+  const customWallpaperStyle = uploadedWallpaperImageUrl
+    ? {
+        backgroundColor: "hsl(var(--background))",
+        backgroundImage: `linear-gradient(180deg, hsl(var(--background) / 0.18) 0%, hsl(var(--background) / 0.62) 100%), ${cssUrl(uploadedWallpaperImageUrl)}`,
+        backgroundPosition: "center, center",
+        backgroundRepeat: "no-repeat, no-repeat",
+        backgroundSize: "cover, cover",
+      }
+    : null;
+  const activeWallpaperStyle = customWallpaperStyle ?? activeWallpaper.style;
+  const updateChatWallpaper = (wallpaperId: typeof activeWallpaper.id) => {
+    if (user?.id) {
+      setChatWallpaperForUser(user.id, wallpaperId);
+    } else {
+      setChatWallpaperId(wallpaperId);
+    }
+    if (user?.wallpaper_url) {
+      void clearCustomWallpaper(false);
+    }
+  };
 
   function renderMessageThread(
     msg: MessageResponse,
@@ -1057,6 +1290,103 @@ export default function ChannelView() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Popover>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="text-muted-foreground hover:text-foreground"
+                    aria-label={t("aria.openWallpaperPicker")}
+                  >
+                    <ImageIcon className="w-5 h-5" />
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{t("wallpaper.title")}</TooltipContent>
+            </Tooltip>
+            <PopoverContent align="end" className="w-80 p-3">
+              <div className="mb-3">
+                <div className="text-sm font-semibold text-popover-foreground">{t("wallpaper.title")}</div>
+                <p className="mt-1 text-xs text-muted-foreground">{t("wallpaper.description")}</p>
+              </div>
+              <input
+                ref={wallpaperFileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleWallpaperSelected}
+              />
+              <div className="mb-3 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => wallpaperFileInputRef.current?.click()}
+                  disabled={isUpdatingWallpaper || !user}
+                >
+                  {isUpdatingWallpaper ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="mr-2 h-3.5 w-3.5" />}
+                  {isUpdatingWallpaper ? t("wallpaper.uploading") : t("wallpaper.uploadCustom")}
+                </Button>
+                {hasCustomWallpaper ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void clearCustomWallpaper()}
+                    disabled={isUpdatingWallpaper}
+                  >
+                    <Trash2 className="mr-2 h-3.5 w-3.5" />
+                    {t("wallpaper.removeCustom")}
+                  </Button>
+                ) : null}
+              </div>
+              {hasCustomWallpaper ? (
+                <div className="mb-3 rounded-md border border-primary/30 bg-primary/5 p-2">
+                  <span
+                    className="relative mb-1.5 block h-16 overflow-hidden rounded-md border border-border/60"
+                    style={customWallpaperStyle ?? activeWallpaper.style}
+                  >
+                    <span className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent" />
+                    <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                      <Check className="h-3.5 w-3.5" />
+                    </span>
+                  </span>
+                  <div className="text-xs font-medium text-popover-foreground">{t("wallpaper.custom")}</div>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">{t("wallpaper.customDescription")}</p>
+                </div>
+              ) : null}
+              <div className="grid grid-cols-2 gap-2">
+                {CHAT_WALLPAPERS.map((wallpaper) => {
+                  const isSelected = !hasCustomWallpaper && activeWallpaper.id === wallpaper.id;
+                  const label = t(`wallpaper.options.${wallpaper.id}`);
+
+                  return (
+                    <button
+                      key={wallpaper.id}
+                      type="button"
+                      className={cn(
+                        "rounded-md border p-1.5 text-left transition-colors hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring",
+                        isSelected ? "border-primary bg-primary/5" : "border-border/70"
+                      )}
+                      onClick={() => updateChatWallpaper(wallpaper.id)}
+                      aria-label={t("aria.selectWallpaper", { name: label })}
+                      aria-pressed={isSelected}
+                    >
+                      <span className="relative mb-1.5 block h-14 overflow-hidden rounded-md border border-border/60" style={wallpaper.style}>
+                        <span className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent" />
+                        {isSelected ? (
+                          <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                            <Check className="h-3.5 w-3.5" />
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="block truncate text-xs font-medium text-popover-foreground">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
           <Button
             size="icon"
             variant="ghost"
@@ -1070,7 +1400,11 @@ export default function ChannelView() {
       </header>
 
       {/* Messages Area */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-background to-background/50">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto p-6 space-y-6 bg-background transition-[background] duration-300"
+        style={activeWallpaperStyle}
+      >
         {!isMember ? (
           <div className="h-full flex flex-col items-center justify-center text-center">
             <div className="w-20 h-20 rounded-2xl bg-secondary flex items-center justify-center mb-6 shadow-inner">

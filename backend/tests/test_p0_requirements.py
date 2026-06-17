@@ -164,6 +164,8 @@ def test_avatar_url_validation_rejects_unsafe_values(avatar_url):
     with pytest.raises(ValidationError):
         UpdateMeRequest(avatar_url=avatar_url)
     with pytest.raises(ValidationError):
+        UpdateMeRequest(wallpaper_url=avatar_url)
+    with pytest.raises(ValidationError):
         ChannelPatchRequest(avatar_url=avatar_url)
 
 
@@ -178,6 +180,7 @@ def test_avatar_url_validation_rejects_unsafe_values(avatar_url):
 )
 def test_avatar_url_validation_accepts_safe_values(avatar_url):
     assert UpdateMeRequest(avatar_url=avatar_url).avatar_url == avatar_url
+    assert UpdateMeRequest(wallpaper_url=avatar_url).wallpaper_url == avatar_url
     assert ChannelPatchRequest(avatar_url=avatar_url).avatar_url == avatar_url
 
 
@@ -440,6 +443,29 @@ async def test_profile_avatar_upload_is_accessible_to_authenticated_users(db_ses
 
 
 @pytest.mark.asyncio
+async def test_profile_wallpaper_upload_is_saved_to_current_user(db_session, monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+
+    owner = await AuthService.register(db_session, RegisterRequest(username="wall_owner", email="wall_owner@x.com", password="password123"))
+    viewer = await AuthService.register(db_session, RegisterRequest(username="wall_viewer", email="wall_viewer@x.com", password="password123"))
+    upload = await MessageService.create_upload(
+        db_session,
+        owner.id,
+        UploadCreateRequest(filename="wallpaper.webp", content_type="image/webp", size_bytes=8),
+    )
+    stored = await MessageService.store_upload_content(db_session, owner.id, upload.id, b"webpdata")
+
+    updated = await update_me(UpdateMeRequest(wallpaper_url=stored.public_url), db_session, owner)
+
+    assert updated.wallpaper_url == stored.public_url
+    await db_session.refresh(owner)
+    assert owner.wallpaper_url == stored.public_url
+    assert await MessageService.can_access_upload(db_session, owner.id, upload.id) is True
+    assert await MessageService.can_access_upload(db_session, viewer.id, upload.id) is False
+
+
+@pytest.mark.asyncio
 async def test_avatar_update_rejects_unowned_or_non_image_uploads(db_session, monkeypatch, tmp_path):
     monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
     get_settings.cache_clear()
@@ -456,6 +482,9 @@ async def test_avatar_update_rejects_unowned_or_non_image_uploads(db_session, mo
     with pytest.raises(HTTPException) as non_image_exc:
         await update_me(UpdateMeRequest(avatar_url=stored_text.public_url), db_session, owner)
     assert non_image_exc.value.status_code == 400
+    with pytest.raises(HTTPException) as wallpaper_non_image_exc:
+        await update_me(UpdateMeRequest(wallpaper_url=stored_text.public_url), db_session, owner)
+    assert wallpaper_non_image_exc.value.status_code == 400
 
     other_upload = await MessageService.create_upload(
         db_session,
@@ -466,6 +495,9 @@ async def test_avatar_update_rejects_unowned_or_non_image_uploads(db_session, mo
     with pytest.raises(HTTPException) as unowned_exc:
         await update_me(UpdateMeRequest(avatar_url=stored_other.public_url), db_session, owner)
     assert unowned_exc.value.status_code == 404
+    with pytest.raises(HTTPException) as wallpaper_unowned_exc:
+        await update_me(UpdateMeRequest(wallpaper_url=stored_other.public_url), db_session, owner)
+    assert wallpaper_unowned_exc.value.status_code == 404
 
 
 @pytest.mark.asyncio

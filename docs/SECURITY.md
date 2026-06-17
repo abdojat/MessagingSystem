@@ -16,8 +16,8 @@
 - Message media attachments use the same protected upload route. A message can reference uploaded photo, video, or audio content only after the uploader has stored the bytes; subscribers fetch/play that media through authenticated requests.
 - Publish requests accept only attachment `file_id` references from clients. Filename, content type, size, and protected URL are derived from trusted upload records by the backend before the message is stored.
 - Upload content types are normalized before storage. SVG image uploads are rejected because they are not needed for the multimedia demo and are riskier to render than ordinary photo/video/audio files.
-- Profile and channel avatar uploads stay behind the same authenticated upload route. Stored avatar URLs are validated to allow only `http`, `https`, or protected upload-content paths; internal avatar uploads must be owned by the updater, already stored, and be non-SVG images.
-- Avatar upload downloads have explicit access rules: profile avatars are visible to authenticated users, public channel avatars are visible to authenticated users, and private channel avatars are visible only to approved channel members or the upload owner.
+- Profile avatar, profile wallpaper, and channel avatar uploads stay behind the same authenticated upload route. Stored image URLs are validated to allow only `http`, `https`, or protected upload-content paths; internal uploads must be owned by the updater, already stored, and be non-SVG images.
+- Avatar and wallpaper upload downloads have explicit access rules: profile avatars are visible to authenticated users, profile wallpapers are visible to the owning user, public channel avatars are visible to authenticated users, and private channel avatars are visible only to approved channel members or the upload owner.
 - Unauthorized publish/read attempts are logged as security events.
 - Unauthorized upload download attempts are logged as `security.unauthorized_upload_access`.
 - Upload creation, successful content storage, successful content access, and size/checksum store failures are logged as `upload.created`, `upload.content_stored`, `upload.accessed`, and `upload.store_failed`.
@@ -39,7 +39,7 @@
 - RabbitMQ routing keys and Redis channels are normalized before use.
 - Safe usernames and channel slugs are restricted to `^[A-Za-z0-9_-]{3,50}$`.
 - Upload storage paths are derived from sanitized filename components and validated to stay inside the uploads directory.
-- Avatar URL fields reject unsafe schemes such as `javascript:`, `data:`, `file:`, and protocol-relative URLs before storage.
+- Avatar and wallpaper URL fields reject unsafe schemes such as `javascript:`, `data:`, `file:`, and protocol-relative URLs before storage.
 - Raw user input is not used directly in broker routing keys, Redis pub/sub channels, or filesystem paths.
 
 ## Delivery Error Handling
@@ -64,3 +64,4 @@ This protects against accidental or unauthorized event modification, insertion, 
 - Event integrity is tamper-evident inside PostgreSQL, but it does not prove that the database itself was never rewritten by a fully privileged operator.
 - The verifier does not prove tail deletion unless the previous last hash was stored or witnessed outside the database.
 - Successful upload access logging is best-effort so a temporary audit-log failure does not break protected media playback; unauthorized access logging still blocks the request with `403 Forbidden`.
+- Protected upload-backed avatars, wallpapers, and message media are fetched by the frontend with the bearer token and rendered through temporary object URLs. This is suitable for the local demo, but it is not a production CDN/media pipeline.
