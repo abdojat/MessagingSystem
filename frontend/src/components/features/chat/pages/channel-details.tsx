@@ -334,6 +334,27 @@ export default function ChannelDetailsPage() {
     return commonT("roles.none");
   };
 
+  const getMemberProfilePath = (memberUserId: string) =>
+    memberUserId === currentUser?.id ? localePath("/app/profile") : localePath(`/app/users/${memberUserId}`);
+
+  const renderMemberIdentity = (member: ChannelMembershipItem) => {
+    const displayName = member.display_name?.trim() || member.username;
+    return (
+      <div className="min-w-0">
+        <Link
+          href={getMemberProfilePath(member.user_id)}
+          className="block truncate font-medium leading-none text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {displayName}
+        </Link>
+        <div className="mt-1 truncate text-xs text-muted-foreground">
+          @{member.username}
+          {member.email ? ` - ${member.email}` : ` - ${t("empty.noEmailAvailable")}`}
+        </div>
+      </div>
+    );
+  };
+
   const trimmedName = editForm.name.trim();
   const trimmedDescription = editForm.description.trim();
   const hasEditChanges =
@@ -724,10 +745,7 @@ export default function ChannelDetailsPage() {
                         return (
                           <div key={member.user_id} className="rounded-xl border border-border/60 p-3">
                             <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div>
-                                <div className="font-medium leading-none">{member.username}</div>
-                                <div className="mt-1 text-xs text-muted-foreground">{member.email || t("empty.noEmailAvailable")}</div>
-                              </div>
+                              {renderMemberIdentity(member)}
                               <div className="flex items-center gap-2">
                                 <Badge variant={getRoleBadgeVariant(member.role)}>{roleLabel(member.role)}</Badge>
                                 {channel.permissions.can_approve ? (
@@ -841,10 +859,7 @@ export default function ChannelDetailsPage() {
                         return (
                           <div key={member.user_id} className="rounded-xl border border-border/60 p-3">
                             <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div>
-                                <div className="font-medium leading-none">{member.username}</div>
-                                <div className="mt-1 text-xs text-muted-foreground">{member.email || t("empty.noEmailAvailable")}</div>
-                              </div>
+                              {renderMemberIdentity(member)}
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge variant={getRoleBadgeVariant(member.role)}>{roleLabel(member.role)}</Badge>
                                 {canPromote ? (

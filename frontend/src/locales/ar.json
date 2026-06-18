@@ -507,6 +507,33 @@
       "updatedTitle": "تم تحديث الملف"
     }
   },
+  "publicProfile": {
+    "badges": {
+      "public": "ملف مساحة العمل"
+    },
+    "description": "اعرض بيانات الهوية العامة لزميل من نشاط القنوات.",
+    "empty": {
+      "noBio": "لم تتم مشاركة نبذة بعد.",
+      "noDisplayName": "لم تتم مشاركة اسم عرض"
+    },
+    "errors": {
+      "loadDescription": "قد لا يكون المستخدم موجودا، أو قد تحتاج جلستك إلى التحديث.",
+      "loadTitle": "تعذر تحميل هذا الملف"
+    },
+    "rows": {
+      "displayName": "اسم العرض",
+      "userId": "معرف المستخدم"
+    },
+    "sections": {
+      "identity": "الهوية"
+    },
+    "stats": {
+      "lastUpdated": "آخر تحديث",
+      "memberSince": "عضو منذ",
+      "username": "اسم المستخدم"
+    },
+    "title": "ملف المستخدم"
+  },
   "delivery": {
     "actions": {
       "retryAll": "إعادة محاولة الكل"

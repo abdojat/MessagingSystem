@@ -13,6 +13,12 @@ export interface MeResponse extends User {
   updated_at?: string | null;
 }
 
+export interface UserPublicProfile extends User {
+  bio?: string | null;
+  created_at?: string;
+  updated_at?: string | null;
+}
+
 export interface UpdateMeRequest {
   email?: string | null;
   display_name?: string | null;

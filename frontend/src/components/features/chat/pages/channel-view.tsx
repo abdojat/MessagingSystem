@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useChannel, useChannelMembers, useJoinChannel } from "@/hooks/use-channels";
 import { useMarkSeen, useMessages, useSendMessage, useToggleReaction } from "@/hooks/use-messages";
@@ -833,6 +834,49 @@ export default function ChannelView() {
     return memberAvatarById.get(senderUserId);
   };
 
+  const getUserProfilePath = (senderUserId: string | undefined) => {
+    if (!senderUserId) return null;
+    return senderUserId === user?.id ? localePath("/app/profile") : localePath(`/app/users/${senderUserId}`);
+  };
+
+  const renderSenderNameLink = (message: MessageResponse, className?: string) => {
+    const label = resolveSenderName(message.sender_user_id, message);
+    const href = getUserProfilePath(message.sender_user_id);
+    if (!href) return <span className={className}>{label}</span>;
+    return (
+      <Link
+        href={href}
+        className={cn(
+          className,
+          "rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        )}
+      >
+        {label}
+      </Link>
+    );
+  };
+
+  const renderSenderAvatarLink = (message: MessageResponse, className: string, fallbackClassName?: string) => {
+    const label = resolveSenderName(message.sender_user_id, message);
+    const avatar = (
+      <Avatar className={className}>
+        <AvatarImage src={resolveSenderAvatarUrl(message.sender_user_id, message)} alt={label} />
+        <AvatarFallback className={fallbackClassName}>{label?.[0]?.toUpperCase() || "#"}</AvatarFallback>
+      </Avatar>
+    );
+    const href = getUserProfilePath(message.sender_user_id);
+    if (!href) return avatar;
+    return (
+      <Link
+        href={href}
+        className="inline-flex flex-shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label={label}
+      >
+        {avatar}
+      </Link>
+    );
+  };
+
   const getDescendantReplyCount = (messageId: string): number => {
     let count = 0;
     const visited = new Set<string>();
@@ -1006,15 +1050,9 @@ export default function ChannelView() {
       >
         <div className={cn("flex", isNested ? "gap-2" : "gap-3", isMe ? "justify-end" : "justify-start")}>
           {isNested && !isMe ? (
-            <Avatar className="mt-1 h-6 w-6 flex-shrink-0 border border-border/70 shadow-sm">
-              <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
-              <AvatarFallback className="text-[10px]">{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
-            </Avatar>
+            renderSenderAvatarLink(msg, "mt-1 h-6 w-6 flex-shrink-0 border border-border/70 shadow-sm", "text-[10px]")
           ) : !isNested && !isMe && showHeader ? (
-            <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
-              <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
-              <AvatarFallback>{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
-            </Avatar>
+            renderSenderAvatarLink(msg, "w-10 h-10 border border-border shadow-sm flex-shrink-0")
           ) : !isNested && !isMe ? (
             <div className="w-10 flex-shrink-0" />
           ) : null}
@@ -1022,9 +1060,7 @@ export default function ChannelView() {
           <div className={cn("flex min-w-0 flex-col", isNested ? "max-w-full" : "max-w-[min(85%,42rem)]", isMe ? "items-end" : "items-start")}>
             {showHeader && !isNested && (
               <div className={cn("mb-1 flex items-baseline gap-2", isMe && "justify-end")}>
-                <span className="font-semibold text-foreground text-sm">
-                  {resolveSenderName(msg.sender_user_id, msg)}
-                </span>
+                {renderSenderNameLink(msg, "font-semibold text-foreground text-sm")}
                 <span className="text-[11px] text-muted-foreground">{formatTime(msg.created_at)}</span>
               </div>
             )}
@@ -1052,9 +1088,7 @@ export default function ChannelView() {
             >
             {showHeader && isNested && (
               <div className="mb-1 flex items-baseline gap-2">
-                <span className={cn("text-xs font-semibold", isMe ? "text-primary-foreground" : "text-foreground")}>
-                  {resolveSenderName(msg.sender_user_id, msg)}
-                </span>
+                {renderSenderNameLink(msg, cn("text-xs font-semibold", isMe ? "text-primary-foreground" : "text-foreground"))}
                 <span className={cn("text-[10px]", isMe ? "text-primary-foreground/70" : "text-muted-foreground")}>
                   {formatTime(msg.created_at)}
                 </span>
@@ -1247,15 +1281,9 @@ export default function ChannelView() {
         </div>
 
         {isNested && isMe ? (
-          <Avatar className="mt-1 h-6 w-6 flex-shrink-0 border border-primary/20 shadow-sm">
-            <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
-            <AvatarFallback className="text-[10px]">{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
-          </Avatar>
+          renderSenderAvatarLink(msg, "mt-1 h-6 w-6 flex-shrink-0 border border-primary/20 shadow-sm", "text-[10px]")
         ) : !isNested && isMe && showHeader ? (
-          <Avatar className="w-10 h-10 border border-border shadow-sm flex-shrink-0">
-            <AvatarImage src={resolveSenderAvatarUrl(msg.sender_user_id, msg)} />
-            <AvatarFallback>{resolveSenderName(msg.sender_user_id, msg)?.[0]?.toUpperCase() || "#"}</AvatarFallback>
-          </Avatar>
+          renderSenderAvatarLink(msg, "w-10 h-10 border border-border shadow-sm flex-shrink-0")
         ) : !isNested && isMe ? (
           <div className="w-10 flex-shrink-0" />
         ) : null}

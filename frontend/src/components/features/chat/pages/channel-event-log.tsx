@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
@@ -39,15 +40,9 @@ import { cn } from "@/lib/utils";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
 import { apiClient } from "@/services/api/client";
 import { formatDateTimeLocalized, formatNumberLocalized } from "@/lib/i18n-format";
-import type { AttachmentItem, ChannelResponse, EventIntegrityResponse, EventResponse, MessageResponse, User } from "@/types/api";
+import type { AttachmentItem, ChannelResponse, EventIntegrityResponse, EventResponse, MessageResponse, UserPublicProfile } from "@/types/api";
 
 const EVENT_LIMIT = 100;
-
-type UserPublicProfile = User & {
-  bio?: string | null;
-  created_at?: string;
-  updated_at?: string | null;
-};
 
 type ReferenceMaps = {
   channel: ChannelResponse;
@@ -59,6 +54,7 @@ type ReferenceMaps = {
   locale: string;
   t: ReturnType<typeof useTranslations>;
   commonT: ReturnType<typeof useTranslations>;
+  profilePathForUser: (userId: string) => string;
 };
 
 type ReferenceKind = "user" | "channel" | "message" | "upload" | "invite" | "delivery" | "client" | "internal";
@@ -330,13 +326,16 @@ function UserReference({ userId, references, fallback }: { userId?: string | nul
   const avatarUrl = resolveApiMediaUrl(user?.avatar_url);
 
   return (
-    <span className="inline-flex min-h-7 max-w-full items-center gap-2 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium">
+    <Link
+      href={references.profilePathForUser(userId)}
+      className="inline-flex min-h-7 max-w-full items-center gap-2 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium underline-offset-2 hover:bg-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       <Avatar className="h-5 w-5">
         {avatarUrl ? <AvatarImage src={avatarUrl} alt={userDisplayName(user) ?? fallbackLabel} /> : null}
         <AvatarFallback className="text-[10px]">{userInitial(user)}</AvatarFallback>
       </Avatar>
       <span className="truncate">{userDisplayName(user) ?? fallbackLabel}</span>
-    </span>
+    </Link>
   );
 }
 
@@ -805,8 +804,10 @@ export default function ChannelEventLogPage() {
       locale,
       t,
       commonT,
+      profilePathForUser: (profileUserId: string) =>
+        profileUserId === authUser?.id ? localePath("/app/profile") : localePath(`/app/users/${profileUserId}`),
     };
-  }, [authUser, channel, collectedReferences, commonT, locale, messageQueries, t, userQueries]);
+  }, [authUser, channel, collectedReferences, commonT, locale, localePath, messageQueries, t, userQueries]);
 
   useEffect(() => {
     if (!isInitializing && !isAuthenticated) {

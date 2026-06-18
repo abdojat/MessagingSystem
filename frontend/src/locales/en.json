@@ -507,6 +507,33 @@
       "updatedTitle": "Profile updated"
     }
   },
+  "publicProfile": {
+    "badges": {
+      "public": "Workspace profile"
+    },
+    "description": "View a teammate's public identity details from channel activity.",
+    "empty": {
+      "noBio": "No bio shared yet.",
+      "noDisplayName": "No display name shared"
+    },
+    "errors": {
+      "loadDescription": "The user may not exist anymore, or your session may need to be refreshed.",
+      "loadTitle": "We couldn't load this profile"
+    },
+    "rows": {
+      "displayName": "Display name",
+      "userId": "User ID"
+    },
+    "sections": {
+      "identity": "Identity"
+    },
+    "stats": {
+      "lastUpdated": "Last updated",
+      "memberSince": "Member since",
+      "username": "Username"
+    },
+    "title": "User profile"
+  },
   "delivery": {
     "actions": {
       "retryAll": "Retry all"
