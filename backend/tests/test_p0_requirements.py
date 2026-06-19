@@ -114,6 +114,11 @@ async def test_message_encryption_round_trip_and_authz_and_event(db_session, mon
 
     events = (await db_session.execute(select(Event).where(Event.event_type == "message.published"))).scalars().all()
     assert len(events) == 1
+    assert events[0].payload["message_id"] == str(published.id)
+    assert events[0].payload["seq_id"] == published.seq_id
+    assert "content_text" not in events[0].payload
+    assert "content_json" not in events[0].payload
+    assert "attachments" not in events[0].payload
     unauthorized_publish_events = (
         await db_session.execute(select(Event).where(Event.event_type == "security.unauthorized_publish"))
     ).scalars().all()

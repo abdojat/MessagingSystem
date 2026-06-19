@@ -234,7 +234,15 @@ class MessageService:
         await log_event(
             db,
             "message.published",
-            payload,
+            {
+                "message_id": str(message.id),
+                "channel_id": str(channel_id),
+                "seq_id": seq_id,
+                "content_type": content_type.value,
+                "attachment_count": len(attachments or []),
+                "reply_to_message_id": str(reply_to_message_id) if reply_to_message_id else None,
+                "reply_to_seq_id": reply_to_seq_id,
+            },
             channel_id=channel_id,
             actor_user_id=sender_id,
         )

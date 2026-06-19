@@ -58,10 +58,11 @@ export interface AdminEventItem {
   id: string;
   channel_id?: string | null;
   channel_name?: string | null;
+  channel_slug?: string | null;
   actor_user_id?: string | null;
   actor_username?: string | null;
   event_type: string;
-  payload: Record<string, unknown>;
+  details: Record<string, string | number | boolean | null>;
   created_at: string;
   event_hash?: string | null;
   integrity_scope?: string | null;

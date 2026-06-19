@@ -61,10 +61,11 @@ class AdminEventItem(BaseModel):
     id: UUID
     channel_id: UUID | None
     channel_name: str | None
+    channel_slug: str | None
     actor_user_id: UUID | None
     actor_username: str | None
     event_type: str
-    payload: dict
+    details: dict[str, str | int | bool | None]
     created_at: datetime
     event_hash: str | None
     integrity_scope: str | None

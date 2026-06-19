@@ -12,39 +12,60 @@ export function useAdminOverview(enabled = true) {
     queryKey: ["/admin/overview"],
     queryFn: () => apiClient<AdminOverviewResponse>("/admin/overview"),
     enabled,
+    gcTime: 0,
   });
 }
 
-export function useAdminUsers(q = "", offset = 0, enabled = true) {
+export function useAdminUsers(q = "", isActive: boolean | null = null, offset = 0, limit = 25, enabled = true) {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  if (q) params.set("q", q);
+  if (isActive !== null) params.set("is_active", String(isActive));
   return useQuery({
-    queryKey: ["/admin/users", { q, offset }],
+    queryKey: ["/admin/users", { q, isActive, offset, limit }],
     queryFn: () =>
       apiClient<{ items: AdminUserItem[]; total: number }>(
-        `/admin/users?limit=100&offset=${offset}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+        `/admin/users?${params.toString()}`,
       ),
     enabled,
+    gcTime: 0,
   });
 }
 
-export function useAdminChannels(q = "", offset = 0, enabled = true) {
+export function useAdminChannels(
+  q = "",
+  state = "",
+  visibility = "",
+  offset = 0,
+  limit = 25,
+  enabled = true,
+) {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit), include_deleted: "true" });
+  if (q) params.set("q", q);
+  if (state) params.set("state", state);
+  if (visibility) params.set("visibility", visibility);
   return useQuery({
-    queryKey: ["/admin/channels", { q, offset }],
+    queryKey: ["/admin/channels", { q, state, visibility, offset, limit }],
     queryFn: () =>
       apiClient<{ items: AdminChannelItem[]; total: number }>(
-        `/admin/channels?limit=100&offset=${offset}&include_deleted=true${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+        `/admin/channels?${params.toString()}`,
       ),
     enabled,
+    gcTime: 0,
   });
 }
 
-export function useAdminEvents(eventType = "", offset = 0, enabled = true) {
+export function useAdminEvents(q = "", category = "", offset = 0, limit = 25, enabled = true) {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  if (q) params.set("q", q);
+  if (category) params.set("category", category);
   return useQuery({
-    queryKey: ["/admin/events", { eventType, offset }],
+    queryKey: ["/admin/events", { q, category, offset, limit }],
     queryFn: () =>
       apiClient<{ items: AdminEventItem[]; total: number }>(
-        `/admin/events?limit=100&offset=${offset}${eventType ? `&event_type=${encodeURIComponent(eventType)}` : ""}`,
+        `/admin/events?${params.toString()}`,
       ),
     enabled,
+    gcTime: 0,
   });
 }
 

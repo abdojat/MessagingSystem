@@ -28,11 +28,17 @@
 - `users.is_superadmin` is a separate platform privilege; it is not a channel membership role and cannot be requested through registration or profile APIs.
 - `/v1/admin/*` requires the dedicated `SuperadminDep` authorization dependency. Denied attempts are logged as `security.superadmin_access_denied`.
 - The frontend's `chat_user_role` cookie only redirects navigation for convenience and is not trusted for authorization; every admin API re-loads the user from the signed access token and database.
+- Global console list/overview responses send `Cache-Control: no-store` and `Pragma: no-cache` so browsers and intermediary caches are instructed not to retain privileged data.
+- Superadmin React Query entries use immediate garbage-collection after their final observer unmounts, limiting privileged data retention in the SPA's in-memory query cache.
 - The initial account is created only when `SUPERADMIN_USERNAME` and `SUPERADMIN_PASSWORD` are explicitly configured. The password must contain at least 12 characters, and bootstrap refuses to promote an existing normal account with the same username/email.
 - Superadmins can browse all audit events, view platform counts, deactivate/reactivate normal accounts, revoke their sessions, suspend/restore channels, and inspect/retry delivery failures across active channels.
 - Account deactivation is enforced on login and access-token resolution; active refresh sessions are revoked and sockets connected to the current backend instance are closed immediately.
 - A superadmin cannot deactivate their own account through the API, and one superadmin cannot alter another superadmin through normal administration endpoints.
 - Superadmin operations create `superadmin.*` or channel audit events.
+- Destructive console actions require an explicit confirmation. This is a safety guard against accidental clicks; server-side `SuperadminDep` authorization remains the actual security boundary.
+- `GET /v1/admin/events` returns only a per-event-family allowlisted, scalar `details` projection. It never returns the stored raw event payload, nested message/attachment structures, ciphertext, storage paths, or arbitrary unknown fields.
+- New `message.published` audit rows store identifiers and operational metadata only. Message content remains in the encrypted message row and broker outbox, not duplicated into the audit payload.
+- Console searches escape SQL wildcard characters and are filtered/paginated by the backend. Event search covers type, actor username, and channel name without searching raw event payloads.
 - Superadmin status does **not** grant blanket read access to private message bodies or protected uploads. Platform administration and private channel content remain deliberately separate.
 
 ## Message Encryption

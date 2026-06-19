@@ -44,8 +44,12 @@ Superadmin tests (`backend/tests/test_superadmin.py`):
 - immediate account deactivation, session revocation, login denial, and access-token denial
 - immediate closure of WebSockets connected to the current backend instance
 - denied superadmin dependency access with audit logging
-- global system/cross-channel event visibility
+- global system/cross-channel event visibility with matching channel name/slug and actor identity, including upload-event channel recovery through message attachments
+- relevant event search by actor plus category filtering
+- safe event-detail projection that excludes content, nested attachments, storage paths, and arbitrary raw fields
 - superadmin channel suspension and restoration without channel membership
+
+The P0 message test also asserts that new `message.published` audit payloads contain only operational summary fields and do not duplicate `content_text`, `content_json`, or attachment structures.
 
 Run in Docker (recommended):
 ```bash
@@ -76,7 +80,7 @@ Focused superadmin run:
 ```bash
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest tests/test_superadmin.py -q"
 ```
-The 2026-06-19 isolated PostgreSQL run passed all seven focused tests; the full Docker-network backend run passed `66` tests. Use a dedicated test database because the shared fixture truncates its configured database between cases.
+The earlier 2026-06-19 isolated PostgreSQL run passed all seven original focused tests. After console hardening, the complete suite passed `68` tests against a disposable PostgreSQL 16 container; frontend typecheck and production build also passed. Use a dedicated test database because the shared fixture truncates its configured database between cases.
 
 Legacy event backfill check:
 ```bash

@@ -4,16 +4,26 @@ Last updated: 2026-06-19
 
 ## Summary
 
-The latest pass adds a bounded global superadmin role with platform audit visibility and high-value operational controls while preserving private-message authorization boundaries.
+The latest pass hardens the bounded global superadmin console, removes raw audit-payload exposure, and improves operator search/filter/pagination without changing private-message authorization boundaries.
+
+## Superadmin Console Hardening Pass - 2026-06-19
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Authorization/cache boundary | Passed | Every console endpoint still uses `SuperadminDep`; denied access is audited; global list/overview responses set `no-store`/`no-cache` | Frontend role cookie remains a navigation hint only; privileged auth has no MFA | Keep explaining that the backend dependency—not the UI guard—is authoritative |
+| Audit privacy | Passed | `AdminService._safe_event_details` allowlists display fields per event family; `/admin/events` returns `details` instead of raw `payload`; new `message.published` events omit content/ciphertext/attachment structures; regression tests cover both | Historical database rows still contain their original payloads for hash-chain integrity, though the console API no longer exposes them | Define a separately reviewed retention/redaction migration only if historical payload removal becomes required |
+| Operator relevance | Passed | Exact/prefix/contains search ranking; escaped wildcard search; event category, user status, channel status/visibility filters; debounced UI queries | No date-range event filter | Add date range only if real event volume makes it useful |
+| Safer controls and pagination | Passed | Confirmation dialogs for user/session/channel mutations; independent selectable 10/25/50/100-row pagination on all three tables | No browser automation for confirmation and page-size flows | Rehearse one action and each filter during the final manual demo |
+| Verification | Passed | Disposable PostgreSQL 16 run: full backend `68 passed`; frontend typecheck and production build passed; locale JSON validation and `git diff --check` passed | No browser e2e click-through for filters, confirmations, or page-size changes; one dependency deprecation warning remains | Manually rehearse the console once before submission |
 
 ## Superadmin Administration Pass - 2026-06-19
 
 | Area | Status | Evidence | Remaining Risk | Next Action |
 | ---- | ------ | -------- | -------------- | ----------- |
 | Identity/bootstrap | Passed | Migration `0015_superadmin_controls`, `SuperadminBootstrapService`, Docker startup bootstrap, and refusal to auto-promote existing normal users | Bootstrap secret still comes from environment variables; no MFA | Use a unique bootstrap password, create the account once, then remove the password from local `.env` |
-| Global audit visibility | Passed | `GET /v1/admin/events`, enriched actor/channel context, paginated `/app/admin` bilingual event table, and cross-channel/system integration test | Filters cover event type and API-level actor/channel IDs; UI exposes event-type filtering | Add date-range filters only if event volume makes them useful |
-| User/channel controls | Passed | Account deactivate/reactivate, session revocation, current-instance WebSocket termination, channel suspend/restore, self/protected-superadmin guards, and administrative audit events | A future multi-backend deployment needs Redis-broadcast socket termination; no MFA or external approval workflow | Keep controls intentionally small for the university MVP |
-| Privacy boundary | Passed | Superadmin administration does not bypass private message/upload reads; documented in `docs/SECURITY.md` | Database operators remain technically privileged outside the application layer | Explain application-level boundary honestly during defense |
+| Global audit visibility | Passed | `GET /v1/admin/events`, enriched actor/channel context (including channel recovery for upload/message/outbox references), unique channel slug display, channel-to-view and actor-to-profile links, safe typed details, relevant backend search/category filters, selectable pagination, and cross-channel/system integration test | Uploads reused across multiple channels remain explicitly unscoped because one channel cannot be attributed safely; channel navigation still honors normal private-content authorization; no browser automation for link navigation | Add date range only if event volume makes it useful |
+| User/channel controls | Passed | Account deactivate/reactivate, session revocation, current-instance WebSocket termination, channel suspend/restore, confirmation dialogs, self/protected-superadmin guards, and administrative audit events | A future multi-backend deployment needs Redis-broadcast socket termination; no MFA or external approval workflow | Keep controls intentionally small for the university MVP |
+| Privacy boundary | Passed | Superadmin administration does not bypass private message/upload reads; global audit API returns allowlisted display details instead of raw payloads | Original historical payloads remain inside PostgreSQL and database operators remain technically privileged | Explain the application-level API boundary honestly during defense |
 | Verification | Passed | Dedicated Docker-network test database: `7 passed` focused; full backend: `66 passed`; frontend typecheck/build passed; fresh Alembic migration and bootstrap passed | No browser e2e click-through for the console | Manually rehearse one user deactivation and disposable-channel restore |
 
 ## Profile Wallpaper Upload Pass - 2026-06-17

@@ -903,22 +903,61 @@
       "users": "Total users", "activeUsers": "Active users", "channels": "Active channels",
       "messages": "Messages", "events": "Audit events", "deliveryFailures": "Delivery failures"
     },
-    "actions": { "refresh": "Refresh", "delivery": "Delivery monitor", "failed": "Action failed", "tryAgain": "Please try again." },
-    "pagination": { "previous": "Previous", "next": "Next" },
+    "actions": { "refresh": "Refresh", "delivery": "Delivery monitor", "failed": "Action failed", "tryAgain": "Please try again.", "completed": "Action completed" },
+    "filters": { "allStatuses": "All statuses", "allVisibility": "All visibility" },
+    "pagination": {
+      "previous": "Previous", "next": "Next", "rowsPerPage": "Rows per page",
+      "range": "{first}–{last} of {total}", "page": "Page {page} of {pages}"
+    },
     "events": {
-      "filterPlaceholder": "Filter by event type...", "total": "{count} events", "type": "Event type",
-      "actor": "Actor", "channel": "Channel", "time": "Time", "details": "Details", "system": "System"
+      "searchPlaceholder": "Search event, actor, or channel...", "total": "{count} events", "type": "Event type",
+      "actor": "Actor", "channel": "Channel", "time": "Time", "details": "Activity", "system": "System", "notChannelScoped": "Not channel-scoped",
+      "category": "Event category", "empty": "No audit events match these filters.",
+      "categories": {
+        "all": "All categories", "security": "Security", "channels": "Channels", "messages": "Messages",
+        "memberships": "Memberships", "uploads": "Uploads", "delivery": "Delivery", "administration": "Administration", "system": "System"
+      }
     },
     "users": {
       "searchPlaceholder": "Search username, email, or display name...", "total": "{count} users", "user": "User",
       "status": "Status", "sessions": "Active sessions", "created": "Created", "actions": "Actions",
       "superadmin": "Superadmin", "active": "Active", "inactive": "Inactive", "revokeSessions": "Revoke sessions",
-      "deactivate": "Deactivate", "reactivate": "Reactivate"
+      "deactivate": "Deactivate", "reactivate": "Reactivate", "empty": "No users match these filters."
     },
     "channels": {
       "searchPlaceholder": "Search channel or owner...", "total": "{count} channels", "channel": "Channel",
       "owner": "Owner", "members": "Members", "messages": "Messages", "status": "Status", "actions": "Actions",
-      "active": "Active", "suspended": "Suspended", "suspend": "Suspend", "restore": "Restore"
+      "active": "Active", "suspended": "Suspended", "suspend": "Suspend", "restore": "Restore",
+      "visibility": "Visibility", "public": "Public", "private": "Private", "empty": "No channels match these filters."
+    },
+    "confirm": {
+      "cancel": "Cancel", "confirm": "Confirm action",
+      "deactivate": { "title": "Deactivate user?", "description": "This blocks {target} and revokes their sessions. This action is audited." },
+      "reactivate": { "title": "Reactivate user?", "description": "This restores sign-in access for {target}." },
+      "revokeSessions": { "title": "Revoke all sessions?", "description": "All refresh sessions for {target} will be revoked. This action is audited." },
+      "suspend": { "title": "Suspend channel?", "description": "{target} will become unavailable until a superadmin restores it. This action is audited." },
+      "restore": { "title": "Restore channel?", "description": "{target} will become active and subscriber bindings will be restored." }
+    },
+    "eventDisplay": {
+      "yes": "Yes", "no": "No", "bytes": "{count} bytes", "noSensitiveDetails": "No additional non-sensitive details.",
+      "titles": {
+        "channelCreated": "Channel created", "channelUpdated": "Channel settings updated", "channelDeleted": "Channel suspended", "channelSlugResolved": "Channel identifier adjusted", "channelRestored": "Channel restored",
+        "messagePublished": "Message published", "messageEncryptionFailed": "Message encryption failed", "messageDecryptionFailed": "Message decryption failed",
+        "membershipJoined": "Member joined", "membershipApproved": "Membership approved", "membershipAdded": "Member added", "membershipLeft": "Member left",
+        "memberPromoted": "Member promoted", "memberDemoted": "Member demoted", "memberRemoved": "Member removed", "memberPermissionsUpdated": "Member permissions updated",
+        "inviteCreated": "Invitation created", "inviteRevoked": "Invitation revoked", "inviteAccepted": "Invitation accepted",
+        "uploadCreated": "Upload registered", "uploadStored": "Upload stored", "uploadAccessed": "Upload accessed", "uploadStoreFailed": "Upload storage failed",
+        "loginFailed": "Login attempt failed", "unauthorizedPublish": "Unauthorized publish blocked", "unauthorizedRead": "Unauthorized read blocked", "unauthorizedUploadAccess": "Unauthorized upload access blocked", "superadminAccessDenied": "Superadmin access denied",
+        "deliveryRetryScheduled": "Delivery retry scheduled", "deliveryDeadLettered": "Delivery moved to dead letter", "deliveryManualRetry": "Manual delivery retry requested",
+        "superadminBootstrapped": "Superadmin account bootstrapped", "userDeactivated": "User deactivated", "userReactivated": "User reactivated", "userSessionsRevoked": "User sessions revoked"
+      },
+      "fields": {
+        "name": "Name", "target_username": "User", "username": "User", "identity": "Identity", "role": "Role", "visibility": "Visibility", "join_mode": "Join policy", "channel_slug": "Channel identifier",
+        "seq_id": "Sequence", "content_type": "Content", "attachment_count": "Attachments", "filename": "File", "size_bytes": "Size", "expected_size_bytes": "Expected size", "actual_size_bytes": "Received size", "has_checksum": "Checksum supplied", "reason": "Reason",
+        "previous_status": "Previous status", "previous_attempt_count": "Previous attempts", "attempt_count": "Attempt", "max_attempts": "Attempt limit", "retry_in_seconds": "Retry delay (seconds)", "revoked_sessions": "Sessions revoked", "manual_retry": "Manual retry", "superadmin_override": "Superadmin action", "permissions": "Permissions",
+        "resolved_slug": "Assigned identifier", "requested_slug": "Requested identifier", "message_id": "Message ref", "upload_id": "Upload ref", "outbox_id": "Delivery ref",
+        "target_user_id": "Target user ref", "user_id": "User ref", "invite_id": "Invite ref", "channel_id": "Channel ref"
+      }
     }
   },
   "notFound": {

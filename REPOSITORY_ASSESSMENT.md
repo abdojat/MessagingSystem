@@ -4,7 +4,7 @@ Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
 
-This report is evidence-based and references the current codebase. Last updated after the superadmin administration pass on 2026-06-19.
+This report is evidence-based and references the current codebase. Last updated after the superadmin console hardening pass on 2026-06-19.
 
 ## 1. Executive Summary
 
@@ -19,7 +19,7 @@ It does more than a toy chat app:
 - It has a substantial Next.js frontend for login, channel management, publishing, membership control, and event logs.
 - It implements password hashing, JWT auth, role-based authorization, and Fernet message encryption at rest.
 - It supports protected photo/video/audio attachments with server-derived attachment metadata and upload audit events.
-- It has a separate, environment-bootstrapped global superadmin privilege with guarded global audit, account/session, channel lifecycle, and delivery controls.
+- It has a separate, environment-bootstrapped global superadmin privilege with guarded global audit, account/session, channel lifecycle, and delivery controls. The console API now returns allowlisted event summaries instead of raw payloads, marks sensitive list responses non-cacheable, and supports ranked/escaped search plus server-side filters and selectable pagination. Audit rows recover channel context from safe message/outbox/upload references where the canonical event field is absent, show the unique slug alongside the channel name, link channels to their existing view route, and link actor identities to the appropriate profile page.
 
 Biggest strengths:
 - The pub/sub stack is real, not mocked.

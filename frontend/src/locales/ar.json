@@ -903,22 +903,61 @@
       "users": "كل المستخدمين", "activeUsers": "المستخدمون النشطون", "channels": "القنوات النشطة",
       "messages": "الرسائل", "events": "أحداث التدقيق", "deliveryFailures": "إخفاقات التسليم"
     },
-    "actions": { "refresh": "تحديث", "delivery": "مراقبة التسليم", "failed": "فشل الإجراء", "tryAgain": "يرجى المحاولة مجدداً." },
-    "pagination": { "previous": "السابق", "next": "التالي" },
+    "actions": { "refresh": "تحديث", "delivery": "مراقبة التسليم", "failed": "فشل الإجراء", "tryAgain": "يرجى المحاولة مجدداً.", "completed": "تم تنفيذ الإجراء" },
+    "filters": { "allStatuses": "كل الحالات", "allVisibility": "كل مستويات الظهور" },
+    "pagination": {
+      "previous": "السابق", "next": "التالي", "rowsPerPage": "صفوف الصفحة",
+      "range": "{first}–{last} من {total}", "page": "الصفحة {page} من {pages}"
+    },
     "events": {
-      "filterPlaceholder": "تصفية حسب نوع الحدث...", "total": "{count} حدث", "type": "نوع الحدث",
-      "actor": "المنفذ", "channel": "القناة", "time": "الوقت", "details": "التفاصيل", "system": "النظام"
+      "searchPlaceholder": "ابحث بالحدث أو المنفذ أو القناة...", "total": "{count} حدث", "type": "نوع الحدث",
+      "actor": "المنفذ", "channel": "القناة", "time": "الوقت", "details": "النشاط", "system": "النظام", "notChannelScoped": "غير مرتبط بقناة",
+      "category": "فئة الحدث", "empty": "لا توجد أحداث تدقيق مطابقة لهذه المرشحات.",
+      "categories": {
+        "all": "كل الفئات", "security": "الأمان", "channels": "القنوات", "messages": "الرسائل",
+        "memberships": "العضويات", "uploads": "الملفات", "delivery": "التسليم", "administration": "الإدارة", "system": "النظام"
+      }
     },
     "users": {
       "searchPlaceholder": "ابحث باسم المستخدم أو البريد أو الاسم...", "total": "{count} مستخدم", "user": "المستخدم",
       "status": "الحالة", "sessions": "الجلسات النشطة", "created": "تاريخ الإنشاء", "actions": "الإجراءات",
       "superadmin": "مشرف عام", "active": "نشط", "inactive": "معطل", "revokeSessions": "إلغاء الجلسات",
-      "deactivate": "تعطيل", "reactivate": "إعادة تفعيل"
+      "deactivate": "تعطيل", "reactivate": "إعادة تفعيل", "empty": "لا يوجد مستخدمون مطابقون لهذه المرشحات."
     },
     "channels": {
       "searchPlaceholder": "ابحث عن قناة أو مالك...", "total": "{count} قناة", "channel": "القناة",
       "owner": "المالك", "members": "الأعضاء", "messages": "الرسائل", "status": "الحالة", "actions": "الإجراءات",
-      "active": "نشطة", "suspended": "معلقة", "suspend": "تعليق", "restore": "استعادة"
+      "active": "نشطة", "suspended": "معلقة", "suspend": "تعليق", "restore": "استعادة",
+      "visibility": "الظهور", "public": "عامة", "private": "خاصة", "empty": "لا توجد قنوات مطابقة لهذه المرشحات."
+    },
+    "confirm": {
+      "cancel": "إلغاء", "confirm": "تأكيد الإجراء",
+      "deactivate": { "title": "تعطيل المستخدم؟", "description": "سيتم حظر {target} وإلغاء جلساته. سيُسجل هذا الإجراء في سجل التدقيق." },
+      "reactivate": { "title": "إعادة تفعيل المستخدم؟", "description": "سيُستعاد وصول {target} لتسجيل الدخول." },
+      "revokeSessions": { "title": "إلغاء جميع الجلسات؟", "description": "سيتم إلغاء جميع جلسات {target}. سيُسجل هذا الإجراء في سجل التدقيق." },
+      "suspend": { "title": "تعليق القناة؟", "description": "ستصبح {target} غير متاحة حتى يستعيدها مشرف عام. سيُسجل هذا الإجراء." },
+      "restore": { "title": "استعادة القناة؟", "description": "ستصبح {target} نشطة وستُستعاد روابط المشتركين." }
+    },
+    "eventDisplay": {
+      "yes": "نعم", "no": "لا", "bytes": "{count} بايت", "noSensitiveDetails": "لا توجد تفاصيل إضافية غير حساسة.",
+      "titles": {
+        "channelCreated": "إنشاء قناة", "channelUpdated": "تحديث إعدادات القناة", "channelDeleted": "تعليق قناة", "channelSlugResolved": "تعديل معرّف القناة", "channelRestored": "استعادة قناة",
+        "messagePublished": "نشر رسالة", "messageEncryptionFailed": "فشل تشفير رسالة", "messageDecryptionFailed": "فشل فك تشفير رسالة",
+        "membershipJoined": "انضمام عضو", "membershipApproved": "قبول عضوية", "membershipAdded": "إضافة عضو", "membershipLeft": "مغادرة عضو",
+        "memberPromoted": "ترقية عضو", "memberDemoted": "خفض رتبة عضو", "memberRemoved": "إزالة عضو", "memberPermissionsUpdated": "تحديث صلاحيات عضو",
+        "inviteCreated": "إنشاء دعوة", "inviteRevoked": "إلغاء دعوة", "inviteAccepted": "قبول دعوة",
+        "uploadCreated": "تسجيل ملف", "uploadStored": "تخزين ملف", "uploadAccessed": "الوصول إلى ملف", "uploadStoreFailed": "فشل تخزين ملف",
+        "loginFailed": "فشل محاولة تسجيل الدخول", "unauthorizedPublish": "منع نشر غير مصرح", "unauthorizedRead": "منع قراءة غير مصرح بها", "unauthorizedUploadAccess": "منع وصول غير مصرح إلى ملف", "superadminAccessDenied": "رفض وصول المشرف العام",
+        "deliveryRetryScheduled": "جدولة إعادة محاولة التسليم", "deliveryDeadLettered": "نقل التسليم إلى الرسائل الميتة", "deliveryManualRetry": "طلب إعادة محاولة يدوية",
+        "superadminBootstrapped": "تهيئة حساب المشرف العام", "userDeactivated": "تعطيل مستخدم", "userReactivated": "إعادة تفعيل مستخدم", "userSessionsRevoked": "إلغاء جلسات مستخدم"
+      },
+      "fields": {
+        "name": "الاسم", "target_username": "المستخدم", "username": "المستخدم", "identity": "الهوية", "role": "الدور", "visibility": "الظهور", "join_mode": "سياسة الانضمام", "channel_slug": "معرّف القناة",
+        "seq_id": "التسلسل", "content_type": "المحتوى", "attachment_count": "المرفقات", "filename": "الملف", "size_bytes": "الحجم", "expected_size_bytes": "الحجم المتوقع", "actual_size_bytes": "الحجم المستلم", "has_checksum": "تتوفر بصمة تحقق", "reason": "السبب",
+        "previous_status": "الحالة السابقة", "previous_attempt_count": "المحاولات السابقة", "attempt_count": "المحاولة", "max_attempts": "حد المحاولات", "retry_in_seconds": "مهلة الإعادة (ثانية)", "revoked_sessions": "الجلسات الملغاة", "manual_retry": "إعادة محاولة يدوية", "superadmin_override": "إجراء المشرف العام", "permissions": "الصلاحيات",
+        "resolved_slug": "المعرّف المعتمد", "requested_slug": "المعرّف المطلوب", "message_id": "مرجع الرسالة", "upload_id": "مرجع الملف", "outbox_id": "مرجع التسليم",
+        "target_user_id": "مرجع المستخدم المستهدف", "user_id": "مرجع المستخدم", "invite_id": "مرجع الدعوة", "channel_id": "مرجع القناة"
+      }
     }
   },
   "notFound": {

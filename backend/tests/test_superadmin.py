@@ -2,14 +2,15 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from sqlalchemy import select
 
 from app.api.deps import get_current_superadmin
+from app.api.routes.admin import _prevent_sensitive_caching
 from app.core.errors import AppError
 from app.core.security import create_access_token
 from app.core.utils import utcnow
-from app.db.models import Event, UserSession
+from app.db.models import ContentType, Event, Message, Upload, UserSession
 from app.schemas.auth import LoginRequest, RegisterRequest
 from app.schemas.channels import ChannelCreateRequest
 from app.services.admin_service import AdminService
@@ -36,6 +37,15 @@ class _FakeWebSocket:
 
     async def close(self, code: int, reason: str) -> None:
         self.closed = (code, reason)
+
+
+def test_superadmin_console_responses_are_not_cacheable():
+    response = Response()
+
+    _prevent_sensitive_caching(response)
+
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.headers["pragma"] == "no-cache"
 
 
 @pytest.mark.asyncio
@@ -166,12 +176,41 @@ async def test_global_event_list_includes_system_and_cross_channel_events(db_ses
         ChannelCreateRequest(name="Audit channel", visibility="private", join_mode="invite_only"),
         _FakeAmqpConnection(),
     )
+    upload = Upload(
+        owner_user_id=owner.id,
+        filename="audit-proof.png",
+        content_type="image/png",
+        size_bytes=128,
+        storage_path=f"{owner.id}/audit-proof.png",
+        public_url=None,
+    )
+    db_session.add(upload)
+    await db_session.flush()
+    db_session.add(
+        Message(
+            channel_id=channel.id,
+            sender_user_id=owner.id,
+            seq_id=1,
+            content_type=ContentType.text,
+            content_text="encrypted-placeholder",
+            attachments=[{"file_id": str(upload.id), "filename": upload.filename}],
+        )
+    )
+    await db_session.flush()
+    await log_event(
+        db_session,
+        "upload.accessed",
+        {"upload_id": str(upload.id), "filename": upload.filename},
+        actor_user_id=owner.id,
+    )
     await log_event(db_session, "system.test_event", {"proof": True}, actor_user_id=admin.id)
     await db_session.commit()
 
     events, total = await AdminService.list_events(
         db_session,
+        q=None,
         event_type=None,
+        category=None,
         channel_id=None,
         actor_user_id=None,
         offset=0,
@@ -179,8 +218,87 @@ async def test_global_event_list_includes_system_and_cross_channel_events(db_ses
     )
 
     assert total >= 3
-    assert any(event.event_type == "channel.created" and event.channel_id == channel.id for event in events)
+    created_event = next(event for event in events if event.event_type == "channel.created")
+    assert created_event.channel_id == channel.id
+    assert created_event.channel_name == channel.name
+    assert created_event.channel_slug == channel.channel_slug
+    assert created_event.actor_user_id == owner.id
+    assert created_event.actor_username == owner.username
+    upload_event = next(event for event in events if event.event_type == "upload.accessed")
+    assert upload_event.channel_id == channel.id
+    assert upload_event.channel_name == channel.name
+    assert upload_event.channel_slug == channel.channel_slug
     assert any(event.event_type == "system.test_event" and event.channel_id is None for event in events)
+
+    channel_events, channel_total = await AdminService.list_events(
+        db_session,
+        q="@audit_owner",
+        event_type=None,
+        category="channels",
+        channel_id=None,
+        actor_user_id=None,
+        offset=0,
+        limit=10,
+    )
+    assert channel_total == 1
+    assert channel_events[0].event_type == "channel.created"
+
+    escaped_events, escaped_total = await AdminService.list_events(
+        db_session,
+        q="%",
+        event_type=None,
+        category=None,
+        channel_id=None,
+        actor_user_id=None,
+        offset=0,
+        limit=10,
+    )
+    assert escaped_events == []
+    assert escaped_total == 0
+
+    matching_users, matching_user_total = await AdminService.list_users(
+        db_session,
+        q="@audit_owner",
+        is_active=True,
+        offset=0,
+        limit=10,
+    )
+    assert matching_user_total == 1
+    assert matching_users[0].id == owner.id
+
+    matching_channels, matching_channel_total = await AdminService.list_channels(
+        db_session,
+        q=f"#{channel.channel_slug}",
+        include_deleted=True,
+        state="active",
+        visibility="private",
+        offset=0,
+        limit=10,
+    )
+    assert matching_channel_total == 1
+    assert matching_channels[0].id == channel.id
+
+
+def test_admin_event_projection_excludes_raw_and_nested_payload_data():
+    details = AdminService._safe_event_details(
+        "message.published",
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "content_text": "encrypted-but-sensitive-value",
+            "content_json": {"secret": "encrypted-value"},
+            "attachments": [{"storage_path": "private/path"}],
+            "sender_avatar_url": "https://private.example/avatar",
+            "seq_id": 42,
+            "content_type": "text",
+        },
+    )
+
+    assert details == {
+        "attachment_count": 1,
+        "content_type": "text",
+        "message_id": "11111111-1111-1111-1111-111111111111",
+        "seq_id": 42,
+    }
 
 
 @pytest.mark.asyncio

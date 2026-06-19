@@ -1,7 +1,7 @@
 from uuid import UUID
 
 import aio_pika
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import String, and_, case, cast, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -29,6 +29,153 @@ from app.services.outbox_service import enqueue_channel_event_outbox
 
 
 class AdminService:
+    EVENT_CATEGORY_PREFIXES = {
+        "security": ("security.",),
+        "channels": ("channel.",),
+        "messages": ("message.",),
+        "memberships": ("membership.", "member.", "invite."),
+        "uploads": ("upload.",),
+        "delivery": ("broker.",),
+        "administration": ("superadmin.",),
+        "system": ("system.", "user."),
+    }
+
+    SAFE_EVENT_DETAIL_KEYS_BY_PREFIX = {
+        "channel": {
+            "channel_id", "channel_slug", "join_mode", "name", "requested_slug",
+            "resolved_slug", "superadmin_override", "visibility",
+        },
+        "message": {"attachment_count", "channel_id", "content_type", "message_id", "reason", "seq_id"},
+        "membership": {"channel_id", "role", "target_user_id", "user_id"},
+        "member": {"channel_id", "role", "target_user_id"},
+        "invite": {"channel_id", "invite_id", "target_user_id", "user_id"},
+        "upload": {
+            "actual_size_bytes", "content_type", "expected_size_bytes", "filename",
+            "has_checksum", "reason", "size_bytes", "upload_id",
+        },
+        "security": {"channel_id", "identity", "reason", "upload_id"},
+        "broker": {
+            "attempt_count", "channel_id", "manual_retry", "max_attempts", "outbox_id",
+            "previous_attempt_count", "previous_status", "reason", "retry_in_seconds",
+        },
+        "superadmin": {
+            "channel_id", "channel_slug", "revoked_sessions", "target_user_id",
+            "target_username", "user_id", "username",
+        },
+        "user": {"user_id", "username"},
+    }
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    @staticmethod
+    def _safe_event_details(event_type: str, payload: dict) -> dict[str, str | int | bool | None]:
+        """Return a small display-only projection; never expose raw audit payloads."""
+        projected: dict[str, str | int | bool | None] = {}
+        prefix = event_type.split(".", 1)[0]
+        allowed_keys = AdminService.SAFE_EVENT_DETAIL_KEYS_BY_PREFIX.get(prefix, set())
+        for key in allowed_keys:
+            value = payload.get(key)
+            if isinstance(value, (str, int, bool)) or value is None and key in payload:
+                projected[key] = value[:160] if isinstance(value, str) else value
+
+        if event_type.startswith("message."):
+            message_id = payload.get("message_id") or payload.get("id")
+            if isinstance(message_id, str):
+                projected["message_id"] = message_id[:160]
+            attachments = payload.get("attachments")
+            if isinstance(attachments, list):
+                projected["attachment_count"] = len(attachments)
+
+        permissions = payload.get("admin_permissions")
+        if prefix == "member" and isinstance(permissions, dict):
+            enabled = sorted(str(key) for key, value in permissions.items() if value is True)
+            projected["permissions"] = ", ".join(enabled)[:160] if enabled else "none"
+
+        return projected
+
+    @staticmethod
+    def _payload_uuid(payload: dict, *keys: str) -> UUID | None:
+        for key in keys:
+            value = payload.get(key)
+            if value is None:
+                continue
+            try:
+                return UUID(str(value))
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    @staticmethod
+    async def _resolve_event_channel_ids(db: AsyncSession, events: list[Event]) -> dict[UUID, UUID]:
+        """Resolve display context without rewriting immutable historical audit rows."""
+        resolved: dict[UUID, UUID] = {}
+        message_refs: dict[UUID, list[UUID]] = {}
+        outbox_refs: dict[UUID, list[UUID]] = {}
+        upload_refs: dict[UUID, list[UUID]] = {}
+
+        for event in events:
+            if event.channel_id is not None:
+                resolved[event.id] = event.channel_id
+                continue
+
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            direct_channel_id = AdminService._payload_uuid(payload, "channel_id")
+            if direct_channel_id is not None:
+                resolved[event.id] = direct_channel_id
+                continue
+
+            message_id = AdminService._payload_uuid(payload, "message_id", "id")
+            outbox_id = AdminService._payload_uuid(payload, "outbox_id")
+            upload_id = AdminService._payload_uuid(payload, "upload_id")
+            if message_id is not None:
+                message_refs.setdefault(message_id, []).append(event.id)
+            elif outbox_id is not None:
+                outbox_refs.setdefault(outbox_id, []).append(event.id)
+            elif upload_id is not None:
+                upload_refs.setdefault(upload_id, []).append(event.id)
+
+        if message_refs:
+            rows = await db.execute(select(Message.id, Message.channel_id).where(Message.id.in_(message_refs)))
+            for message_id, resolved_channel_id in rows.all():
+                for event_id in message_refs.get(message_id, []):
+                    resolved[event_id] = resolved_channel_id
+
+        if outbox_refs:
+            rows = await db.execute(select(Outbox.id, Outbox.channel_id).where(Outbox.id.in_(outbox_refs)))
+            for outbox_id, resolved_channel_id in rows.all():
+                for event_id in outbox_refs.get(outbox_id, []):
+                    resolved[event_id] = resolved_channel_id
+
+        if upload_refs:
+            attachment_filters = [
+                cast(Message.attachments, String).contains(str(upload_id)) for upload_id in upload_refs
+            ]
+            rows = await db.execute(
+                select(Message.channel_id, Message.attachments)
+                .where(Message.attachments.is_not(None), or_(*attachment_filters))
+                .order_by(Message.created_at.desc())
+            )
+            upload_channels: dict[UUID, set[UUID]] = {}
+            for resolved_channel_id, attachments in rows.all():
+                if not isinstance(attachments, list):
+                    continue
+                for attachment in attachments:
+                    if not isinstance(attachment, dict):
+                        continue
+                    upload_id = AdminService._payload_uuid(attachment, "file_id")
+                    if upload_id in upload_refs:
+                        upload_channels.setdefault(upload_id, set()).add(resolved_channel_id)
+            for upload_id, candidate_channel_ids in upload_channels.items():
+                if len(candidate_channel_ids) != 1:
+                    continue
+                resolved_channel_id = next(iter(candidate_channel_ids))
+                for event_id in upload_refs[upload_id]:
+                    resolved[event_id] = resolved_channel_id
+
+        return resolved
+
     @staticmethod
     async def overview(db: AsyncSession) -> AdminOverviewResponse:
         async def count(stmt) -> int:
@@ -60,8 +207,16 @@ class AdminService:
     ) -> tuple[list[AdminUserItem], int]:
         filters = []
         if q:
-            pattern = f"%{q.strip()}%"
-            filters.append(or_(User.username.ilike(pattern), User.email.ilike(pattern), User.display_name.ilike(pattern)))
+            term = q.strip().removeprefix("@")
+            escaped = AdminService._escape_like(term)
+            pattern = f"%{escaped}%"
+            filters.append(
+                or_(
+                    User.username.ilike(pattern, escape="\\"),
+                    User.email.ilike(pattern, escape="\\"),
+                    User.display_name.ilike(pattern, escape="\\"),
+                )
+            )
         if is_active is not None:
             filters.append(User.is_active.is_(is_active))
 
@@ -79,7 +234,23 @@ class AdminService:
             stmt = stmt.where(and_(*filters))
             total_stmt = total_stmt.where(and_(*filters))
 
-        rows = (await db.execute(stmt.order_by(User.created_at.desc(), User.id.desc()).offset(offset).limit(limit))).all()
+        ordering = [User.created_at.desc(), User.id.desc()]
+        if q and q.strip():
+            term = q.strip().removeprefix("@")
+            escaped = AdminService._escape_like(term)
+            prefix = f"{escaped}%"
+            ordering = [
+                case(
+                    (func.lower(User.username) == term.lower(), 0),
+                    (User.username.ilike(prefix, escape="\\"), 1),
+                    (User.display_name.ilike(prefix, escape="\\"), 2),
+                    (User.email.ilike(prefix, escape="\\"), 3),
+                    else_=4,
+                ),
+                User.created_at.desc(),
+                User.id.desc(),
+            ]
+        rows = (await db.execute(stmt.order_by(*ordering).offset(offset).limit(limit))).all()
         total = int((await db.execute(total_stmt)).scalar_one() or 0)
         return [
             AdminUserItem(
@@ -163,6 +334,8 @@ class AdminService:
         *,
         q: str | None,
         include_deleted: bool,
+        state: str | None,
+        visibility: str | None,
         offset: int,
         limit: int,
     ) -> tuple[list[AdminChannelItem], int]:
@@ -178,11 +351,26 @@ class AdminService:
             .subquery()
         )
         filters = []
-        if not include_deleted:
+        if state == "active" or (not include_deleted and state is None):
             filters.append(Channel.deleted_at.is_(None))
+        elif state == "suspended":
+            filters.append(Channel.deleted_at.is_not(None))
+        if visibility:
+            filters.append(Channel.visibility == visibility)
         if q:
-            pattern = f"%{q.strip()}%"
-            filters.append(or_(Channel.name.ilike(pattern), Channel.channel_slug.ilike(pattern), User.username.ilike(pattern)))
+            term = q.strip()
+            identifier_term = term[1:] if term.startswith(("#", "@")) else term
+            escaped = AdminService._escape_like(term)
+            identifier_escaped = AdminService._escape_like(identifier_term)
+            pattern = f"%{escaped}%"
+            identifier_pattern = f"%{identifier_escaped}%"
+            filters.append(
+                or_(
+                    Channel.name.ilike(pattern, escape="\\"),
+                    Channel.channel_slug.ilike(identifier_pattern, escape="\\"),
+                    User.username.ilike(identifier_pattern, escape="\\"),
+                )
+            )
 
         stmt = (
             select(
@@ -199,7 +387,27 @@ class AdminService:
         if filters:
             stmt = stmt.where(and_(*filters))
             total_stmt = total_stmt.where(and_(*filters))
-        rows = (await db.execute(stmt.order_by(Channel.created_at.desc()).offset(offset).limit(limit))).all()
+        ordering = [Channel.created_at.desc(), Channel.id.desc()]
+        if q and q.strip():
+            term = q.strip()
+            identifier_term = term[1:] if term.startswith(("#", "@")) else term
+            escaped = AdminService._escape_like(term)
+            identifier_escaped = AdminService._escape_like(identifier_term)
+            prefix = f"{escaped}%"
+            identifier_prefix = f"{identifier_escaped}%"
+            ordering = [
+                case(
+                    (func.lower(Channel.channel_slug) == identifier_term.lower(), 0),
+                    (func.lower(Channel.name) == term.lower(), 1),
+                    (Channel.channel_slug.ilike(identifier_prefix, escape="\\"), 2),
+                    (Channel.name.ilike(prefix, escape="\\"), 3),
+                    (User.username.ilike(identifier_prefix, escape="\\"), 4),
+                    else_=5,
+                ),
+                Channel.created_at.desc(),
+                Channel.id.desc(),
+            ]
+        rows = (await db.execute(stmt.order_by(*ordering).offset(offset).limit(limit))).all()
         total = int((await db.execute(total_stmt)).scalar_one() or 0)
         return [
             AdminChannelItem(
@@ -223,7 +431,9 @@ class AdminService:
     async def list_events(
         db: AsyncSession,
         *,
+        q: str | None,
         event_type: str | None,
+        category: str | None,
         channel_id: UUID | None,
         actor_user_id: UUID | None,
         offset: int,
@@ -231,37 +441,94 @@ class AdminService:
     ) -> tuple[list[AdminEventItem], int]:
         filters = []
         if event_type:
-            filters.append(Event.event_type.ilike(f"%{event_type.strip()}%"))
+            filters.append(func.lower(Event.event_type) == event_type.strip().lower())
+        if category:
+            prefixes = AdminService.EVENT_CATEGORY_PREFIXES.get(category, ())
+            filters.append(or_(*(Event.event_type.startswith(prefix) for prefix in prefixes)))
         if channel_id:
             filters.append(Event.channel_id == channel_id)
         if actor_user_id:
             filters.append(Event.actor_user_id == actor_user_id)
+        if q:
+            term = q.strip()
+            identifier_term = term[1:] if term.startswith(("#", "@")) else term
+            escaped = AdminService._escape_like(term)
+            identifier_escaped = AdminService._escape_like(identifier_term)
+            pattern = f"%{escaped}%"
+            identifier_pattern = f"%{identifier_escaped}%"
+            filters.append(
+                or_(
+                    Event.event_type.ilike(pattern, escape="\\"),
+                    User.username.ilike(identifier_pattern, escape="\\"),
+                    Channel.name.ilike(identifier_pattern, escape="\\"),
+                )
+            )
 
         stmt = (
-            select(Event, User.username, Channel.name)
+            select(Event, User.username, Channel.name, Channel.channel_slug)
             .outerjoin(User, User.id == Event.actor_user_id)
             .outerjoin(Channel, Channel.id == Event.channel_id)
         )
-        total_stmt = select(func.count(Event.id))
+        total_stmt = (
+            select(func.count(Event.id))
+            .outerjoin(User, User.id == Event.actor_user_id)
+            .outerjoin(Channel, Channel.id == Event.channel_id)
+        )
         if filters:
             stmt = stmt.where(and_(*filters))
             total_stmt = total_stmt.where(and_(*filters))
-        rows = (await db.execute(stmt.order_by(Event.created_at.desc(), Event.id.desc()).offset(offset).limit(limit))).all()
+        ordering = [Event.created_at.desc(), Event.id.desc()]
+        if q and q.strip():
+            term = q.strip()
+            identifier_term = term[1:] if term.startswith(("#", "@")) else term
+            escaped = AdminService._escape_like(term)
+            identifier_escaped = AdminService._escape_like(identifier_term)
+            prefix = f"{escaped}%"
+            identifier_prefix = f"{identifier_escaped}%"
+            ordering = [
+                case(
+                    (func.lower(Event.event_type) == term.lower(), 0),
+                    (Event.event_type.ilike(prefix, escape="\\"), 1),
+                    (User.username.ilike(identifier_prefix, escape="\\"), 2),
+                    (Channel.name.ilike(identifier_prefix, escape="\\"), 3),
+                    else_=4,
+                ),
+                Event.created_at.desc(),
+                Event.id.desc(),
+            ]
+        rows = (await db.execute(stmt.order_by(*ordering).offset(offset).limit(limit))).all()
         total = int((await db.execute(total_stmt)).scalar_one() or 0)
+        resolved_channel_ids = await AdminService._resolve_event_channel_ids(db, [row[0] for row in rows])
+        resolved_channel_context: dict[UUID, tuple[str, str]] = {}
+        if resolved_channel_ids:
+            channel_rows = await db.execute(
+                select(Channel.id, Channel.name, Channel.channel_slug).where(
+                    Channel.id.in_(set(resolved_channel_ids.values()))
+                )
+            )
+            resolved_channel_context = {
+                resolved_channel_id: (resolved_name, resolved_slug)
+                for resolved_channel_id, resolved_name, resolved_slug in channel_rows.all()
+            }
         return [
             AdminEventItem(
                 id=event.id,
-                channel_id=event.channel_id,
-                channel_name=channel_name,
+                channel_id=resolved_channel_ids.get(event.id),
+                channel_name=(
+                    resolved_channel_context.get(resolved_channel_ids.get(event.id), (channel_name, channel_slug))[0]
+                ),
+                channel_slug=(
+                    resolved_channel_context.get(resolved_channel_ids.get(event.id), (channel_name, channel_slug))[1]
+                ),
                 actor_user_id=event.actor_user_id,
                 actor_username=actor_username,
                 event_type=event.event_type,
-                payload=event.payload,
+                details=AdminService._safe_event_details(event.event_type, event.payload),
                 created_at=event.created_at,
                 event_hash=event.event_hash,
                 integrity_scope=event.integrity_scope,
             )
-            for event, actor_username, channel_name in rows
+            for event, actor_username, channel_name, channel_slug in rows
         ], total
 
     @staticmethod
