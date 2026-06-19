@@ -6,7 +6,7 @@ import { routing } from "@/config/i18n/routing";
 const handleI18nRouting = createMiddleware(routing);
 
 const AUTH_REQUIRED_PREFIXES = ["/app", "/profile", "/settings"];
-const ADMIN_ONLY_PREFIXES = ["/admin"];
+const ADMIN_ONLY_PREFIXES = ["/admin", "/app/admin"];
 
 function normalizeLocalePath(pathname: string): {
   locale: string;
@@ -45,7 +45,7 @@ export default function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (hasMatchingPrefix(routePath, ADMIN_ONLY_PREFIXES) && role !== "admin") {
+  if (hasMatchingPrefix(routePath, ADMIN_ONLY_PREFIXES) && role !== "superadmin") {
     return NextResponse.redirect(new URL(`/${locale}/app`, request.url));
   }
 

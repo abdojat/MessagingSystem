@@ -67,6 +67,7 @@ What to show the supervisor:
 ```bash
 cp .env.example .env
 # set MESSAGE_ENCRYPTION_KEY in .env (recommended even for demo)
+# optional initial admin: set SUPERADMIN_USERNAME and a unique 12+ character SUPERADMIN_PASSWORD
 docker compose up -d --build
 docker compose ps -a
 ```
@@ -125,6 +126,12 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 ```
 Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not plaintext.
 16. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
+17. Optional superadmin proof:
+   - Log in with the explicitly bootstrapped superadmin account and open the shield link (`/app/admin`).
+   - Show that the global event table includes system and cross-channel events.
+   - Revoke a disposable user's sessions, then demonstrate that their next protected request/login is blocked if the account is deactivated.
+   - Suspend and restore a disposable channel, and show the corresponding audit events.
+   - Explain that the superadmin does not automatically read private message bodies.
 
 Developer-only tamper test:
 ```bash
@@ -158,6 +165,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, status,
 - [ ] Event integrity check shows Verified or an honestly explained Not initialized state
 - [ ] Delivery Monitor loads for a channel owner/admin
 - [ ] English/Arabic language switch works and Arabic renders RTL
+- [ ] Normal user cannot open `/app/admin`; superadmin can see global audit events and perform audited controls
 - [ ] Unauthorized access denied
 - [ ] Unauthorized upload access denied
 - [ ] DB stores ciphertext, not plaintext

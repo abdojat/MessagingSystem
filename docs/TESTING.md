@@ -39,6 +39,14 @@ Event integrity tests:
 - `test_integrity_verification_reports_legacy_missing_hash`
 - `test_unauthorized_user_cannot_verify_channel_event_integrity`
 
+Superadmin tests (`backend/tests/test_superadmin.py`):
+- explicit, idempotent bootstrap and refusal to auto-promote an existing user
+- immediate account deactivation, session revocation, login denial, and access-token denial
+- immediate closure of WebSockets connected to the current backend instance
+- denied superadmin dependency access with audit logging
+- global system/cross-channel event visibility
+- superadmin channel suspension and restoration without channel membership
+
 Run in Docker (recommended):
 ```bash
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
@@ -63,6 +71,12 @@ cd backend
 python -m pytest tests/test_event_integrity.py -q
 ```
 These tests verify hash creation, sequential chain linking, clean verification, tamper detection, missing legacy hashes, and authorization for the integrity endpoint.
+
+Focused superadmin run:
+```bash
+docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest tests/test_superadmin.py -q"
+```
+The 2026-06-19 isolated PostgreSQL run passed all seven focused tests; the full Docker-network backend run passed `66` tests. Use a dedicated test database because the shared fixture truncates its configured database between cases.
 
 Legacy event backfill check:
 ```bash
@@ -182,6 +196,7 @@ This is an automated supervisor proof for the normal worker path and controlled 
 - Unauthorized publish/read denial behavior.
 - Private upload download denial for a non-member.
 - Profile/channel avatar upload and chat wallpaper upload/display behavior, including fallback initials/icons and protected-image loading.
+- Superadmin console global event filtering, user deactivation/reactivation, session revocation, channel suspension/restoration, and normal-user denial.
 
 ## Current Limitations
 - Local Windows `npm run build` passed during the 2026-06-14 frontend i18n pass. Docker Compose remains the canonical evaluator path if local Node dependency behavior differs on another machine.

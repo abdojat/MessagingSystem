@@ -178,6 +178,7 @@
       "myChannelsSearch": "لا توجد قنوات مملوكة أو إدارية مطابقة"
     },
     "logout": "تسجيل الخروج",
+    "superadminConsole": "لوحة المشرف العام",
     "searchPlaceholder": "ابحث في القنوات...",
     "sections": {
       "channels": "القنوات",
@@ -890,6 +891,34 @@
       "privateUploadLink": "رابط رفع خاص",
       "seconds": "{count, plural, one {ثانية واحدة} other {# ثوان}}",
       "storedMessageText": "نص الرسالة المخزن"
+    }
+  },
+  "superadmin": {
+    "eyebrow": "إدارة المنصة",
+    "title": "لوحة المشرف العام",
+    "description": "راجع جميع أحداث التدقيق وأدر الحسابات والقنوات وعمليات التسليم على مستوى المنصة.",
+    "forbidden": "تتطلب هذه الصفحة حساب مشرف عام.",
+    "tabs": { "events": "جميع أحداث التدقيق", "users": "المستخدمون", "channels": "القنوات" },
+    "stats": {
+      "users": "كل المستخدمين", "activeUsers": "المستخدمون النشطون", "channels": "القنوات النشطة",
+      "messages": "الرسائل", "events": "أحداث التدقيق", "deliveryFailures": "إخفاقات التسليم"
+    },
+    "actions": { "refresh": "تحديث", "delivery": "مراقبة التسليم", "failed": "فشل الإجراء", "tryAgain": "يرجى المحاولة مجدداً." },
+    "pagination": { "previous": "السابق", "next": "التالي" },
+    "events": {
+      "filterPlaceholder": "تصفية حسب نوع الحدث...", "total": "{count} حدث", "type": "نوع الحدث",
+      "actor": "المنفذ", "channel": "القناة", "time": "الوقت", "details": "التفاصيل", "system": "النظام"
+    },
+    "users": {
+      "searchPlaceholder": "ابحث باسم المستخدم أو البريد أو الاسم...", "total": "{count} مستخدم", "user": "المستخدم",
+      "status": "الحالة", "sessions": "الجلسات النشطة", "created": "تاريخ الإنشاء", "actions": "الإجراءات",
+      "superadmin": "مشرف عام", "active": "نشط", "inactive": "معطل", "revokeSessions": "إلغاء الجلسات",
+      "deactivate": "تعطيل", "reactivate": "إعادة تفعيل"
+    },
+    "channels": {
+      "searchPlaceholder": "ابحث عن قناة أو مالك...", "total": "{count} قناة", "channel": "القناة",
+      "owner": "المالك", "members": "الأعضاء", "messages": "الرسائل", "status": "الحالة", "actions": "الإجراءات",
+      "active": "نشطة", "suspended": "معلقة", "suspend": "تعليق", "restore": "استعادة"
     }
   },
   "notFound": {

@@ -44,6 +44,8 @@ class MeResponse(BaseModel):
     avatar_url: str | None = None
     wallpaper_url: str | None = None
     bio: str | None = None
+    is_superadmin: bool = False
+    is_active: bool = True
     created_at: datetime
     updated_at: datetime | None = None
 

@@ -1,6 +1,7 @@
 # Final MVP Status
 
 ## What Is Complete
+- Environment-bootstrapped global superadmin with platform-wide audit visibility, account/session controls, channel suspension/restoration, and global delivery recovery; private message content is not implicitly exposed.
 - User authentication with password hashing, JWT access/refresh tokens, and session revocation.
 - Channel/topic creation, listing, updates, joins, leaves, invites, approvals, role changes, and member removal.
 - Publish/subscribe message persistence with PostgreSQL as the source of truth.
@@ -20,6 +21,7 @@
 - Verified during Stabilization Pass on 2026-06-10: Docker Compose config passed, Docker stack rebuilt and was healthy, Docker-backed backend tests passed, frontend typecheck passed, Docker frontend build passed, upgraded demo verifier passed, and Docker-network event-integrity dry-run passed.
 - Verified during Stabilization Pass 2 on 2026-06-10: Docker Compose config passed, Docker stack rebuilt and stayed healthy, Docker-backed backend tests passed (`37 passed, 2 warnings`), frontend typecheck passed, main demo verifier passed, approval-required membership verifier passed with live WebSocket delivery, Docker event-integrity dry-run passed, delivery reliability verifier passed, container compileall passed, and `git diff --check` reported no whitespace errors beyond line-ending notices.
 - Verified during frontend i18n pass on 2026-06-14: frontend typecheck passed, frontend production build passed, English/Arabic locale JSON parsing passed, English/Arabic key-set alignment passed, placeholder scan found no `???` entries, and `git diff --check` reported no whitespace errors beyond line-ending notices.
+- Verified during superadmin pass on 2026-06-19: focused tests passed (`7 passed`), the full backend suite passed (`66 passed`), frontend typecheck/build passed, fresh-database migration and idempotent bootstrap passed, and Alembic reported `0015_superadmin_controls` as the single head.
 - Verified during avatar/image audit on 2026-06-15: backend tests passed (`31 passed, 20 skipped`) and frontend typecheck passed after hardening avatar URL validation, protected avatar upload access, and authenticated image rendering.
 - Verified during multimedia publishing audit on 2026-06-16: backend P0 tests passed (`33 passed, 13 skipped`) and frontend typecheck passed after tightening attachment references, upload error handling, SVG rejection, upload audit events, and refreshed-token PUT uploads.
 - Verified during profile wallpaper upload pass on 2026-06-17: backend P0 tests passed (`33 passed, 14 skipped`), frontend typecheck passed, locale key alignment passed, Docker Compose rebuilt and started successfully, Alembic applied `0014_user_wallpaper_url`, and `git diff --check` reported only line-ending warnings.

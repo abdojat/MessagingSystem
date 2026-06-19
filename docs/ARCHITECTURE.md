@@ -1,5 +1,9 @@
 # Architecture
 
+## Platform administration boundary
+
+Global administration is modeled independently from channel membership. `users.is_superadmin` guards `/v1/admin/*`; the admin service aggregates system/channel audit events and controls normal-user account state, sessions, channel soft deletion/restoration, and global delivery recovery. Each mutation writes an audit event. This privilege does not alter RabbitMQ topic membership and does not bypass private message/upload read authorization.
+
 ## Component Responsibilities
 - Backend (FastAPI)
   - Exposes REST + WebSocket endpoints.

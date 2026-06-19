@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.utils import utcnow
-from app.db.models import Channel, ChannelMembership, MembershipRole, Outbox, OutboxStatus
+from app.db.models import Channel, ChannelMembership, MembershipRole, Outbox, OutboxStatus, User
 from app.schemas.delivery import DeliveryItemResponse, DeliveryRetryResponse, DeliveryStatsResponse
 from app.services.event_service import log_event
 from app.services.rbac import normalize_admin_permissions
@@ -32,6 +32,11 @@ class DeliveryService:
 
     @staticmethod
     async def get_managed_channel_ids(db: AsyncSession, actor_user_id: UUID) -> list[UUID]:
+        actor = await db.get(User, actor_user_id)
+        if actor and actor.is_superadmin:
+            rows = await db.execute(select(Channel.id).where(Channel.deleted_at.is_(None)))
+            return list(rows.scalars().all())
+
         rows = (
             await db.execute(
                 select(ChannelMembership.channel_id, ChannelMembership.role, ChannelMembership.admin_permissions)

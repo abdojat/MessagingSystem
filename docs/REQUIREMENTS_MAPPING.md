@@ -5,8 +5,16 @@
 | Create channels/topics | Complete | `POST /v1/channels`, slug auto-generation/collision handling, safe identifier validation, and database constraints | User A creates a channel in UI/API |
 | Allow subscribers to publish and receive automatically | Complete | Membership join + text/media message publish + realtime pipeline (RabbitMQ/Redis/WebSocket + REST retrieval). Backend tests verify attachment-only photo/video/audio messages are syncable by a subscriber and that media attachment references are validated before publish. `scripts/verify_demo_flow.py` opens User B's WebSocket before join, explicitly subscribes/resyncs after join, checks live WebSocket delivery, and checks REST backfill fallback. Approval-after-connect is covered by `scripts/verify_approval_flow.py` | User B joins or is approved, User A publishes text and protected media, User B receives |
 | Interfaces for managing channels and subscribers | Complete | Frontend channel list/details, create dialog, membership actions, channel settings, approval route, and approval verifier | Show channel details and membership actions; run approval verifier |
-| Security: encryption, authentication, permissions | Complete | JWT auth, role/permission checks, Fernet encryption at rest, protected upload downloads, stored-upload checks before attachment publish, server-derived attachment metadata, SVG upload rejection, avatar/wallpaper upload access rules, safe avatar/wallpaper/routing identifiers, unauthorized/security/upload audit events | Login required routes, denied unauthorized actions, DB ciphertext query, avatar/wallpaper/upload/media regression tests |
-| Event log for tracking activity | Complete | `events` API (`GET /v1/channels/{id}/events`) + frontend event log subpage; upload create/store/access/failure events are logged in the backend | Open channel details -> Event Log |
+| Security: encryption, authentication, permissions | Complete | JWT auth, role/permission checks, Fernet encryption at rest, protected upload downloads, safe identifiers, plus migration `0015_superadmin_controls`, guarded `/v1/admin/*` APIs, account deactivation/session revocation, and tests in `backend/tests/test_superadmin.py` | Login required routes, denied unauthorized actions, DB ciphertext query, then show normal-user denial of the superadmin console |
+| Event log for tracking activity | Complete | Channel events API/UI plus global superadmin audit API `GET /v1/admin/events` and bilingual `/app/admin` console; denied superadmin access and all administrative mutations are audited | Open channel Event Log, then superadmin console -> All audit events |
+
+## Platform Administration Enhancement
+
+| Enhancement | Status | Implementation evidence | Demo step |
+|---|---|---|---|
+| Global superadmin oversight and controls | Mostly complete | `users.is_superadmin/is_active`; migration `0015_superadmin_controls`; safe environment bootstrap; `AdminService`; guarded `/v1/admin/overview`, `/events`, `/users`, and `/channels`; global delivery-monitor scope; bilingual frontend console; six PostgreSQL integration tests | Login as configured superadmin, show global events, revoke a test user's sessions, suspend/restore a disposable channel |
+
+The enhancement is intentionally bounded: superadmins administer accounts, channels, audit evidence, and delivery state but do not receive implicit access to private message bodies. Production additions such as MFA and external audit anchoring remain future work.
 
 ## Advanced Reliability Enhancement
 

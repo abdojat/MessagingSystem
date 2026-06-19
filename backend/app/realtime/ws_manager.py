@@ -39,6 +39,7 @@ class WSManager:
         self._redis = redis
         self._amqp = amqp
         self._subscriptions: dict[int, set[str]] = {}
+        self._connections: dict[UUID, dict[int, WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: UUID, username: str, pre_accepted: bool = False) -> None:
         if not pre_accepted:
@@ -46,10 +47,24 @@ class WSManager:
         await mark_user_online(self._redis, username)
         await self._ensure_user_bindings(user_id, username)
         self._subscriptions[id(websocket)] = set(await self._member_channel_ids(user_id))
+        self._connections.setdefault(user_id, {})[id(websocket)] = websocket
 
     async def disconnect(self, websocket: WebSocket, username: str) -> None:
         self._subscriptions.pop(id(websocket), None)
+        for user_id, sockets in list(self._connections.items()):
+            sockets.pop(id(websocket), None)
+            if not sockets:
+                self._connections.pop(user_id, None)
         await mark_user_offline(self._redis, username)
+
+    async def disconnect_user(self, user_id: UUID, reason: str = "account deactivated") -> int:
+        sockets = list(self._connections.get(user_id, {}).values())
+        for websocket in sockets:
+            try:
+                await websocket.close(code=1008, reason=reason)
+            except Exception:
+                logger.exception("failed to close websocket for deactivated user", extra={"user_id": str(user_id)})
+        return len(sockets)
 
     async def run_socket(self, websocket: WebSocket, user_id: UUID, username: str) -> None:
         await websocket.send_json(

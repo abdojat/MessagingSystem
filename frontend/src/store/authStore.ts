@@ -20,7 +20,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   isInitializing: true,
   setAuth: (user, accessToken, refreshToken) => {
     localStorage.setItem('chat_refresh_token', refreshToken);
-    persistSessionCookies(accessToken, "member");
+    persistSessionCookies(accessToken, user.is_superadmin ? "superadmin" : "member");
     set({ user, accessToken, isAuthenticated: true, isInitializing: false });
   },
   clearAuth: () => {

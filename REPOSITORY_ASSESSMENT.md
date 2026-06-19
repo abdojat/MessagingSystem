@@ -4,7 +4,7 @@ Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
 
-This report is evidence-based and references the current codebase. Last updated after the multimedia publishing audit on 2026-06-16.
+This report is evidence-based and references the current codebase. Last updated after the superadmin administration pass on 2026-06-19.
 
 ## 1. Executive Summary
 
@@ -19,6 +19,7 @@ It does more than a toy chat app:
 - It has a substantial Next.js frontend for login, channel management, publishing, membership control, and event logs.
 - It implements password hashing, JWT auth, role-based authorization, and Fernet message encryption at rest.
 - It supports protected photo/video/audio attachments with server-derived attachment metadata and upload audit events.
+- It has a separate, environment-bootstrapped global superadmin privilege with guarded global audit, account/session, channel lifecycle, and delivery controls.
 
 Biggest strengths:
 - The pub/sub stack is real, not mocked.
@@ -27,12 +28,14 @@ Biggest strengths:
 - There is genuine event logging and an outbox pattern.
 - Delivery failures are visible through admin APIs/UI instead of only worker logs.
 - Event log tampering can be detected through the hash-chain verifier when rows have initialized integrity metadata.
+- Administrative intervention is auditable and does not silently grant access to private message bodies.
 
 Biggest risks:
 - Security is not strong enough for a serious deployment.
 - Frontend auth tokens are browser-managed, which is acceptable for a demo but not production-grade.
 - Runtime verification still depends on the full Docker stack, even though the demo verifier now exercises the live WebSocket path when available with REST backfill fallback.
 - There is no full Merkle tree, external hash anchoring, or anomaly detection feature in the codebase.
+- Superadmin authentication is still password/JWT based without MFA or an external privileged-access workflow, so it remains appropriate for the university MVP rather than production operations.
 
 Most urgent missing pieces:
 - Keep the security posture honest and documented.

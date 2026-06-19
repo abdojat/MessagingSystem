@@ -11,6 +11,7 @@ University final-year project implementing a secure distributed channel messagin
 - Frontend: Next.js (`frontend/`)
 - Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
 - Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
+- Platform administration: environment-bootstrapped superadmin, global audit view, user/session controls, channel suspension/restoration, and global delivery recovery
 
 ## Services
 - `postgres` (5432)
@@ -47,6 +48,7 @@ Important:
 - `OUTBOX_RETRY_BACKOFF_MULTIPLIER`
 - `OUTBOX_MAX_RETRY_DELAY_SECONDS`
 - `NEXT_PUBLIC_API_BASE_URL`
+- `SUPERADMIN_USERNAME`, `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD` (optional bootstrap; password must be at least 12 characters)
 - Keep `.env` local only; the repository tracks `.env.example` for documentation.
 
 Development note:
@@ -56,6 +58,8 @@ Development note:
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
+
+To create the initial superadmin, set `SUPERADMIN_USERNAME` and a unique 12+ character `SUPERADMIN_PASSWORD` in the untracked `.env` before startup. `SUPERADMIN_EMAIL` is optional. Startup creates the account once and never resets its password or auto-promotes an existing normal account. After login, open `/app/admin` or use the shield link in the sidebar. Remove the bootstrap password from `.env` after the account has been created if automatic recreation is not needed.
 
 ## Migrations
 ```bash

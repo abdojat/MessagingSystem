@@ -25,6 +25,8 @@ async def me(user: CurrentUserDep) -> MeResponse:
         avatar_url=user.avatar_url,
         wallpaper_url=user.wallpaper_url,
         bio=user.bio,
+        is_superadmin=user.is_superadmin,
+        is_active=user.is_active,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )

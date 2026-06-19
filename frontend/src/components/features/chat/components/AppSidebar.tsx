@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown, ChevronRight, Hash, LogOut, Plus, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Hash, LogOut, Plus, Search, ShieldCheck } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useChannels } from "@/hooks/use-channels";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
@@ -215,6 +215,15 @@ export function AppSidebar() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-6">
+          {user?.is_superadmin ? (
+            <Link
+              href={localePath("/app/admin")}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${pathname === localePath("/app/admin") ? "bg-primary text-primary-foreground" : "bg-sidebar-accent/60 text-sidebar-foreground hover:bg-sidebar-accent"}`}
+            >
+              <ShieldCheck className="h-4 w-4" />
+              {t("superadminConsole")}
+            </Link>
+          ) : null}
           <SidebarSection title={t("sections.myChannels")} isOpen={isMyChannelsOpen} onToggle={() => setIsMyChannelsOpen(open => !open)}>
             <div className="space-y-1">
               {myChannels.map(channel => (

@@ -24,6 +24,17 @@
 - Delivery monitoring endpoints under `/v1/admin/delivery/*` require authentication and are scoped to channels where the caller is an owner or an admin with management permissions.
 - Manual delivery retry is authorized through the same scoped channel-manager rule.
 
+### Global superadmin
+- `users.is_superadmin` is a separate platform privilege; it is not a channel membership role and cannot be requested through registration or profile APIs.
+- `/v1/admin/*` requires the dedicated `SuperadminDep` authorization dependency. Denied attempts are logged as `security.superadmin_access_denied`.
+- The frontend's `chat_user_role` cookie only redirects navigation for convenience and is not trusted for authorization; every admin API re-loads the user from the signed access token and database.
+- The initial account is created only when `SUPERADMIN_USERNAME` and `SUPERADMIN_PASSWORD` are explicitly configured. The password must contain at least 12 characters, and bootstrap refuses to promote an existing normal account with the same username/email.
+- Superadmins can browse all audit events, view platform counts, deactivate/reactivate normal accounts, revoke their sessions, suspend/restore channels, and inspect/retry delivery failures across active channels.
+- Account deactivation is enforced on login and access-token resolution; active refresh sessions are revoked and sockets connected to the current backend instance are closed immediately.
+- A superadmin cannot deactivate their own account through the API, and one superadmin cannot alter another superadmin through normal administration endpoints.
+- Superadmin operations create `superadmin.*` or channel audit events.
+- Superadmin status does **not** grant blanket read access to private message bodies or protected uploads. Platform administration and private channel content remain deliberately separate.
+
 ## Message Encryption
 - Message content is encrypted at rest on the server side with Fernet.
 - The backend decrypts content only for authorized readers.
@@ -34,6 +45,7 @@
 - The repository keeps `.env.example` as documentation for required settings.
 - A local `.env` file may be used for development, but it should remain untracked.
 - In the current repository state, `git ls-files` does not show any tracked `.env` file.
+- Treat `SUPERADMIN_PASSWORD` as a bootstrap secret. Keep it only in the local/untracked environment and remove or rotate it after initial creation when practical.
 
 ## Routing-Key and Path Safety
 - RabbitMQ routing keys and Redis channels are normalized before use.
@@ -65,3 +77,5 @@ This protects against accidental or unauthorized event modification, insertion, 
 - The verifier does not prove tail deletion unless the previous last hash was stored or witnessed outside the database.
 - Successful upload access logging is best-effort so a temporary audit-log failure does not break protected media playback; unauthorized access logging still blocks the request with `403 Forbidden`.
 - Protected upload-backed avatars, wallpapers, and message media are fetched by the frontend with the bearer token and rendered through temporary object URLs. This is suitable for the local demo, but it is not a production CDN/media pipeline.
+- Superadmin activity is application-audited but does not replace external administrator monitoring, MFA, a hardware-backed secret store, or separation-of-duties controls.
+- In a future multi-backend deployment, immediate socket termination would need a shared Redis control message so every backend instance disconnects the user; durable token/account rejection already applies on the next authenticated request or reconnect.

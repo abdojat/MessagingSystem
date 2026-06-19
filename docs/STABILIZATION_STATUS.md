@@ -1,10 +1,20 @@
 # Stabilization Status
 
-Last updated: 2026-06-17
+Last updated: 2026-06-19
 
 ## Summary
 
-This status file now includes the 2026-06-17 profile wallpaper upload pass. The latest pass adds a server-saved user wallpaper field, reuses protected upload storage and validation, and keeps the chat wallpaper picker working with authenticated image loading while preserving private upload controls.
+The latest pass adds a bounded global superadmin role with platform audit visibility and high-value operational controls while preserving private-message authorization boundaries.
+
+## Superadmin Administration Pass - 2026-06-19
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Identity/bootstrap | Passed | Migration `0015_superadmin_controls`, `SuperadminBootstrapService`, Docker startup bootstrap, and refusal to auto-promote existing normal users | Bootstrap secret still comes from environment variables; no MFA | Use a unique bootstrap password, create the account once, then remove the password from local `.env` |
+| Global audit visibility | Passed | `GET /v1/admin/events`, enriched actor/channel context, paginated `/app/admin` bilingual event table, and cross-channel/system integration test | Filters cover event type and API-level actor/channel IDs; UI exposes event-type filtering | Add date-range filters only if event volume makes them useful |
+| User/channel controls | Passed | Account deactivate/reactivate, session revocation, current-instance WebSocket termination, channel suspend/restore, self/protected-superadmin guards, and administrative audit events | A future multi-backend deployment needs Redis-broadcast socket termination; no MFA or external approval workflow | Keep controls intentionally small for the university MVP |
+| Privacy boundary | Passed | Superadmin administration does not bypass private message/upload reads; documented in `docs/SECURITY.md` | Database operators remain technically privileged outside the application layer | Explain application-level boundary honestly during defense |
+| Verification | Passed | Dedicated Docker-network test database: `7 passed` focused; full backend: `66 passed`; frontend typecheck/build passed; fresh Alembic migration and bootstrap passed | No browser e2e click-through for the console | Manually rehearse one user deactivation and disposable-channel restore |
 
 ## Profile Wallpaper Upload Pass - 2026-06-17
 

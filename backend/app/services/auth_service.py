@@ -53,6 +53,8 @@ class AuthService:
         user = result.scalar_one_or_none()
         if not user or not verify_password(req.password, user.password_hash):
             raise AppError("invalid credentials", 401, code="AUTH_INVALID")
+        if not user.is_active:
+            raise AppError("account is deactivated", 403, code="ACCOUNT_DISABLED")
 
         session = UserSession(
             user_id=user.id,
@@ -74,6 +76,11 @@ class AuthService:
     @staticmethod
     async def refresh(db: AsyncSession, refresh_token: str, user_agent: str | None, ip: str | None, refresh_ttl_days: int) -> TokenPair:
         session = await AuthService._get_valid_refresh_session(db, refresh_token)
+        user = await db.get(User, session.user_id)
+        if not user or not user.is_active:
+            session.revoked_at = utcnow()
+            await db.commit()
+            raise AppError("account is deactivated", 403, code="ACCOUNT_DISABLED")
 
         now = utcnow()
         session.last_used_at = now
@@ -104,6 +111,8 @@ class AuthService:
         user = await db.get(User, UUID(user_id))
         if not user:
             raise AppError("user not found", 404)
+        if not user.is_active:
+            raise AppError("account is deactivated", 403, code="ACCOUNT_DISABLED")
         return user
 
     @staticmethod

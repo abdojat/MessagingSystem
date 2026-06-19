@@ -11,6 +11,60 @@ export interface MeResponse extends User {
   bio?: string | null;
   created_at?: string;
   updated_at?: string | null;
+  is_superadmin: boolean;
+  is_active: boolean;
+}
+
+export interface AdminOverviewResponse {
+  total_users: number;
+  active_users: number;
+  total_channels: number;
+  active_channels: number;
+  total_messages: number;
+  total_events: number;
+  delivery_failures: number;
+}
+
+export interface AdminUserItem {
+  id: string;
+  username: string;
+  email?: string | null;
+  display_name?: string | null;
+  is_superadmin: boolean;
+  is_active: boolean;
+  active_session_count: number;
+  created_at: string;
+  updated_at: string;
+  deactivated_at?: string | null;
+  deactivated_by_user_id?: string | null;
+}
+
+export interface AdminChannelItem {
+  id: string;
+  name: string;
+  channel_slug: string;
+  owner_user_id: string;
+  owner_username: string;
+  visibility: "public" | "private";
+  join_mode: "open" | "approval_required" | "invite_only";
+  member_count: number;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string | null;
+}
+
+export interface AdminEventItem {
+  id: string;
+  channel_id?: string | null;
+  channel_name?: string | null;
+  actor_user_id?: string | null;
+  actor_username?: string | null;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+  event_hash?: string | null;
+  integrity_scope?: string | null;
 }
 
 export interface UserPublicProfile extends User {

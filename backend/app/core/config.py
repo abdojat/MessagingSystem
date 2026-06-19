@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/v1"
     message_encryption_enabled: bool = True
     message_encryption_key: str = ""
+    superadmin_username: str = ""
+    superadmin_email: str = ""
+    superadmin_password: str = ""
 
     @field_validator("cors_origins", mode="before")
     @classmethod

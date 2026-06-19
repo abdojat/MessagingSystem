@@ -178,6 +178,7 @@
       "myChannelsSearch": "No matching owned or admin channels"
     },
     "logout": "Log out",
+    "superadminConsole": "Superadmin console",
     "searchPlaceholder": "Search channels...",
     "sections": {
       "channels": "Channels",
@@ -890,6 +891,34 @@
       "privateUploadLink": "Private upload link",
       "seconds": "{count, plural, one {# second} other {# seconds}}",
       "storedMessageText": "Stored message text"
+    }
+  },
+  "superadmin": {
+    "eyebrow": "Platform control",
+    "title": "Superadmin console",
+    "description": "Review platform-wide audit events and manage accounts, channels, and delivery operations.",
+    "forbidden": "This page requires a superadmin account.",
+    "tabs": { "events": "All audit events", "users": "Users", "channels": "Channels" },
+    "stats": {
+      "users": "Total users", "activeUsers": "Active users", "channels": "Active channels",
+      "messages": "Messages", "events": "Audit events", "deliveryFailures": "Delivery failures"
+    },
+    "actions": { "refresh": "Refresh", "delivery": "Delivery monitor", "failed": "Action failed", "tryAgain": "Please try again." },
+    "pagination": { "previous": "Previous", "next": "Next" },
+    "events": {
+      "filterPlaceholder": "Filter by event type...", "total": "{count} events", "type": "Event type",
+      "actor": "Actor", "channel": "Channel", "time": "Time", "details": "Details", "system": "System"
+    },
+    "users": {
+      "searchPlaceholder": "Search username, email, or display name...", "total": "{count} users", "user": "User",
+      "status": "Status", "sessions": "Active sessions", "created": "Created", "actions": "Actions",
+      "superadmin": "Superadmin", "active": "Active", "inactive": "Inactive", "revokeSessions": "Revoke sessions",
+      "deactivate": "Deactivate", "reactivate": "Reactivate"
+    },
+    "channels": {
+      "searchPlaceholder": "Search channel or owner...", "total": "{count} channels", "channel": "Channel",
+      "owner": "Owner", "members": "Members", "messages": "Messages", "status": "Status", "actions": "Actions",
+      "active": "Active", "suspended": "Suspended", "suspend": "Suspend", "restore": "Restore"
     }
   },
   "notFound": {

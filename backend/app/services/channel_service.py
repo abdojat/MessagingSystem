@@ -543,14 +543,16 @@ class ChannelService:
     ) -> None:
         channel = await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
-        if not membership or membership.role != MembershipRole.owner:
+        actor = await db.get(User, actor_user_id)
+        is_superadmin_override = bool(actor and actor.is_superadmin)
+        if (not membership or membership.role != MembershipRole.owner) and not is_superadmin_override:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         channel.deleted_at = utcnow()
         await log_event(
             db,
             "channel.deleted",
-            {"channel_id": str(channel_id)},
+            {"channel_id": str(channel_id), "superadmin_override": is_superadmin_override},
             channel_id=channel_id,
             actor_user_id=actor_user_id,
         )
