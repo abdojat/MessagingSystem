@@ -1,13 +1,20 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from app.core.identifiers import validate_username as validate_username_value
 
 
 class RegisterRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=64)
+    username: str = Field(min_length=3, max_length=50)
     email: EmailStr | None = None
     password: str = Field(min_length=8, max_length=256)
+
+    @field_validator("username")
+    @classmethod
+    def validate_username_no_spaces(cls, value: str) -> str:
+        return validate_username_value(value)
 
 
 class LoginRequest(BaseModel):
@@ -35,7 +42,10 @@ class MeResponse(BaseModel):
     email: EmailStr | None
     display_name: str | None = None
     avatar_url: str | None = None
+    wallpaper_url: str | None = None
     bio: str | None = None
+    is_superadmin: bool = False
+    is_active: bool = True
     created_at: datetime
     updated_at: datetime | None = None
 

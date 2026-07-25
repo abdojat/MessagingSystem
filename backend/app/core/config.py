@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     jwt_refresh_ttl_days: int = 14
 
     outbox_poll_interval: float = 1.0
+    outbox_max_attempts: int = 5
+    outbox_initial_retry_delay_seconds: int = 5
+    outbox_retry_backoff_multiplier: float = 2.0
+    outbox_max_retry_delay_seconds: int = 300
     worker_online_scan_interval: float = 3.0
     ws_history_batch_limit: int = 100
 
@@ -29,6 +33,11 @@ class Settings(BaseSettings):
     upload_max_size_bytes: int = 25 * 1024 * 1024
     uploads_base_dir: str = "/data/uploads"
     api_v1_prefix: str = "/v1"
+    message_encryption_enabled: bool = True
+    message_encryption_key: str = ""
+    superadmin_username: str = ""
+    superadmin_email: str = ""
+    superadmin_password: str = ""
 
     @field_validator("cors_origins", mode="before")
     @classmethod

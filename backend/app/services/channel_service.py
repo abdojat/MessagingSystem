@@ -1,5 +1,6 @@
 import uuid
 import base64
+import re
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -8,6 +9,8 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.identifiers import SAFE_IDENTIFIER_MAX_LENGTH, normalize_channel_slug, normalize_username
+from app.core.encryption import decrypt_json_payload, decrypt_message
 from app.core.utils import make_invite_token, sha256_hex, utcnow
 from app.db.models import (
     Channel,
@@ -23,10 +26,18 @@ from app.db.models import (
     User,
 )
 from app.mq.publisher import bind_user_channel, unbind_user_channel
-from app.schemas.channels import ChannelCreateRequest, ChannelPatchRequest, InviteRequest, JoinRequest
+from app.schemas.channels import AdminPermissionsUpdateRequest, ChannelCreateRequest, ChannelPatchRequest, InviteRequest, JoinRequest
 from app.services.event_service import log_event
 from app.services.outbox_service import enqueue_channel_event_outbox, enqueue_user_event_outbox
-from app.services.rbac import can_approve, can_demote, can_invite, can_promote, can_publish, can_remove
+from app.services.rbac import (
+    build_permissions as build_rbac_permissions,
+    can_approve,
+    can_demote,
+    can_invite,
+    can_promote,
+    can_remove,
+    normalize_admin_permissions,
+)
 
 MEMBERSHIP_CURSOR_SEP = "|"
 ALLOWED_MEMBER_ROLES = {MembershipRole.owner, MembershipRole.admin, MembershipRole.member, MembershipRole.pending}
@@ -40,29 +51,66 @@ ROLE_WEIGHT = {
 
 class ChannelService:
     @staticmethod
+    def _slugify(raw: str) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", "-", raw.strip().lower()).strip("-")
+        normalized = re.sub(r"-{2,}", "-", normalized)
+        if not normalized:
+            return "channel"
+        if len(normalized) < 3:
+            normalized = f"{normalized}-channel"
+        normalized = normalized[:SAFE_IDENTIFIER_MAX_LENGTH].strip("-")
+        return normalized or "channel"
+
+    @staticmethod
+    async def _next_available_slug(db: AsyncSession, base_slug: str) -> str:
+        base = base_slug[:SAFE_IDENTIFIER_MAX_LENGTH] or "channel"
+        candidate = base
+        suffix = 2
+        while True:
+            exists_row = await db.execute(select(Channel.id).where(Channel.channel_slug == candidate).limit(1))
+            if exists_row.scalar_one_or_none() is None:
+                return candidate
+            suffix_token = f"-{suffix}"
+            candidate = f"{base[: max(1, SAFE_IDENTIFIER_MAX_LENGTH - len(suffix_token))]}{suffix_token}"
+            suffix += 1
+
+    @staticmethod
+    def _decrypted_message_payload(message: Message) -> tuple[str | None, dict | None]:
+        if message.deleted_at is not None:
+            return None, None
+        if message.content_type.value == "text":
+            return decrypt_message(message.content_text) if message.content_text is not None else None, None
+        if message.content_type.value == "json":
+            return None, decrypt_json_payload(message.content_json)
+        raise AppError("unsupported content type", 500, code="DECRYPTION_FAILED")
+
+    @staticmethod
     async def get_membership(db: AsyncSession, channel_id: UUID, user_id: UUID) -> ChannelMembership | None:
         return await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
 
     @staticmethod
-    def build_permissions(role: MembershipRole | None, channel: Channel | None = None) -> dict[str, bool]:
-        is_manage_members = role in {MembershipRole.owner, MembershipRole.admin}
-        can_edit_channel = role == MembershipRole.owner
-        return {
-            "can_publish": can_publish(role),
-            "can_invite": can_invite(role),
-            "can_approve": can_approve(role),
-            "can_manage_members": is_manage_members,
-            "can_edit_channel": can_edit_channel,
-            "can_delete_channel": can_edit_channel,
-        }
+    def membership_permissions(membership: ChannelMembership | None) -> dict[str, bool]:
+        if membership is None:
+            return ChannelService.build_permissions(None)
+        return ChannelService.build_permissions(membership.role, membership.admin_permissions)
 
     @staticmethod
-    def build_channel_payload(channel: Channel, role: MembershipRole | None) -> dict:
+    def build_permissions(
+        role: MembershipRole | None,
+        admin_permissions: dict | None = None,
+        channel: Channel | None = None,
+    ) -> dict[str, bool]:
+        _ = channel
+        return build_rbac_permissions(role, admin_permissions)
+
+    @staticmethod
+    def build_channel_payload(channel: Channel, role: MembershipRole | None, admin_permissions: dict | None = None) -> dict:
         my_role: MembershipRole | str = role if role is not None else "none"
         return {
             "id": channel.id,
             "owner_user_id": channel.owner_user_id,
             "name": channel.name,
+            "channel_slug": channel.channel_slug,
             "description": channel.description,
             "avatar_url": channel.avatar_url,
             "visibility": channel.visibility,
@@ -77,19 +125,32 @@ class ChannelService:
             "my_last_seen_seq_id": None,
             "unread_count": 0,
             "my_role": my_role,
-            "permissions": ChannelService.build_permissions(role, channel),
+            "permissions": ChannelService.build_permissions(role, admin_permissions, channel),
         }
 
     @staticmethod
-    def compute_my_role_and_permissions(channel: Channel, role: MembershipRole | None) -> tuple[MembershipRole | str, dict[str, bool]]:
+    def compute_my_role_and_permissions(
+        channel: Channel,
+        role: MembershipRole | None,
+        admin_permissions: dict | None = None,
+    ) -> tuple[MembershipRole | str, dict[str, bool]]:
         my_role: MembershipRole | str = role if role is not None else "none"
-        return my_role, ChannelService.build_permissions(role, channel)
+        return my_role, ChannelService.build_permissions(role, admin_permissions, channel)
 
     @staticmethod
     async def create_channel(db: AsyncSession, owner_user_id: UUID, req: ChannelCreateRequest, amqp: aio_pika.RobustConnection) -> Channel:
+        if req.avatar_url is not None:
+            from app.services.message_service import MessageService
+
+            await MessageService.validate_avatar_upload_reference(db, owner_user_id, req.avatar_url)
+
+        provided_slug = normalize_channel_slug(req.channel_slug) if req.channel_slug else ""
+        slug_base = provided_slug if provided_slug else ChannelService._slugify(req.name)
+        slug = await ChannelService._next_available_slug(db, slug_base)
         channel = Channel(
             owner_user_id=owner_user_id,
             name=req.name,
+            channel_slug=slug,
             description=req.description,
             avatar_url=req.avatar_url,
             visibility=req.visibility,
@@ -115,12 +176,24 @@ class ChannelService:
             channel_id=channel.id,
             actor_user_id=owner_user_id,
         )
+        if slug != slug_base:
+            await log_event(
+                db,
+                "channel.slug_collision_resolved",
+                {"requested_slug": slug_base, "resolved_slug": slug},
+                channel_id=channel.id,
+                actor_user_id=owner_user_id,
+            )
         await db.commit()
         await db.refresh(channel)
 
+        owner = await db.get(User, owner_user_id)
+        if owner is None:
+            raise AppError("owner not found", 404, code="USER_NOT_FOUND")
+
         amqp_channel = await amqp.channel()
         try:
-            await bind_user_channel(amqp_channel, str(owner_user_id), str(channel.id))
+            await bind_user_channel(amqp_channel, owner.username, channel.channel_slug)
         finally:
             await amqp_channel.close()
         return channel
@@ -142,7 +215,7 @@ class ChannelService:
             .subquery()
         )
         stmt = (
-            select(Channel, ChannelMembership.role, last_message_sq.c.last_message_at)
+            select(Channel, ChannelMembership.role, ChannelMembership.admin_permissions, last_message_sq.c.last_message_at)
             .outerjoin(
                 ChannelMembership,
                 and_(ChannelMembership.channel_id == Channel.id, ChannelMembership.user_id == user_id),
@@ -198,12 +271,12 @@ class ChannelService:
         page = all_rows[:limit]
         items = await ChannelService._enrich_channel_payload_batch(
             db,
-            [(channel, role) for channel, role, _ in page],
+            [(channel, role, admin_permissions) for channel, role, admin_permissions, _ in page],
             user_id,
         )
         next_cursor = None
         if has_more and page:
-            last_channel, _, last_message_at = page[-1]
+            last_channel, _, _, last_message_at = page[-1]
             next_cursor = ChannelService._encode_channel_cursor(
                 last_message_at,
                 last_channel.created_at,
@@ -214,17 +287,23 @@ class ChannelService:
     @staticmethod
     async def _enrich_channel_payload_batch(
         db: AsyncSession,
-        channel_rows: list[tuple[Channel, MembershipRole | None]],
+        channel_rows: list[tuple[Channel, MembershipRole | None, dict | None]],
         user_id: UUID,
     ) -> list[dict]:
         if not channel_rows:
             return []
-        channels_by_id = {channel.id: channel for channel, _ in channel_rows}
-        roles_by_id = {channel.id: role for channel, role in channel_rows}
+        channels_by_id = {channel.id: channel for channel, _, _ in channel_rows}
+        roles_by_id = {channel.id: role for channel, role, _ in channel_rows}
+        admin_permissions_by_id = {channel.id: admin_permissions for channel, _, admin_permissions in channel_rows}
         channel_ids = list(channels_by_id.keys())
 
         payloads = {
-            channel_id: ChannelService.build_channel_payload(channels_by_id[channel_id], roles_by_id[channel_id]) for channel_id in channel_ids
+            channel_id: ChannelService.build_channel_payload(
+                channels_by_id[channel_id],
+                roles_by_id[channel_id],
+                admin_permissions_by_id[channel_id],
+            )
+            for channel_id in channel_ids
         }
 
         member_rows = await db.execute(
@@ -249,7 +328,8 @@ class ChannelService:
         pending_map = {cid: int(count or 0) for cid, count in pending_rows.all()}
         for channel_id in channel_ids:
             role = roles_by_id.get(channel_id)
-            payloads[channel_id]["pending_count"] = pending_map.get(channel_id, 0) if role in {MembershipRole.owner, MembershipRole.admin} else 0
+            permissions = ChannelService.build_permissions(role, admin_permissions_by_id.get(channel_id))
+            payloads[channel_id]["pending_count"] = pending_map.get(channel_id, 0) if permissions["can_manage_members"] else 0
 
         max_seq_sq = (
             select(Message.channel_id, func.max(Message.seq_id).label("max_seq"))
@@ -265,15 +345,27 @@ class ChannelService:
             )
             .order_by(Message.channel_id.asc())
         )
-        for last_message in last_rows.scalars().all():
+        last_messages = last_rows.scalars().all()
+        sender_ids = {message.sender_user_id for message in last_messages}
+        sender_profiles: dict[UUID, User] = {}
+        if sender_ids:
+            sender_rows = await db.execute(select(User).where(User.id.in_(sender_ids)))
+            sender_profiles = {sender.id: sender for sender in sender_rows.scalars().all()}
+
+        for last_message in last_messages:
+            sender = sender_profiles.get(last_message.sender_user_id)
+            content_text, content_json = ChannelService._decrypted_message_payload(last_message)
             payloads[last_message.channel_id]["last_message"] = {
                 "id": last_message.id,
                 "channel_id": last_message.channel_id,
                 "sender_user_id": last_message.sender_user_id,
+                "sender_username": sender.username if sender else None,
+                "sender_display_name": sender.display_name if sender else None,
+                "sender_avatar_url": sender.avatar_url if sender else None,
                 "seq_id": last_message.seq_id,
                 "content_type": last_message.content_type.value,
-                "content_text": last_message.content_text,
-                "content_json": last_message.content_json,
+                "content_text": content_text,
+                "content_json": content_json,
                 "reply_to_message_id": last_message.reply_to_message_id,
                 "reply_to_seq_id": last_message.reply_to_seq_id,
                 "attachments": last_message.attachments,
@@ -307,6 +399,8 @@ class ChannelService:
                 Message.channel_id.in_(channel_ids),
                 Message.deleted_at.is_(None),
                 Message.seq_id > func.coalesce(state_sq.c.last_seen_seq_id, 0),
+                Message.reply_to_message_id.is_(None),
+                Message.reply_to_seq_id.is_(None),
             )
             .group_by(Message.channel_id)
         )
@@ -314,7 +408,7 @@ class ChannelService:
         for channel_id in channel_ids:
             payloads[channel_id]["unread_count"] = unread_map.get(channel_id, 0)
 
-        return [payloads[channel.id] for channel, _ in channel_rows]
+        return [payloads[channel.id] for channel, _, _ in channel_rows]
 
     @staticmethod
     async def get_channel_or_404(db: AsyncSession, channel_id: UUID) -> Channel:
@@ -324,9 +418,13 @@ class ChannelService:
         return channel
 
     @staticmethod
-    async def _get_channel_with_role(db: AsyncSession, channel_id: UUID, user_id: UUID) -> tuple[Channel | None, MembershipRole | None]:
+    async def _get_channel_with_role(
+        db: AsyncSession,
+        channel_id: UUID,
+        user_id: UUID,
+    ) -> tuple[Channel | None, MembershipRole | None, dict | None]:
         row = await db.execute(
-            select(Channel, ChannelMembership.role)
+            select(Channel, ChannelMembership.role, ChannelMembership.admin_permissions)
             .outerjoin(
                 ChannelMembership,
                 and_(ChannelMembership.channel_id == Channel.id, ChannelMembership.user_id == user_id),
@@ -336,17 +434,17 @@ class ChannelService:
         )
         data = row.first()
         if not data:
-            return None, None
-        return data[0], data[1]
+            return None, None, None
+        return data[0], data[1], data[2]
 
     @staticmethod
     async def get_channel_view(db: AsyncSession, channel_id: UUID, user_id: UUID) -> dict:
-        channel, role = await ChannelService._get_channel_with_role(db, channel_id, user_id)
+        channel, role, admin_permissions = await ChannelService._get_channel_with_role(db, channel_id, user_id)
         if not channel:
             raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         if channel.visibility == ChannelVisibility.private and role is None:
             raise AppError("forbidden", 403, code="FORBIDDEN")
-        return await ChannelService._enrich_channel_payload(db, channel, user_id, role)
+        return await ChannelService._enrich_channel_payload(db, channel, user_id, role, admin_permissions)
 
     @staticmethod
     async def update_channel(
@@ -358,14 +456,23 @@ class ChannelService:
     ) -> Channel:
         channel = await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
-        if not membership or membership.role != MembershipRole.owner:
+        if not ChannelService.membership_permissions(membership)["can_edit_channel"]:
             raise AppError("forbidden", 403, code="FORBIDDEN")
+
+        old_channel_slug = channel.channel_slug
+        provided_fields = req.model_fields_set
+        if "avatar_url" in provided_fields and req.avatar_url is not None:
+            from app.services.message_service import MessageService
+
+            await MessageService.validate_avatar_upload_reference(db, actor_user_id, req.avatar_url)
 
         if req.name is not None:
             channel.name = req.name
-        if req.description is not None:
+        if req.channel_slug is not None:
+            channel.channel_slug = req.channel_slug
+        if "description" in provided_fields:
             channel.description = req.description
-        if req.avatar_url is not None:
+        if "avatar_url" in provided_fields:
             channel.avatar_url = req.avatar_url
         if req.visibility is not None:
             channel.visibility = req.visibility
@@ -378,6 +485,7 @@ class ChannelService:
             {
                 "channel_id": str(channel_id),
                 "name": channel.name,
+                "channel_slug": channel.channel_slug,
                 "description": channel.description,
                 "avatar_url": channel.avatar_url,
                 "visibility": channel.visibility.value,
@@ -396,6 +504,7 @@ class ChannelService:
                 "channel_id": str(channel_id),
                 "patch": {
                     "name": channel.name,
+                    "channel_slug": channel.channel_slug,
                     "description": channel.description,
                     "avatar_url": channel.avatar_url,
                     "visibility": channel.visibility.value,
@@ -405,6 +514,24 @@ class ChannelService:
         )
         await db.commit()
         await db.refresh(channel)
+
+        if old_channel_slug != channel.channel_slug:
+            member_rows = await db.execute(
+                select(User.username)
+                .join(ChannelMembership, ChannelMembership.user_id == User.id)
+                .where(
+                    ChannelMembership.channel_id == channel_id,
+                    ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+                )
+            )
+            usernames = list(member_rows.scalars().all())
+            amqp_channel = await amqp.channel()
+            try:
+                for username in usernames:
+                    await unbind_user_channel(amqp_channel, username, old_channel_slug)
+                    await bind_user_channel(amqp_channel, username, channel.channel_slug)
+            finally:
+                await amqp_channel.close()
         return channel
 
     @staticmethod
@@ -416,14 +543,16 @@ class ChannelService:
     ) -> None:
         channel = await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
-        if not membership or membership.role != MembershipRole.owner:
+        actor = await db.get(User, actor_user_id)
+        is_superadmin_override = bool(actor and actor.is_superadmin)
+        if (not membership or membership.role != MembershipRole.owner) and not is_superadmin_override:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         channel.deleted_at = utcnow()
         await log_event(
             db,
             "channel.deleted",
-            {"channel_id": str(channel_id)},
+            {"channel_id": str(channel_id), "superadmin_override": is_superadmin_override},
             channel_id=channel_id,
             actor_user_id=actor_user_id,
         )
@@ -439,13 +568,15 @@ class ChannelService:
         amqp_channel = await amqp.channel()
         try:
             rows = await db.execute(
-                select(ChannelMembership.user_id).where(
+                select(User.username)
+                .join(ChannelMembership, ChannelMembership.user_id == User.id)
+                .where(
                     ChannelMembership.channel_id == channel_id,
                     ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
                 )
             )
-            for uid in rows.scalars().all():
-                await unbind_user_channel(amqp_channel, str(uid), str(channel_id))
+            for username in rows.scalars().all():
+                await unbind_user_channel(amqp_channel, username, channel.channel_slug)
         finally:
             await amqp_channel.close()
 
@@ -517,9 +648,10 @@ class ChannelService:
         await db.commit()
 
         if membership.role in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member}:
+            username = await ChannelService._require_username(db, user_id)
             amqp_channel = await amqp.channel()
             try:
-                await bind_user_channel(amqp_channel, str(user_id), str(channel_id))
+                await bind_user_channel(amqp_channel, username, channel.channel_slug)
             finally:
                 await amqp_channel.close()
         return (status, membership, message)
@@ -533,7 +665,7 @@ class ChannelService:
     ) -> tuple[ChannelInvite, str]:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
-        if not can_invite(membership.role if membership else None):
+        if not membership or not can_invite(membership.role, membership.admin_permissions):
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         token = make_invite_token()
@@ -571,7 +703,7 @@ class ChannelService:
     ) -> tuple[list[ChannelInvite], str | None, bool]:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
-        if not membership or membership.role not in {MembershipRole.owner, MembershipRole.admin}:
+        if not membership or not can_invite(membership.role, membership.admin_permissions):
             raise AppError("forbidden", 403, code="FORBIDDEN")
         stmt = select(ChannelInvite).where(ChannelInvite.channel_id == channel_id)
         now = utcnow()
@@ -608,7 +740,7 @@ class ChannelService:
     async def revoke_invite(db: AsyncSession, channel_id: UUID, invite_id: UUID, actor_user_id: UUID) -> ChannelInvite:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
-        if not membership or membership.role not in {MembershipRole.owner, MembershipRole.admin}:
+        if not membership or not can_invite(membership.role, membership.admin_permissions):
             raise AppError("forbidden", 403, code="FORBIDDEN")
         invite = await db.get(ChannelInvite, invite_id)
         if not invite or invite.channel_id != channel_id:
@@ -694,6 +826,7 @@ class ChannelService:
         membership = await ChannelService.get_membership(db, invite.channel_id, user_id)
         if membership:
             membership.role = MembershipRole.member
+            membership.admin_permissions = None
             membership.approved_at = utcnow()
         else:
             membership = ChannelMembership(
@@ -725,7 +858,7 @@ class ChannelService:
 
         amqp_channel = await amqp.channel()
         try:
-            await bind_user_channel(amqp_channel, str(user_id), str(invite.channel_id))
+            await bind_user_channel(amqp_channel, user.username, channel.channel_slug)
         finally:
             await amqp_channel.close()
         return membership
@@ -742,12 +875,13 @@ class ChannelService:
         target = await ChannelService.get_membership(db, channel_id, target_id)
         if not actor or not target:
             raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
-        if not can_approve(actor.role):
+        if not can_approve(actor.role, actor.admin_permissions):
             raise AppError("forbidden", 403, code="FORBIDDEN")
         if target.role != MembershipRole.pending:
             raise AppError("target is not pending", 400)
 
         target.role = MembershipRole.member
+        target.admin_permissions = None
         target.approved_at = utcnow()
         await log_event(
             db,
@@ -765,9 +899,11 @@ class ChannelService:
         )
         await db.commit()
 
+        target_username = await ChannelService._require_username(db, target_id)
+        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
         try:
-            await bind_user_channel(amqp_channel, str(target_id), str(channel_id))
+            await bind_user_channel(amqp_channel, target_username, channel_slug)
         finally:
             await amqp_channel.close()
         return target
@@ -781,12 +917,13 @@ class ChannelService:
         target_id: UUID,
     ) -> ChannelMembership:
         actor = await ChannelService.get_membership(db, channel_id, actor_id)
-        if not actor or actor.role not in {MembershipRole.owner, MembershipRole.admin}:
+        if not ChannelService.membership_permissions(actor)["can_manage_members"]:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         target = await ChannelService.get_membership(db, channel_id, target_id)
         if target:
             target.role = MembershipRole.member
+            target.admin_permissions = None
             target.approved_at = utcnow()
         else:
             target = ChannelMembership(
@@ -814,9 +951,11 @@ class ChannelService:
         )
         await db.commit()
 
+        target_username = await ChannelService._require_username(db, target_id)
+        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
         try:
-            await bind_user_channel(amqp_channel, str(target_id), str(channel_id))
+            await bind_user_channel(amqp_channel, target_username, channel_slug)
         finally:
             await amqp_channel.close()
         return target
@@ -830,6 +969,7 @@ class ChannelService:
         if not can_promote(actor.role, target.role):
             raise AppError("forbidden", 403, code="FORBIDDEN")
         target.role = MembershipRole.admin
+        target.admin_permissions = normalize_admin_permissions(target.admin_permissions)
         await log_event(
             db,
             "member.promoted",
@@ -856,6 +996,7 @@ class ChannelService:
         if not can_demote(actor.role, target.role):
             raise AppError("forbidden", 403, code="FORBIDDEN")
         target.role = MembershipRole.member
+        target.admin_permissions = None
         await log_event(
             db,
             "member.demoted",
@@ -874,11 +1015,64 @@ class ChannelService:
         return target
 
     @staticmethod
+    async def update_admin_permissions(
+        db: AsyncSession,
+        channel_id: UUID,
+        actor_id: UUID,
+        target_id: UUID,
+        req: AdminPermissionsUpdateRequest,
+    ) -> ChannelMembership:
+        actor = await ChannelService.get_membership(db, channel_id, actor_id)
+        target = await ChannelService.get_membership(db, channel_id, target_id)
+        if not actor or not target:
+            raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
+        if actor.role != MembershipRole.owner:
+            raise AppError("forbidden", 403, code="FORBIDDEN")
+        if target.role != MembershipRole.admin:
+            raise AppError("target user must be an admin", 400, code="VALIDATION_ERROR")
+
+        current_permissions = normalize_admin_permissions(target.admin_permissions)
+        if req.can_publish is not None:
+            current_permissions["can_publish"] = req.can_publish
+        if req.can_invite is not None:
+            current_permissions["can_invite"] = req.can_invite
+        if req.can_approve is not None:
+            current_permissions["can_approve"] = req.can_approve
+        if req.can_manage_members is not None:
+            current_permissions["can_manage_members"] = req.can_manage_members
+        if req.can_edit_channel is not None:
+            current_permissions["can_edit_channel"] = req.can_edit_channel
+        target.admin_permissions = current_permissions
+
+        await log_event(
+            db,
+            "member.permissions.updated",
+            {
+                "channel_id": str(channel_id),
+                "target_user_id": str(target_id),
+                "admin_permissions": current_permissions,
+            },
+            channel_id=channel_id,
+            actor_user_id=actor_id,
+        )
+        await ChannelService._enqueue_membership_update(
+            db,
+            channel_id,
+            target_id,
+            MembershipRole.admin,
+            reason="admin_permissions_updated",
+        )
+        await db.commit()
+        return target
+
+    @staticmethod
     async def remove_member(db: AsyncSession, amqp: aio_pika.RobustConnection, channel_id: UUID, actor_id: UUID, target_id: UUID) -> None:
         actor = await ChannelService.get_membership(db, channel_id, actor_id)
         target = await ChannelService.get_membership(db, channel_id, target_id)
         if not actor or not target:
             raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
+        if not ChannelService.membership_permissions(actor)["can_manage_members"]:
+            raise AppError("forbidden", 403, code="FORBIDDEN")
         if not can_remove(actor.role, target.role):
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
@@ -899,9 +1093,11 @@ class ChannelService:
         )
         await db.commit()
 
+        target_username = await ChannelService._require_username(db, target_id)
+        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
         try:
-            await unbind_user_channel(amqp_channel, str(target_id), str(channel_id))
+            await unbind_user_channel(amqp_channel, target_username, channel_slug)
         finally:
             await amqp_channel.close()
 
@@ -934,9 +1130,11 @@ class ChannelService:
         )
         await db.commit()
 
+        username = await ChannelService._require_username(db, user_id)
+        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
         try:
-            await unbind_user_channel(amqp_channel, str(user_id), str(channel_id))
+            await unbind_user_channel(amqp_channel, username, channel_slug)
         finally:
             await amqp_channel.close()
 
@@ -968,7 +1166,7 @@ class ChannelService:
             stmt = stmt.where(ChannelMembership.role == role)
         if q:
             pattern = f"%{q.strip()}%"
-            stmt = stmt.where(or_(User.username.ilike(pattern), User.email.ilike(pattern)))
+            stmt = stmt.where(or_(User.username.ilike(pattern), User.display_name.ilike(pattern), User.email.ilike(pattern)))
         if cursor:
             cursor_role_weight, cursor_username, cursor_user_id = ChannelService._decode_member_cursor(cursor)
             stmt = stmt.where(
@@ -1047,8 +1245,20 @@ class ChannelService:
     async def _assert_manage_membership_access(db: AsyncSession, channel_id: UUID, actor_user_id: UUID) -> None:
         await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
-        if not membership or membership.role not in {MembershipRole.owner, MembershipRole.admin}:
+        if not ChannelService.membership_permissions(membership)["can_manage_members"]:
             raise AppError("forbidden", 403, code="FORBIDDEN")
+
+    @staticmethod
+    async def _require_username(db: AsyncSession, user_id: UUID) -> str:
+        user = await db.get(User, user_id)
+        if user is None:
+            raise AppError("user not found", 404, code="USER_NOT_FOUND")
+        return normalize_username(user.username)
+
+    @staticmethod
+    async def _require_channel_slug(db: AsyncSession, channel_id: UUID) -> str:
+        channel = await ChannelService.get_channel_or_404(db, channel_id)
+        return normalize_channel_slug(channel.channel_slug)
 
     @staticmethod
     async def _validate_invite(db: AsyncSession, channel_id: UUID, token: str, user_id: UUID) -> ChannelInvite:
@@ -1161,8 +1371,9 @@ class ChannelService:
         channel: Channel,
         user_id: UUID,
         role: MembershipRole | None,
+        admin_permissions: dict | None = None,
     ) -> dict:
-        payload = ChannelService.build_channel_payload(channel, role)
+        payload = ChannelService.build_channel_payload(channel, role, admin_permissions)
 
         members_result = await db.execute(
             select(func.count(ChannelMembership.user_id)).where(
@@ -1177,7 +1388,11 @@ class ChannelService:
             )
         )
         payload["member_count"] = int(members_result.scalar_one() or 0)
-        payload["pending_count"] = int(pending_result.scalar_one() or 0) if role in {MembershipRole.owner, MembershipRole.admin} else 0
+        payload["pending_count"] = (
+            int(pending_result.scalar_one() or 0)
+            if ChannelService.build_permissions(role, admin_permissions)["can_manage_members"]
+            else 0
+        )
 
         last_msg_result = await db.execute(
             select(Message)
@@ -1187,14 +1402,19 @@ class ChannelService:
         )
         last_message = last_msg_result.scalar_one_or_none()
         if last_message:
+            sender = await db.get(User, last_message.sender_user_id)
+            content_text, content_json = ChannelService._decrypted_message_payload(last_message)
             payload["last_message"] = {
                 "id": last_message.id,
                 "channel_id": last_message.channel_id,
                 "sender_user_id": last_message.sender_user_id,
+                "sender_username": sender.username if sender else None,
+                "sender_display_name": sender.display_name if sender else None,
+                "sender_avatar_url": sender.avatar_url if sender else None,
                 "seq_id": last_message.seq_id,
                 "content_type": last_message.content_type.value,
-                "content_text": last_message.content_text,
-                "content_json": last_message.content_json,
+                "content_text": content_text,
+                "content_json": content_json,
                 "reply_to_message_id": last_message.reply_to_message_id,
                 "reply_to_seq_id": last_message.reply_to_seq_id,
                 "attachments": last_message.attachments,
@@ -1216,6 +1436,8 @@ class ChannelService:
                 Message.channel_id == channel.id,
                 Message.deleted_at.is_(None),
                 Message.seq_id > seen_seq,
+                Message.reply_to_message_id.is_(None),
+                Message.reply_to_seq_id.is_(None),
             )
         )
         payload["unread_count"] = int(unread_result.scalar_one() or 0)
@@ -1255,3 +1477,4 @@ class ChannelService:
             "message_count": int(message_count_result.scalar_one() or 0),
             "last_message_at": last_message_result.scalar_one_or_none(),
         }
+

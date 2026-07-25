@@ -1,227 +1,183 @@
-# Channels Backend (FastAPI + Postgres + RabbitMQ + Redis)
+# Distributed Messaging System Based on Publish/Subscribe Model
 
-Telegram-like backend with auth, channels, memberships, messages, invites, events, sync, uploads, and websocket fanout.
+University final-year project implementing a secure distributed channel messaging platform with FastAPI, PostgreSQL, RabbitMQ, Redis/WebSocket, worker processing, and Next.js frontend.
 
-## Run
+## Architecture Summary
+- Backend API: FastAPI (`backend/`)
+- Worker: outbox + broker fanout (`worker/`)
+- Persistence: PostgreSQL
+- Broker: RabbitMQ
+- Realtime: Redis + WebSocket
+- Frontend: Next.js (`frontend/`)
+- Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
+- Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
+- Platform administration: environment-bootstrapped superadmin, global audit view, user/session controls, channel suspension/restoration, and global delivery recovery
+
+## Services
+- `postgres` (5432)
+- `rabbitmq` (5672, 15672)
+- `redis` (6379)
+- `backend` (8000)
+- `worker`
+- `frontend` (3000)
+
+## Quick Start
 ```bash
 cp .env.example .env
-docker compose up --build
+# set MESSAGE_ENCRYPTION_KEY in .env
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+docker compose config
+docker compose up -d --build
+docker compose ps -a
 ```
 
-API docs:
-- `http://localhost:8000/docs`
-- Versioned API prefix: `/v1`
-- Legacy unversioned routes remain available as temporary aliases.
+For the deterministic supervisor sequence, use the [Golden Demo Path](docs/DEMO_GUIDE.md#golden-demo-path).
+
+## Environment Variables
+See `.env.example`.
+Important:
+- `DATABASE_URL`
+- `RABBITMQ_URL`
+- `REDIS_URL`
+- `JWT_SECRET` (replace development default)
+- `MESSAGE_ENCRYPTION_ENABLED=true`
+- `MESSAGE_ENCRYPTION_KEY` (Fernet key)
+- `OUTBOX_MAX_ATTEMPTS`
+- `OUTBOX_INITIAL_RETRY_DELAY_SECONDS`
+- `OUTBOX_RETRY_BACKOFF_MULTIPLIER`
+- `OUTBOX_MAX_RETRY_DELAY_SECONDS`
+- `NEXT_PUBLIC_API_BASE_URL`
+- `SUPERADMIN_USERNAME`, `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD` (optional bootstrap; password must be at least 12 characters)
+- Keep `.env` local only; the repository tracks `.env.example` for documentation.
+
+Development note:
+- In `dev/test/local`, empty `MESSAGE_ENCRYPTION_KEY` uses a fallback key.
+- For demo/prod-like runs, set a real key explicitly.
+- Generate one with:
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+To create the initial superadmin, set `SUPERADMIN_USERNAME` and a unique 12+ character `SUPERADMIN_PASSWORD` in the untracked `.env` before startup. `SUPERADMIN_EMAIL` is optional. Startup creates the account once and never resets its password or auto-promotes an existing normal account. After login, open `/app/admin` or use the shield link in the sidebar. Remove the bootstrap password from `.env` after the account has been created if automatic recreation is not needed.
 
 ## Migrations
 ```bash
 docker compose run --rm backend sh -lc "alembic upgrade head"
 ```
 
-## Seed Demo Data
-```bash
-python scripts/seed_demo.py
-```
-
 ## Tests
+Docker backend tests (verified):
 ```bash
-docker compose run --rm backend sh -lc "pytest -q"
+docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
 ```
 
-## Environment Variables
-- `DATABASE_URL`
-- `RABBITMQ_URL`
-- `REDIS_URL`
-- `JWT_SECRET`
-- `JWT_ACCESS_TTL_MIN`
-- `JWT_REFRESH_TTL_DAYS`
-- `CORS_ORIGINS` (comma-separated or JSON array, e.g. `http://localhost:3000,http://localhost:5173`)
-- `UPLOAD_MAX_SIZE_BYTES` (supports up to `1073741824` bytes / 1GB)
-- `UPLOADS_BASE_DIR` (docker volume path)
-- `API_V1_PREFIX` (default `/v1`)
-- `OUTBOX_POLL_INTERVAL`
-- `WORKER_ONLINE_SCAN_INTERVAL`
-
-## Key Endpoints (`/v1`)
-
-Auth:
-- `POST /v1/auth/register`
-- `POST /v1/auth/login`
-- `POST /v1/auth/refresh`
-- `POST /v1/auth/logout`
-- `GET /v1/auth/sessions`
-- `DELETE /v1/auth/sessions/{session_id}`
-- `POST /v1/auth/logout_all`
-- `GET /v1/me`
-
-Users:
-- `GET /v1/users/search?q=...&limit=...&cursor=...`
-- `GET /v1/users/{user_id}`
-
-Channels:
-- `POST /v1/channels`
-- `GET /v1/channels?limit=...&cursor=...`
-- `GET /v1/channels/{channel_id}`
-- `PATCH /v1/channels/{channel_id}`
-- `DELETE /v1/channels/{channel_id}`
-- `GET /v1/channels/{channel_id}/stats`
-- `GET /v1/channels/{channel_id}/members`
-- `GET /v1/channels/{channel_id}/requests`
-- `POST /v1/channels/{channel_id}/join`
-- `POST /v1/channels/{channel_id}/leave`
-
-Invites:
-- `POST /v1/channels/{channel_id}/invite`
-- `GET /v1/channels/{channel_id}/invites`
-- `POST /v1/channels/{channel_id}/invites/{invite_id}/revoke`
-- `GET /v1/invites/{token}`
-- `POST /v1/invites/{token}/accept`
-
-Messages:
-- `POST /v1/channels/{channel_id}/messages`
-- `GET /v1/channels/{channel_id}/messages`
-- `GET /v1/channels/{channel_id}/messages/{message_id}`
-- `PATCH /v1/channels/{channel_id}/messages/{message_id}`
-- `DELETE /v1/channels/{channel_id}/messages/{message_id}`
-- `POST /v1/channels/{channel_id}/messages/{message_id}/reactions`
-- `DELETE /v1/channels/{channel_id}/messages/{message_id}/reactions/{emoji}`
-- `POST /v1/channels/{channel_id}/pins/{message_id}`
-- `DELETE /v1/channels/{channel_id}/pins/{message_id}`
-- `GET /v1/channels/{channel_id}/pins`
-- `POST /v1/channels/{channel_id}/seen`
-
-Uploads:
-- `POST /v1/uploads`
-- `PUT /v1/uploads/{file_id}/content`
-- `GET /v1/uploads/{file_id}/content`
-
-Sync:
-- `POST /v1/sync`
-
-Health:
-- `GET /v1/health`
-
-## Example curl
+Local backend tests:
 ```bash
-# login
-TOKENS=$(curl -s -X POST http://localhost:8000/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username_or_email":"alice","password":"password123"}')
-ACCESS=$(echo "$TOKENS" | jq -r .access_token)
+cd backend
+python -m pytest -q
+```
+If local PostgreSQL is unreachable for `DATABASE_URL`, tests may be skipped.
 
-# list channels (frontend-ready summary)
-curl -s "http://localhost:8000/v1/channels?limit=20" \
-  -H "Authorization: Bearer $ACCESS"
+## Frontend Checks
+Supported scripts:
+```bash
+cd frontend
+npm install
+npm run typecheck
+npm run build
+```
+Notes:
+- `npm run lint` is not defined in this repo.
+- Local Windows build may hit a Node dependency issue (`caniuse-lite/...`).
+- Docker frontend build is verified and recommended for demo readiness.
 
-# idempotent message send
-curl -s -X POST http://localhost:8000/v1/channels/$CHANNEL_ID/messages \
-  -H "Authorization: Bearer $ACCESS" \
-  -H 'Content-Type: application/json' \
-  -d '{"content_text":"hello","client_msg_id":"11111111-1111-1111-1111-111111111111"}'
+## Demo Verification Script
+```bash
+python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
+```
+The script verifies register/login, channel creation, join, live WebSocket delivery when available, REST sync backfill, event log entries, and an unauthorized upload access check.
+It now opens User B's WebSocket before joining, explicitly subscribes after the join, verifies event integrity for the fresh demo channel, and remains the strongest repo-level proof of the distributed publish/subscribe path currently available.
 
-# sync
-curl -s -X POST http://localhost:8000/v1/sync \
-  -H "Authorization: Bearer $ACCESS" \
-  -H 'Content-Type: application/json' \
-  -d '{"channels":[{"channel_id":"'$CHANNEL_ID'","last_seen_seq_id":5}],"since":null,"limit":200}'
+Event integrity checks:
+```bash
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app pytest tests/test_event_integrity.py -q"
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
+```
+Canonical real backfill, when you intentionally want to initialize legacy events:
+```bash
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
+```
+Host execution (`python scripts/backfill_event_integrity.py --dry-run`) is optional and depends on local PostgreSQL credentials matching the Docker database.
 
-# seen marker (exactly one of last_seen_seq_id / last_seen_message_id)
-curl -s -X POST http://localhost:8000/v1/channels/$CHANNEL_ID/seen \
-  -H "Authorization: Bearer $ACCESS" \
-  -H 'Content-Type: application/json' \
-  -d '{"last_seen_seq_id":10}'
+Delivery reliability checks:
+```bash
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app pytest tests/test_delivery_reliability.py -q"
+docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"
+docker compose exec postgres psql -U postgres -d channels -c "select status, count(*) from outbox group by status order by status;"
+```
+The verifier proves normal worker publish plus a controlled dead-letter/manual retry path; it does not claim full broker-outage CI coverage.
+
+Approval-required membership verifier:
+```bash
+python scripts/verify_approval_flow.py --base-url http://localhost:8000/v1
+```
+This opens User B's WebSocket while pending, approves User B, verifies membership update or REST resync, then checks live delivery and REST backfill.
+
+## Manual Demo Flow
+1. User A register/login.
+2. User B register/login.
+3. User A creates channel.
+4. User B joins/subscribes.
+5. User A publishes a text message.
+6. User A uses the paperclip composer button to publish a photo, video, or audio file, with or without caption text.
+7. User B receives/reads the text and media messages.
+8. Open the event log subpage from channel details.
+9. Click Verify integrity and show the Audit integrity badge.
+10. Open Delivery Monitor from the Profile page as a channel owner/admin.
+11. Show unauthorized access denial on private channel.
+12. Show private upload access is denied to a non-member.
+13. Show ciphertext at rest:
+```bash
+docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
 
-## WebSocket (`/ws` and `/v1/ws`)
+## Final MVP Status
+- Complete:
+  - Authentication, authorization, membership management, channel CRUD, encrypted message storage, media attachments for photos/videos/audio, event logging, upload access checks, safe identifier validation, and backend regression tests.
+- Mostly complete:
+  - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier and approval verifier, including join-after-connect and approval-after-connect WebSocket resubscribe paths, but there is still no broad CI suite around it.
+  - Delivery reliability monitoring with retry scheduling, dead-letter status, admin APIs, frontend Delivery Monitor, and a controlled verifier for normal publish plus manual retry. Full broker-outage CI coverage remains future work.
+  - Event audit integrity with a per-scope SHA-256 hash chain. This is tamper-evident, not external notarization; legacy rows need explicit backfill before they verify as initialized.
+- Demo-grade:
+  - Frontend token handling. Access tokens are kept in a JavaScript-managed cookie and refresh tokens are kept in `localStorage`, which is acceptable for a university demo but not production-grade session security.
+- Future work:
+  - Frontend automated smoke tests, richer operational observability, a cleaner production session strategy, and any advanced features beyond the MVP.
 
-Envelope (client and server):
-```json
-{
-  "type": "string",
-  "request_id": "uuid|null",
-  "payload": {},
-  "ts": "2026-03-04T12:00:00+00:00"
-}
-```
+## Final Submission Docs
+- [Final MVP Status](docs/FINAL_MVP_STATUS.md)
+- [Final Demo Checklist](docs/FINAL_DEMO_CHECKLIST.md)
+- [Security](docs/SECURITY.md)
+- [Testing](docs/TESTING.md)
+- [Requirements Mapping](docs/REQUIREMENTS_MAPPING.md)
+- [Repository Assessment](REPOSITORY_ASSESSMENT.md)
 
-Client -> server types:
-- `auth` `{ "token": "jwt" }` (only needed when no query/header token used)
-- `subscribe` `{ "channel_ids": ["uuid"], "from_seq_id": 10 }`
-- `unsubscribe` `{ "channel_ids": ["uuid"] }`
-- `resume` `{ "channels": [{"channel_id":"uuid","last_seen_seq_id":123}], "since": null }`
-- `seen` `{ "channel_id":"uuid","last_seen_seq_id":10 }`
-- `ping` `{}`
+## Security Notes
+- Password hashing enabled.
+- JWT auth on protected routes.
+- Membership/permission authorization checks.
+- Message encryption at rest (Fernet).
+- Private uploads require authentication and channel/ownership checks before download.
+- Message attachments support protected photo, video, and audio publishing through the existing upload API.
+- Profile/channel avatar uploads and profile chat wallpaper uploads use validated image references and protected authenticated media loading.
+- Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.
+- Unauthorized read/publish events logged.
+- Event logs include tamper-evident hash-chain metadata for new events.
+- Do not commit real secrets.
 
-Server -> client types:
-- `hello`
-- `message`
-- `history` `{ "channel_id":"uuid", "items":[...], "is_truncated": true|false }` (optional)
-- `message_updated`
-- `reaction_updated`
-- `membership_update`
-- `channel_updated`
-- `sync`
-- `seen`
-- `pong`
-- `error` (same `{code,message,details}` shape in `payload`)
-
-## Frontend Contracts
-
-- All list endpoints are cursor-based unless messages, which are seq-based.
-- Default pagination limits are conservative and clamped server-side.
-- Cursor validation errors return `400` with code `PAGINATION_INVALID`.
-
-Users:
-- `GET /users/search`: `q` (required, trimmed), `limit` default `50` max `200`, `cursor`.
-- Order is deterministic: username asc, then id asc.
-
-Channels:
-- `GET /channels`: `limit` default `50` max `200`, `cursor`, optional `q`, `visibility`, `scope=my|discover` (default `my`).
-- `my` scope lists only channels where caller has membership.
-- `discover` scope lists public channels not yet joined.
-- Stable order: `last_message_at desc nulls last, created_at desc, id desc`.
-- `GET /channels/{id}/members`: `limit` default `50` max `200`, `cursor`, optional `role`, optional `q`.
-- Stable order: role weight (`owner,admin,member,pending`), username asc, id asc.
-- `GET /channels/{id}/requests`: same pagination contract, filtered to pending.
-- `GET /channels/{id}/invites`: `limit` default `50` max `200`, `cursor`, optional `status=active|revoked|accepted|expired`, order `created_at desc, id desc`.
-- `GET /channels/{id}/events`: `limit` default `50` max `200`, `cursor`, order `created_at desc, id desc`.
-
-Messages:
-- `GET /channels/{id}/messages`: seq pagination with `before_seq_id` and/or `after_seq_id`, `limit` default `50` max `200`, `order=asc|desc` default `desc`.
-- If both `before_seq_id` and `after_seq_id` are provided, server applies a bounded window `(after_seq_id, before_seq_id)` and still honors `order`.
-- Cursor progression precedence:
-  - `order=desc`: page moves older and uses `next_before_seq_id`.
-  - `order=asc`: page moves newer and uses `next_after_seq_id`.
-- Response includes `{next_before_seq_id,next_after_seq_id,has_more,order}`.
-- `GET /channels/{id}/messages/around`: `seq_id` required, `limit_before`/`limit_after` default `30` max `100`.
-
-Idempotency and ordering:
-- `POST /channels/{id}/messages` is idempotent on `(channel_id,sender_user_id,client_msg_id)`.
-- Duplicate sends with same `client_msg_id` return the original message.
-- `seq_id` is channel-local and strictly increasing; duplicates are prevented by DB constraints + transactional counter update.
-
-Deleted message representation:
-- `DELETE /channels/{id}/messages/{message_id}` returns `MessageResponse` with `deleted_at` set.
-- When `deleted_at` is set, `content_text`, `content_json`, and `attachments` are always `null`.
-
-Seen/unread semantics:
-- `POST /channels/{id}/seen` requires exactly one of `last_seen_message_id` or `last_seen_seq_id`.
-- If `last_seen_message_id` is sent, backend resolves and validates it inside the channel.
-- `unread_count` is defined as: messages where `seq_id > last_seen_seq_id` and `deleted_at IS NULL`.
-
-Invite token safety:
-- Full invite token is only returned by `POST /channels/{channel_id}/invite`.
-- Stored invite tokens are hashed in DB (`token_hash`); list endpoints expose only masked token fragments.
-
-Sync and reconnect:
-- `POST /sync` body supports `channels[{channel_id,last_seen_seq_id}]`, optional `since`, `limit` default `200` max `500`.
-- Response shape: `{server_time, channel_updates, membership_updates, messages}`.
-- `messages` are deterministic and sorted by `(channel_id, seq_id)`.
-- WS is realtime-first; clients should use REST `/sync` for backfill.
-- WS auth methods: query `token`, `Authorization: Bearer`, or first message `{"type":"auth","payload":{"token":"..."}}`.
-- If auth is missing/invalid, socket is closed with policy violation.
-
-Errors:
-- Unified error payload: `{code,message,details}`.
-- Core codes: `VALIDATION_ERROR`, `AUTH_INVALID`, `AUTH_EXPIRED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `INTERNAL_ERROR`.
-- Domain codes include `INVITE_EXPIRED`, `INVITE_REVOKED`, `INVITE_INVALID`, `PAGINATION_INVALID`, and join/invite rule codes.
+## Documentation
+- [Project Overview](docs/PROJECT_OVERVIEW.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Demo Guide](docs/DEMO_GUIDE.md)
+- [Requirements Mapping](docs/REQUIREMENTS_MAPPING.md)
+- [Testing](docs/TESTING.md)

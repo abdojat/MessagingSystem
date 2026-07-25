@@ -2,7 +2,13 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class AttachmentReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: UUID
 
 
 class PublishMessageRequest(BaseModel):
@@ -10,17 +16,24 @@ class PublishMessageRequest(BaseModel):
     content_json: dict[str, Any] | None = None
     reply_to_message_id: UUID | None = None
     reply_to_seq_id: int | None = Field(default=None, ge=1)
-    attachments: list[dict[str, Any]] | None = None
+    attachments: list[AttachmentReference] | None = Field(default=None, max_length=10)
     client_msg_id: UUID | None = None
 
     @model_validator(mode="after")
     def validate_content(self) -> "PublishMessageRequest":
         has_text = self.content_text is not None
         has_json = self.content_json is not None
-        if has_text == has_json:
-            raise ValueError("provide exactly one of content_text or content_json")
+        has_attachments = bool(self.attachments)
+        if has_text and has_json:
+            raise ValueError("provide at most one of content_text or content_json")
+        if not has_text and not has_json and not has_attachments:
+            raise ValueError("provide content_text, content_json, or at least one attachment")
         if has_text and not self.content_text.strip():
             raise ValueError("content_text cannot be empty")
+        if self.attachments:
+            file_ids = [item.file_id for item in self.attachments]
+            if len(file_ids) != len(set(file_ids)):
+                raise ValueError("attachments cannot contain duplicate file_id values")
         return self
 
 
@@ -28,6 +41,9 @@ class MessageResponse(BaseModel):
     id: UUID
     channel_id: UUID
     sender_user_id: UUID
+    sender_username: str | None = None
+    sender_display_name: str | None = None
+    sender_avatar_url: str | None = None
     seq_id: int
     content_type: Literal["text", "json"]
     content_text: str | None

@@ -1,0 +1,967 @@
+{
+  "app": {
+    "name": "ChatCore",
+    "tagline": "نظام رسائل موزع بنمط النشر والاشتراك"
+  },
+  "common": {
+    "allowed": "مسموح",
+    "decorativeBackground": "خلفية زخرفية مجردة",
+    "loading": "جار التحميل...",
+    "no": "لا",
+    "notAvailable": "غير متاح",
+    "tryAgain": "يرجى المحاولة مرة أخرى.",
+    "tryAgainLater": "يرجى المحاولة بعد قليل.",
+    "unknown": "غير معروف",
+    "yes": "نعم",
+    "actions": {
+      "back": "رجوع",
+      "backToApp": "العودة إلى التطبيق",
+      "cancel": "إلغاء",
+      "refresh": "تحديث",
+      "refreshing": "جار التحديث...",
+      "reset": "إعادة ضبط",
+      "retry": "إعادة المحاولة",
+      "retrying": "جار إعادة المحاولة",
+      "returnToApp": "العودة إلى التطبيق",
+      "saveChanges": "حفظ التغييرات",
+      "saving": "جار الحفظ...",
+      "tryAgain": "حاول مرة أخرى"
+    },
+    "joinMode": {
+      "approvalRequired": "يتطلب موافقة",
+      "inviteOnly": "بالدعوة فقط",
+      "open": "مفتوح"
+    },
+    "language": {
+      "current": "اللغة الحالية: {locale}",
+      "names": {
+        "ar": "العربية",
+        "en": "الإنجليزية"
+      },
+      "switchTo": "التبديل إلى {locale}"
+    },
+    "roles": {
+      "admin": "مشرف",
+      "member": "عضو",
+      "none": "لا توجد صلاحية",
+      "owner": "مالك",
+      "pending": "قيد الانتظار"
+    },
+    "theme": {
+      "switchToDark": "التبديل إلى الوضع الداكن",
+      "switchToLight": "التبديل إلى الوضع الفاتح"
+    },
+    "visibility": {
+      "private": "خاص",
+      "public": "عام"
+    }
+  },
+  "ui": {
+    "close": "إغلاق",
+    "loading": "جار التحميل",
+    "breadcrumb": {
+      "label": "مسار التنقل",
+      "more": "المزيد"
+    },
+    "carousel": {
+      "next": "الشريحة التالية",
+      "previous": "الشريحة السابقة",
+      "region": "عرض شرائح",
+      "slide": "شريحة"
+    },
+    "pagination": {
+      "label": "ترقيم الصفحات",
+      "morePages": "صفحات إضافية",
+      "next": "التالي",
+      "nextPage": "الانتقال إلى الصفحة التالية",
+      "previous": "السابق",
+      "previousPage": "الانتقال إلى الصفحة السابقة"
+    },
+    "sidebar": {
+      "mobileDescription": "يعرض الشريط الجانبي على الهاتف.",
+      "title": "الشريط الجانبي",
+      "toggle": "تبديل الشريط الجانبي"
+    }
+  },
+  "home": {
+    "actions": {
+      "alreadyHaveAccount": "لدي حساب بالفعل",
+      "continue": "المتابعة إلى قنواتك",
+      "profile": "إدارة الملف الشخصي",
+      "start": "ابدأ المراسلة الآن"
+    },
+    "eyebrow": "مصمم لتسليم القنوات بتركيز",
+    "features": {
+      "0": {
+        "description": "التسليم الفوري يبقي المشتركين متزامنين دون تحديث الصفحة.",
+        "title": "نشر واشتراك مباشر"
+      },
+      "1": {
+        "description": "صلاحيات مبنية على الأدوار ودعوات تحمي كل قناة.",
+        "title": "خاص افتراضيا"
+      },
+      "2": {
+        "description": "السجل الدائم والاسترجاع الخلفي يساعدان على استعادة الرسائل الفائتة.",
+        "title": "موثوق في كل مكان"
+      }
+    },
+    "nav": {
+      "createAccount": "إنشاء حساب",
+      "login": "تسجيل الدخول",
+      "openApp": "فتح التطبيق"
+    },
+    "preview": {
+      "channels": {
+        "engineering": "الهندسة",
+        "product": "المنتج",
+        "support": "الدعم"
+      },
+      "live": "مباشر",
+      "messages": {
+        "engineering": "أحداث WebSocket مستقرة. جاهزون للعرض.",
+        "product": "تم إطلاق الصفحة. التعليقات تصل بسرعة.",
+        "support": "انخفض وقت الحل 32٪ هذا الأسبوع."
+      },
+      "title": "معاينة مساحة العمل"
+    },
+    "subtitle": "أنشئ القنوات، انشر الرسائل، أدر المشتركين، واعرض التسليم الفوري بنمط النشر والاشتراك من واجهة قابلة للاستخدام.",
+    "title": "مرحبا. انشر واشترك بوضوح لا بفوضى.",
+    "titleWithName": "مرحبا، {username}. انشر واشترك بوضوح لا بفوضى."
+  },
+  "auth": {
+    "login": {
+      "createOne": "أنشئ حسابا",
+      "error": "فشل تسجيل الدخول. تحقق من بياناتك.",
+      "noAccount": "ليس لديك حساب؟",
+      "password": "كلمة المرور",
+      "passwordPlaceholder": "أدخل كلمة المرور",
+      "submit": "تسجيل الدخول",
+      "submitting": "جار تسجيل الدخول...",
+      "subtitle": "سجل الدخول لمتابعة محادثات القنوات",
+      "title": "مرحبا بعودتك",
+      "username": "اسم المستخدم",
+      "usernamePlaceholder": "أدخل اسم المستخدم"
+    },
+    "register": {
+      "email": "البريد الإلكتروني",
+      "emailPlaceholder": "name@example.com",
+      "error": "فشل إنشاء الحساب.",
+      "hasAccount": "لديك حساب بالفعل؟",
+      "password": "كلمة المرور",
+      "passwordPlaceholder": "أنشئ كلمة مرور",
+      "signIn": "تسجيل الدخول",
+      "submit": "إنشاء حساب",
+      "submitting": "جار إنشاء الحساب...",
+      "subtitle": "انضم إلى ChatCore اليوم",
+      "title": "إنشاء حساب",
+      "username": "اسم المستخدم",
+      "usernamePlaceholder": "اختر اسم مستخدم"
+    }
+  },
+  "appShell": {
+    "connection": {
+      "connecting": "جار الاتصال بالمحادثة...",
+      "reconnecting": "انقطع الاتصال. جار إعادة الاتصال..."
+    },
+    "empty": {
+      "description": "اختر قناة من الشريط الجانبي لبدء المراسلة، أو أنشئ قناة جديدة لجمع فريقك.",
+      "title": "مرحبا بك في ChatCore"
+    }
+  },
+  "sidebar": {
+    "createChannel": "إنشاء قناة",
+    "empty": {
+      "discoverSearch": "لا توجد قنوات قابلة للاكتشاف مطابقة",
+      "joined": "لا توجد قنوات منضم إليها بعد",
+      "joinedSearch": "لا توجد قنوات عضوية مطابقة",
+      "myChannels": "لا توجد قنوات تملكها أو تديرها بعد",
+      "myChannelsSearch": "لا توجد قنوات مملوكة أو إدارية مطابقة"
+    },
+    "logout": "تسجيل الخروج",
+    "superadminConsole": "لوحة المشرف العام",
+    "searchPlaceholder": "ابحث في القنوات...",
+    "sections": {
+      "channels": "القنوات",
+      "discover": "استكشاف",
+      "myChannels": "قنواتي"
+    }
+  },
+  "createChannel": {
+    "actions": {
+      "create": "إنشاء قناة",
+      "creating": "جار الإنشاء..."
+    },
+    "description": "حدد اسما واضحا، وسياقا بسيطا، ونموذج الوصول المناسب لفريقك.",
+    "eyebrow": "قناة جديدة",
+    "fields": {
+      "description": "الوصف",
+      "descriptionPlaceholder": "ما الذي ينتمي هنا، ومن يستخدمها، وكم مرة يتابع الفريق.",
+      "joinAccess": "وصول الانضمام",
+      "joinModePlaceholder": "اختر طريقة الانضمام",
+      "name": "اسم القناة",
+      "nameHint": "اجعله قصيرا وواضحا ليسهل العثور عليه.",
+      "namePlaceholder": "اجتماع التسويق",
+      "visibility": "الظهور",
+      "visibilityPlaceholder": "اختر الظهور"
+    },
+    "footerHint": "يمكنك تحديث هذه الإعدادات لاحقا من تفاصيل القناة.",
+    "joinMode": {
+      "approvalDescription": "تظهر الطلبات قبل قبول الأشخاص.",
+      "inviteDescription": "الدعوات المباشرة فقط تمنح الوصول.",
+      "openDescription": "يمكن للأشخاص الانضمام فورا."
+    },
+    "presets": {
+      "community": {
+        "description": "عام وسهل الانضمام لمساحات الفريق السريعة.",
+        "title": "غرفة مفتوحة"
+      },
+      "private": {
+        "description": "وصول بالدعوة فقط للأعمال الحساسة أو القيادية.",
+        "title": "غرفة خاصة"
+      },
+      "screened": {
+        "description": "اكتشاف عام مع موافقة قبل الدخول.",
+        "title": "غرفة بمراجعة"
+      }
+    },
+    "summary": {
+      "approvalRequired": "سينتظر المنضمون الجدد الموافقة قبل الدخول.",
+      "inviteOnly": "تتم إدارة العضوية حصرا عبر الدعوات فقط.",
+      "open": "أي شخص يراها يمكنه الانضمام فورا.",
+      "privateDescription": "الأعضاء المدعوون فقط سيعرفون بوجود هذه القناة.",
+      "privateTitle": "محفوظة كقناة خاصة",
+      "publicDescription": "سيتمكن المستخدمون في مساحة العمل من رؤية هذه القناة في الاستكشاف.",
+      "publicTitle": "سهلة الاكتشاف"
+    },
+    "title": "أنشئ مساحة يرغب الناس بالانضمام إليها",
+    "toasts": {
+      "createFailedTitle": "تعذر إنشاء القناة",
+      "createdDescription": "{name} جاهزة لفريقك.",
+      "createdTitle": "تم إنشاء القناة",
+      "nameRequiredDescription": "أدخل اسما قصيرا وواضحا للقناة أولا.",
+      "nameRequiredTitle": "اسم القناة مطلوب"
+    },
+    "visibility": {
+      "privateDescription": "الأشخاص المدعوون فقط يمكنهم العثور على هذه القناة والوصول إليها.",
+      "publicDescription": "يمكن لأي مستخدم في مساحة العمل اكتشاف هذه القناة."
+    }
+  },
+  "channelView": {
+    "actions": {
+      "copyText": "نسخ النص",
+      "hideReplies": "إخفاء الردود",
+      "jumpToParent": "الانتقال إلى الرسالة الأصلية",
+      "reply": "رد",
+      "showReplies": "عرض الردود"
+    },
+    "aria": {
+      "addReaction": "إضافة التفاعل {emoji} على الرسالة #{seq}",
+      "addReactionMenu": "إضافة تفاعل إلى الرسالة #{seq}",
+      "attachFile": "إرفاق ملف",
+      "cancelReply": "إلغاء الرد",
+      "hideRepliesFor": "إخفاء الردود للرسالة #{seq}",
+      "openDetails": "فتح تفاصيل القناة",
+      "openWallpaperPicker": "اختيار خلفية المحادثة",
+      "openOptions": "فتح خيارات الرسالة #{seq}",
+      "reactWith": "تفاعل باستخدام {emoji}",
+      "removeAttachment": "إزالة {name}",
+      "removeReaction": "إزالة التفاعل {emoji} من الرسالة #{seq}",
+      "replyToMessage": "الرد على الرسالة #{seq}",
+      "selectWallpaper": "استخدام خلفية {name} للمحادثة",
+      "showRepliesFor": "عرض الردود للرسالة #{seq}"
+    },
+    "composer": {
+      "enter": "Enter",
+      "forNewLine": "لسطر جديد",
+      "messagePlaceholder": "اكتب رسالة في {name}...",
+      "replyPlaceholder": "اكتب ردا...",
+      "send": "إرسال الرسالة",
+      "shiftEnter": "Shift + Enter",
+      "toSend": "للإرسال"
+    },
+    "empty": {
+      "description": "هذه بداية سجل القناة.",
+      "title": "مرحبا بك في {name}!"
+    },
+    "errors": {
+      "notFound": "القناة غير موجودة",
+      "openFailed": "تعذر فتح هذه القناة الآن."
+    },
+    "header": {
+      "members": "{count, plural, zero {لا أعضاء} one {عضو واحد} two {عضوان} few {# أعضاء} many {# عضوا} other {# عضو}}"
+    },
+    "wallpaper": {
+      "custom": "خلفية مرفوعة",
+      "customDescription": "محفوظة في ملفك الشخصي على الخادم.",
+      "description": "يتم حفظها لحسابك على هذا الجهاز.",
+      "options": {
+        "aurora": "شفق",
+        "default": "افتراضية",
+        "dots": "نقاط",
+        "grid": "شبكة",
+        "meadow": "مرج",
+        "paper": "ورق"
+      },
+      "removeCustom": "إزالة",
+      "uploadCustom": "رفع صورة",
+      "uploading": "جار الرفع...",
+      "title": "الخلفية"
+    },
+    "joinPrompt": {
+      "description": "انضم إلى {name} لرؤية السجل وبدء المراسلة مع الفريق.",
+      "join": "الانضمام إلى القناة",
+      "joining": "جار الانضمام...",
+      "title": "أنت لست عضوا في هذه القناة"
+    },
+    "messages": {
+      "deleted": "تم حذف الرسالة",
+      "hideReplyCount": "{count, plural, one {إخفاء رد واحد} other {إخفاء # ردود}}",
+      "member": "عضو",
+      "memberWithId": "عضو {id}",
+      "message": "رسالة",
+      "replyingTo": "ردا على",
+      "showReplyCount": "{count, plural, one {عرض رد واحد} other {عرض # ردود}}",
+      "snippet": {
+        "attachments": "[{count, plural, one {مرفق واحد} other {# مرفقات}}]",
+        "deleted": "تم حذف الرسالة الأصلية.",
+        "empty": "رسالة فارغة",
+        "notLoaded": "الرسالة الأصلية غير محملة في هذا العرض.",
+        "structured": "رسالة منظمة"
+      },
+      "you": "أنت"
+    },
+    "toasts": {
+      "clipboardBlocked": "منع المتصفح الوصول إلى الحافظة.",
+      "copiedDescription": "أصبح نص الرسالة في الحافظة.",
+      "copiedTitle": "تم نسخ الرسالة",
+      "copyFailedTitle": "فشل النسخ",
+      "mediaLimitDescription": "يمكنك إرفاق حتى {count} ملفات وسائط في رسالة واحدة.",
+      "mediaLimitTitle": "عدد المرفقات كبير جدا",
+      "mediaPublishFailedDescription": "تعذر رفع الوسائط أو نشرها. يرجى المحاولة مرة أخرى.",
+      "mediaPublishFailedTitle": "فشل نشر الوسائط",
+      "mediaTooLargeDescription": "يجب ألا يتجاوز حجم كل ملف وسائط {size}.",
+      "mediaTooLargeTitle": "ملف الوسائط كبير جدا",
+      "mediaUnsupportedDescription": "يمكن إرفاق الصور والفيديو وملفات الصوت فقط هنا.",
+      "mediaUnsupportedTitle": "نوع وسائط غير مدعوم",
+      "nothingToCopyDescription": "يمكن نسخ محتوى النص فقط من هذه الرسالة.",
+      "nothingToCopyTitle": "لا يوجد ما ينسخ",
+      "reactBlockedDescription": "انضم إلى هذه القناة للتفاعل مع الرسائل.",
+      "reactBlockedTitle": "لا يمكن التفاعل الآن",
+      "wallpaperClearFailedDescription": "تعذرت إزالة الخلفية المحفوظة. يرجى المحاولة مرة أخرى.",
+      "wallpaperClearFailedTitle": "تعذرت إزالة الخلفية",
+      "wallpaperClearedDescription": "تستخدم المحادثة الخلفية الجاهزة التي اخترتها مرة أخرى.",
+      "wallpaperClearedTitle": "تمت إزالة الخلفية",
+      "wallpaperMissingUrl": "نجح الرفع لكن لم يتم إرجاع رابط للخلفية.",
+      "wallpaperSignInRequired": "يجب تسجيل الدخول قبل رفع خلفية.",
+      "wallpaperTooLargeDescription": "يجب ألا يتجاوز حجم صورة الخلفية {size}.",
+      "wallpaperTooLargeTitle": "صورة الخلفية كبيرة جدا",
+      "wallpaperUnsupportedDescription": "اختر ملف صورة غير SVG للخلفية.",
+      "wallpaperUnsupportedTitle": "ملف خلفية غير مدعوم",
+      "wallpaperUploadFailedDescription": "تعذر رفع الخلفية أو حفظها. يرجى المحاولة مرة أخرى.",
+      "wallpaperUploadFailedTitle": "فشل رفع الخلفية",
+      "wallpaperUploadedDescription": "تم رفع الخلفية وحفظها في ملفك الشخصي على الخادم.",
+      "wallpaperUploadedTitle": "تم حفظ الخلفية"
+    }
+  },
+  "invite": {
+    "accept": "قبول الدعوة",
+    "grantAccess": "تمنحك هذه الدعوة الوصول إلى قناة {visibility}.",
+    "invalidDescription": "رابط الدعوة غير صالح أو منتهي أو لم يعد متاحا.",
+    "invalidTitle": "دعوة غير صالحة",
+    "joinChannel": "الانضمام إلى القناة",
+    "joining": "جار الانضمام..."
+  },
+  "sessions": {
+    "description": "إدارة الأجهزة المسجلة الدخول إلى حسابك حاليا",
+    "empty": "لم يتم إرجاع جلسات نشطة لهذا الحساب.",
+    "expires": "تنتهي",
+    "ipAddress": "عنوان IP",
+    "revokeAccess": "إلغاء الوصول",
+    "revoked": "ملغاة",
+    "started": "بدأت",
+    "terminateAll": "إنهاء كل الجلسات",
+    "title": "الجلسات النشطة",
+    "unknown": "غير معروف",
+    "unknownDevice": "جهاز غير معروف"
+  },
+  "profile": {
+    "actions": {
+      "copyLabel": "نسخ {label}",
+      "copyUsername": "نسخ اسم المستخدم",
+      "deliveryMonitor": "مراقبة التسليم",
+      "openSessionSettings": "فتح إعدادات الجلسات",
+      "saveChanges": "حفظ التغييرات"
+    },
+    "badges": {
+      "activeSessions": "{count, plural, zero {لا جلسات نشطة} one {جلسة نشطة واحدة} other {# جلسات نشطة}}",
+      "complete": "مكتمل بنسبة {percent}٪",
+      "personal": "ملف شخصي"
+    },
+    "checklist": {
+      "avatar": {
+        "hint": "يساعد الزملاء على تمييزك بسرعة في المحادثات المزدحمة.",
+        "label": "صورة شخصية"
+      },
+      "bio": {
+        "hint": "يضيف سياق الدور حتى يعرف الفريق مسؤولياتك.",
+        "label": "نبذة"
+      },
+      "displayName": {
+        "hint": "يجعل هويتك أوضح في القنوات والإشارات.",
+        "label": "اسم العرض"
+      },
+      "email": {
+        "hint": "مطلوب لاستعادة الحساب وتدفقات الدعوة.",
+        "label": "البريد الإلكتروني"
+      }
+    },
+    "completionSummary": "{completed} من {total} حقول أساسية في الملف الشخصي مكتملة حاليا.",
+    "description": "راجع تفاصيل حسابك وراقب حالة الملف الشخصي.",
+    "editDescription": "حافظ على دقة بيانات هويتك للإشارات والدعوات والزملاء.",
+    "empty": {
+      "noBio": "لم تتم إضافة نبذة بعد.",
+      "noDisplayName": "لم يتم تعيين اسم عرض",
+      "noEmail": "لا يوجد بريد إلكتروني مسجل",
+      "noEmailAddress": "لا يوجد بريد إلكتروني مسجل."
+    },
+    "errors": {
+      "avatarMissingUrl": "نجح الرفع لكن لم يتم إرجاع رابط للصورة.",
+      "avatarUpload": "تعذر رفع صورة الملف الشخصي.",
+      "signInBeforeUpload": "يجب تسجيل الدخول قبل رفع صورة الملف الشخصي."
+    },
+    "fields": {
+      "avatarHint": "ارفع صورة لاستخدامها كصورتك الشخصية.",
+      "avatarPreviewAlt": "معاينة الصورة الشخصية المختارة",
+      "bio": "نبذة",
+      "bioPlaceholder": "شارك دورك أو تركيزك أو مسؤولياتك الحالية.",
+      "displayName": "اسم العرض",
+      "displayNamePlaceholder": "كيف يظهر اسمك في المحادثات",
+      "email": "البريد الإلكتروني",
+      "emailPlaceholder": "name@example.com",
+      "profilePicture": "الصورة الشخصية",
+      "selectedFile": "المحدد: {name}"
+    },
+    "lastServerUpdate": "آخر تحديث من الخادم {value}",
+    "lastSynced": "آخر مزامنة {value}",
+    "noUpdatesYet": "لا توجد تحديثات بعد",
+    "rows": {
+      "bio": "نبذة",
+      "displayName": "اسم العرض",
+      "email": "البريد الإلكتروني",
+      "userId": "معرف المستخدم",
+      "username": "اسم المستخدم"
+    },
+    "sections": {
+      "accountDetails": "تفاصيل الحساب",
+      "completionChecklist": "قائمة اكتمال الملف",
+      "editProfile": "تعديل الملف الشخصي",
+      "sessionStatus": "حالة الجلسات"
+    },
+    "sessionDescription": "حافظ على نظافة هذه القائمة لتقليل تعرض الحساب على الأجهزة القديمة أو المشتركة.",
+    "sessionRows": {
+      "activeSessions": "الجلسات النشطة",
+      "lastProfileUpdate": "آخر تحديث للملف",
+      "nextExpiry": "انتهاء الجلسة التالي"
+    },
+    "stats": {
+      "emailStatus": "حالة البريد",
+      "memberSince": "عضو منذ",
+      "profileHealth": "صحة الملف",
+      "security": "الأمان"
+    },
+    "status": {
+      "activeCount": "{count} نشطة",
+      "checkingSessions": "جار فحص الجلسات...",
+      "configured": "مضبوط",
+      "done": "مكتمل",
+      "missing": "ناقص",
+      "nextExpiration": "الانتهاء التالي {value}",
+      "noActiveSessions": "لم يتم العثور على جلسات نشطة."
+    },
+    "tabs": {
+      "overview": "نظرة عامة",
+      "security": "الأمان"
+    },
+    "title": "الملف الشخصي",
+    "toasts": {
+      "avatarUploadFailedDescription": "تعذر رفع صورة ملفك الشخصي.",
+      "avatarUploadFailedTitle": "فشل رفع الصورة",
+      "clipboardBlocked": "منع المتصفح الوصول إلى الحافظة.",
+      "copiedDescription": "أصبحت القيمة في الحافظة.",
+      "copiedTitle": "تم نسخ {label}",
+      "copyFailedTitle": "فشل النسخ",
+      "copyMissingDescription": "عيّن {label} أولا ثم حاول مرة أخرى.",
+      "copyMissingTitle": "لا يوجد {label}",
+      "exportFailedDescription": "تعذر إنشاء لقطة الملف الشخصي.",
+      "exportFailedTitle": "فشل التصدير",
+      "exportedDescription": "تم تنزيل لقطة JSON.",
+      "exportedTitle": "تم تصدير الملف",
+      "noChangesDescription": "حدّث حقلا أولا ثم حاول مرة أخرى.",
+      "noChangesTitle": "لا توجد تغييرات للحفظ",
+      "refreshFailedDescription": "تعذر تحديث ملفك الشخصي الآن.",
+      "refreshFailedTitle": "فشل التحديث",
+      "refreshedDescription": "تمت مزامنة تفاصيل حسابك مع أحدث بيانات الخادم.",
+      "refreshedTitle": "تم تحديث الملف",
+      "updateFailedDescription": "تعذر حفظ تغييرات ملفك الشخصي.",
+      "updateFailedTitle": "فشل التحديث",
+      "updatedDescription": "تم حفظ تغييرات ملفك الشخصي بنجاح.",
+      "updatedTitle": "تم تحديث الملف"
+    }
+  },
+  "publicProfile": {
+    "badges": {
+      "public": "ملف مساحة العمل"
+    },
+    "description": "اعرض بيانات الهوية العامة لزميل من نشاط القنوات.",
+    "empty": {
+      "noBio": "لم تتم مشاركة نبذة بعد.",
+      "noDisplayName": "لم تتم مشاركة اسم عرض"
+    },
+    "errors": {
+      "loadDescription": "قد لا يكون المستخدم موجودا، أو قد تحتاج جلستك إلى التحديث.",
+      "loadTitle": "تعذر تحميل هذا الملف"
+    },
+    "rows": {
+      "displayName": "اسم العرض",
+      "userId": "معرف المستخدم"
+    },
+    "sections": {
+      "identity": "الهوية"
+    },
+    "stats": {
+      "lastUpdated": "آخر تحديث",
+      "memberSince": "عضو منذ",
+      "username": "اسم المستخدم"
+    },
+    "title": "ملف المستخدم"
+  },
+  "delivery": {
+    "actions": {
+      "retryAll": "إعادة محاولة الكل"
+    },
+    "description": "حالة موثوقية صندوق الصادر للقنوات التي تديرها.",
+    "errors": {
+      "loadDescription": "مراقبة التسليم متاحة لمالكي القنوات والمشرفين.",
+      "loadTitle": "تعذر تحميل بيانات التسليم"
+    },
+    "stats": {
+      "dead": "ميتة",
+      "failed": "فاشلة",
+      "pending": "معلقة",
+      "published": "منشورة",
+      "publishing": "قيد النشر",
+      "retrying": "إعادة محاولة"
+    },
+    "status": {
+      "deadLettered": "منقولة للرسائل الميتة",
+      "failed": "فاشلة",
+      "pending": "معلقة",
+      "published": "منشورة",
+      "publishing": "قيد النشر",
+      "retryScheduled": "إعادة محاولة مجدولة"
+    },
+    "table": {
+      "action": "الإجراء",
+      "attempts": "المحاولات",
+      "channel": "القناة",
+      "lastError": "آخر خطأ",
+      "message": "رسالة",
+      "nextRetry": "إعادة المحاولة التالية",
+      "noError": "لا يوجد خطأ مسجل",
+      "notScheduled": "غير مجدولة",
+      "status": "الحالة",
+      "type": "النوع"
+    },
+    "tables": {
+      "deadLetteredEmpty": "لا توجد عمليات تسليم منقولة للرسائل الميتة.",
+      "deadLetteredTitle": "الرسائل الميتة",
+      "failedEmpty": "لا توجد عمليات تسليم فاشلة أو مجدولة لإعادة المحاولة.",
+      "failedTitle": "فاشلة / مجدولة لإعادة المحاولة"
+    },
+    "title": "مراقبة التسليم",
+    "toasts": {
+      "alreadyActiveDescription": "لم يكن هناك حاجة لتغيير الحالة.",
+      "alreadyActiveTitle": "التسليم نشط بالفعل",
+      "retryAllFailedTitle": "فشلت إعادة محاولة الكل",
+      "retryAllSavedDescription": "{count, plural, one {تمت جدولة سجل تسليم واحد.} other {تمت جدولة # سجلات تسليم.}}",
+      "retryAllSavedTitle": "تم حفظ طلب إعادة المحاولة",
+      "retryFailedTitle": "فشلت إعادة المحاولة",
+      "retryQueuedDescription": "سيلتقطها العامل في دورة الفحص التالية.",
+      "retryQueuedTitle": "تمت جدولة التسليم لإعادة المحاولة"
+    }
+  },
+  "channelDetails": {
+    "actions": {
+      "approve": "موافقة",
+      "backToChannel": "العودة إلى القناة",
+      "demote": "خفض الدور",
+      "join": "الانضمام إلى القناة",
+      "joining": "جار الانضمام...",
+      "leave": "مغادرة القناة",
+      "leaving": "جار المغادرة...",
+      "openEventLog": "فتح سجل الأحداث",
+      "promote": "ترقية",
+      "remove": "إزالة",
+      "savePermissions": "حفظ الصلاحيات"
+    },
+    "description": "نظرة عامة وحالة العضوية وضوابط الوصول لهذه القناة.",
+    "editDescription": "إعدادات للأعضاء القادرين على تعديل ملف القناة وسلوك الوصول.",
+    "editRestricted": "التعديل محصور حاليا بالمالك أو المشرفين الذين لديهم صلاحية التعديل.",
+    "empty": {
+      "noDescription": "لم تتم إضافة وصف لهذه القناة بعد.",
+      "noEmailAvailable": "لا يوجد بريد إلكتروني",
+      "noMembers": "لا يوجد أعضاء لعرضهم.",
+      "noPendingRequests": "لا توجد طلبات معلقة الآن."
+    },
+    "errors": {
+      "avatarMissingUrl": "نجح الرفع لكن لم يتم إرجاع رابط للصورة.",
+      "avatarUpload": "تعذر رفع صورة القناة.",
+      "loadDescription": "قد تكون القناة غير موجودة أو تحتاج جلستك إلى التحديث.",
+      "loadTitle": "تعذر تحميل هذه القناة",
+      "signInBeforeUpload": "يجب تسجيل الدخول قبل رفع صورة للقناة."
+    },
+    "eventLogDescription": "راجع أحداث الأمان والنظام الأخيرة لهذه القناة.",
+    "fields": {
+      "avatarHint": "اختر ملف صورة لتحديث صورة القناة.",
+      "avatarPreviewAlt": "معاينة صورة القناة المختارة",
+      "avatarUpload": "رفع الصورة",
+      "created": "تم الإنشاء",
+      "description": "الوصف",
+      "joinMode": "طريقة الانضمام",
+      "joinPolicy": "سياسة الانضمام",
+      "lastActivity": "آخر نشاط",
+      "name": "الاسم",
+      "selectedFile": "المحدد: {name}",
+      "updated": "تم التحديث",
+      "visibility": "الظهور"
+    },
+    "membersDescription": "إدارة الطلبات المعلقة، إزالة الوصول، وترقيات الأدوار الخاصة بالمالك.",
+    "permissions": {
+      "approve": "الموافقة على الطلبات",
+      "editChannel": "تعديل القناة",
+      "invite": "دعوة أعضاء",
+      "manageMembers": "إدارة الأعضاء",
+      "publish": "نشر الرسائل"
+    },
+    "sections": {
+      "adminPermissions": "صلاحيات المشرف",
+      "currentMembers": "الأعضاء الحاليون",
+      "editChannel": "تعديل القناة",
+      "eventLog": "سجل الأحداث",
+      "membersRoles": "الأعضاء والأدوار",
+      "overview": "نظرة عامة على القناة",
+      "pendingRequests": "الطلبات المعلقة",
+      "yourAccess": "وصولك"
+    },
+    "stats": {
+      "access": "الوصول",
+      "members": "الأعضاء",
+      "pending": "المعلقة",
+      "unread": "غير مقروءة"
+    },
+    "title": "تفاصيل القناة",
+    "toasts": {
+      "adminDemotedDescription": "{username} أصبح عضوا.",
+      "adminDemotedTitle": "تم خفض المشرف",
+      "approveFailedTitle": "تعذرت الموافقة على الطلب",
+      "avatarUploadFailedTitle": "تعذر رفع الصورة",
+      "demoteFailedTitle": "تعذر خفض المشرف",
+      "memberPromotedDescription": "{username} أصبح مشرفا.",
+      "memberPromotedTitle": "تمت ترقية العضو",
+      "memberRemovedDescription": "{username} لم يعد لديه وصول.",
+      "memberRemovedTitle": "تمت إزالة العضو",
+      "noChangesDescription": "حدّث حقلا واحدا أو أكثر قبل الحفظ.",
+      "noChangesTitle": "لا توجد تغييرات للحفظ",
+      "permissionsFailedTitle": "تعذر تحديث الصلاحيات",
+      "permissionsUpdatedDescription": "تم حفظ صلاحيات المشرف لـ {username}.",
+      "permissionsUpdatedTitle": "تم تحديث الصلاحيات",
+      "promoteFailedTitle": "تعذرت ترقية العضو",
+      "removeMemberFailedTitle": "تعذرت إزالة العضو",
+      "removeRequestFailedTitle": "تعذرت إزالة الطلب",
+      "requestApprovedDescription": "{username} أصبح عضوا الآن.",
+      "requestApprovedTitle": "تمت الموافقة على الطلب",
+      "requestRemovedDescription": "{username} لم يعد معلقا.",
+      "requestRemovedTitle": "تمت إزالة الطلب",
+      "updateFailedTitle": "تعذر تحديث القناة",
+      "updatedDescription": "تم حفظ إعدادات القناة بنجاح.",
+      "updatedTitle": "تم تحديث القناة"
+    }
+  },
+  "eventLog": {
+    "actions": {
+      "backToDetails": "العودة إلى التفاصيل",
+      "verifyIntegrity": "التحقق من السلامة"
+    },
+    "description": "أحداث الأمان والنظام الأخيرة لـ {name}.",
+    "empty": "لا توجد أحداث مسجلة لهذه القناة بعد.",
+    "errors": {
+      "loadChannelDescription": "قد تكون القناة غير موجودة أو تحتاج جلستك إلى التحديث.",
+      "loadChannelTitle": "تعذر تحميل هذه القناة",
+      "loadEventsFailed": "تعذر تحميل سجل الأحداث. يرجى المحاولة مرة أخرى.",
+      "unavailableDescription": "تحتاج إلى صلاحية إدارة الأعضاء لعرض أحداث التدقيق لهذه القناة.",
+      "unavailableTitle": "سجل الأحداث غير متاح",
+      "verifyFailed": "تعذر التحقق من سلامة التدقيق. يرجى المحاولة مرة أخرى."
+    },
+    "events": {
+      "brokerDeadLettered": {
+        "description": "فشل تسليم RabbitMQ مرات عديدة وانتقل إلى مسار الرسائل الميتة.",
+        "title": "تم نقل التسليم إلى الرسائل الميتة"
+      },
+      "brokerRetry": {
+        "description": "فشل تسليم RabbitMQ مؤقتا. قام العامل بجدولة محاولة أخرى.",
+        "title": "تمت جدولة إعادة محاولة الوسيط"
+      },
+      "channelCreated": {
+        "description": "أنشأ",
+        "title": "تم إنشاء القناة"
+      },
+      "channelDeleted": {
+        "description": "حذف",
+        "title": "تم حذف القناة"
+      },
+      "channelUpdated": {
+        "description": "غيّر إعدادات القناة لـ",
+        "title": "تم تحديث إعدادات القناة"
+      },
+      "default": {
+        "description": "تم تسجيل حدث تدقيق لـ"
+      },
+      "decryptionFailed": {
+        "description": "تعذر فك تشفير رسالة مخزنة للتسليم.",
+        "title": "فشل فك تشفير الرسالة"
+      },
+      "encryptionFailed": {
+        "after": "تعذر تشفيرها قبل التخزين.",
+        "before": "رسالة من",
+        "title": "فشل تشفير الرسالة"
+      },
+      "inviteAccepted": {
+        "description": "قبل دعوة قناة",
+        "title": "تم قبول الدعوة"
+      },
+      "inviteCreated": {
+        "description": "أنشأ دعوة قناة",
+        "title": "تم إنشاء الدعوة"
+      },
+      "inviteRevoked": {
+        "description": "ألغى دعوة قناة",
+        "title": "تم إلغاء الدعوة"
+      },
+      "manualRetry": {
+        "description": "طلب من العامل إعادة محاولة مهمة تسليم فاشلة.",
+        "title": "تم طلب إعادة محاولة يدوية"
+      },
+      "memberAdded": {
+        "description": "أضاف",
+        "title": "تمت إضافة عضو"
+      },
+      "memberDemoted": {
+        "description": "أعاد إلى دور عضو:",
+        "title": "تم خفض العضو"
+      },
+      "memberJoined": {
+        "as": "بدور",
+        "joined": "انضم إلى",
+        "title": "انضم عضو"
+      },
+      "memberLeft": {
+        "description": "غادر",
+        "title": "غادر عضو"
+      },
+      "memberPromoted": {
+        "description": "رقّى إلى مشرف:",
+        "title": "تمت ترقية عضو"
+      },
+      "memberRemoved": {
+        "description": "أزال من القناة:",
+        "title": "تمت إزالة عضو"
+      },
+      "messagePublished": {
+        "description": "نشر",
+        "title": "تم نشر رسالة"
+      },
+      "permissionsUpdated": {
+        "description": "حدّث الصلاحيات لـ",
+        "title": "تم تحديث صلاحيات المشرف"
+      },
+      "publishBlocked": {
+        "description": "حاول النشر دون صلاحية.",
+        "title": "تم منع النشر"
+      },
+      "readBlocked": {
+        "description": "حاول قراءة بيانات القناة دون صلاحية.",
+        "title": "تم منع القراءة"
+      },
+      "requestApproved": {
+        "description": "وافق على",
+        "title": "تمت الموافقة على طلب الانضمام"
+      },
+      "slugAdjusted": {
+        "description": "كان معرف القناة المطلوب مستخدما، لذلك تم تعيين بديل آمن.",
+        "title": "تم تعديل معرف القناة"
+      }
+    },
+    "fields": {
+      "actor": "الفاعل",
+      "adminPermissions": "صلاحيات المشرف",
+      "attempts": "المحاولات",
+      "avatar": "الصورة",
+      "brokerRoute": "مسار الوسيط",
+      "channel": "القناة",
+      "channelSlug": "معرف القناة",
+      "clientRetryToken": "رمز إعادة محاولة العميل",
+      "contentType": "نوع المحتوى",
+      "deleted": "محذوف",
+      "deliveryJob": "مهمة التسليم",
+      "edited": "معدّل",
+      "fileName": "اسم الملف",
+      "fileSize": "حجم الملف",
+      "invite": "الدعوة",
+      "joinMode": "طريقة الانضمام",
+      "lastError": "آخر خطأ",
+      "maxAttempts": "أقصى المحاولات",
+      "message": "الرسالة",
+      "messageData": "بيانات الرسالة",
+      "messageNumber": "رقم الرسالة",
+      "messageText": "نص الرسالة",
+      "newRole": "الدور الجديد",
+      "pinned": "مثبت",
+      "previousAttempts": "المحاولات السابقة",
+      "previousStatus": "الحالة السابقة",
+      "replyTo": "رد على",
+      "retryDelay": "تأخير إعادة المحاولة",
+      "sender": "المرسل",
+      "senderDisplayName": "اسم عرض المرسل",
+      "senderUsername": "اسم مستخدم المرسل",
+      "targetMember": "العضو الهدف",
+      "updated": "محدث",
+      "upload": "رفع",
+      "user": "المستخدم"
+    },
+    "integrity": {
+      "badge": "سلامة التدقيق: {status}",
+      "broken": "مكسورة",
+      "checkFailed": "فشل التحقق",
+      "checkedEvents": "الأحداث المفحوصة",
+      "checking": "جار التحقق...",
+      "damagedEntry": "تم العثور على إدخال تدقيق تالف في هذه القناة.",
+      "failed": "فشل فحص السلامة",
+      "lastHash": "آخر بصمة",
+      "notChecked": "لم يتم التحقق",
+      "notInitialized": "غير مهيأة",
+      "scope": "النطاق",
+      "status": "الحالة",
+      "verified": "موثقة"
+    },
+    "latestEvents": "عرض آخر {count} حدثا خاصا بالقناة.",
+    "moreAvailable": "تتوفر أحداث إضافية عبر الواجهة البرمجية.",
+    "references": {
+      "attachments": "{count, plural, one {مرفق واحد} other {# مرفقات}}",
+      "bySender": "بواسطة {sender}",
+      "channelBrokerRoute": "مسار وسيط {name}",
+      "clientRetryToken": "رمز إعادة محاولة العميل",
+      "deadLetterBrokerRoute": "مسار الرسائل الميتة في الوسيط",
+      "deletedMessage": "رسالة محذوفة",
+      "deliveryJob": "مهمة تسليم",
+      "emptyMessage": "رسالة فارغة",
+      "internalReference": "مرجع داخلي",
+      "inviteLink": "رابط دعوة",
+      "jsonMessage": "رسالة JSON",
+      "loadingMessage": "جار تحميل الرسالة",
+      "loadingUser": "جار تحميل المستخدم",
+      "message": "رسالة",
+      "messageNumber": "رسالة #{seq}",
+      "system": "النظام",
+      "typedMessage": "رسالة {type}",
+      "unknownActor": "فاعل غير معروف",
+      "unknownMember": "عضو غير معروف",
+      "unknownUser": "مستخدم غير معروف",
+      "uploadFile": "ملف مرفوع",
+      "userDeliveryRoute": "مسار تسليم المستخدم",
+      "userUnavailable": "المستخدم غير متاح"
+    },
+    "structuredDetails": "التفاصيل المنظمة",
+    "title": "سجل الأحداث",
+    "values": {
+      "encryptedJsonContent": "محتوى رسالة JSON مشفر",
+      "noAdditionalDetails": "لم يتم تسجيل تفاصيل إضافية لهذا الحدث.",
+      "noDetails": "لا توجد تفاصيل",
+      "none": "لا شيء",
+      "notSet": "غير معين",
+      "privateUploadLink": "رابط رفع خاص",
+      "seconds": "{count, plural, one {ثانية واحدة} other {# ثوان}}",
+      "storedMessageText": "نص الرسالة المخزن"
+    }
+  },
+  "superadmin": {
+    "eyebrow": "إدارة المنصة",
+    "title": "لوحة المشرف العام",
+    "description": "راجع جميع أحداث التدقيق وأدر الحسابات والقنوات وعمليات التسليم على مستوى المنصة.",
+    "forbidden": "تتطلب هذه الصفحة حساب مشرف عام.",
+    "tabs": { "events": "جميع أحداث التدقيق", "users": "المستخدمون", "channels": "القنوات" },
+    "stats": {
+      "users": "كل المستخدمين", "activeUsers": "المستخدمون النشطون", "channels": "القنوات النشطة",
+      "messages": "الرسائل", "events": "أحداث التدقيق", "deliveryFailures": "إخفاقات التسليم"
+    },
+    "actions": { "refresh": "تحديث", "delivery": "مراقبة التسليم", "failed": "فشل الإجراء", "tryAgain": "يرجى المحاولة مجدداً.", "completed": "تم تنفيذ الإجراء" },
+    "filters": { "allStatuses": "كل الحالات", "allVisibility": "كل مستويات الظهور" },
+    "pagination": {
+      "previous": "السابق", "next": "التالي", "rowsPerPage": "صفوف الصفحة",
+      "range": "{first}–{last} من {total}", "page": "الصفحة {page} من {pages}"
+    },
+    "events": {
+      "searchPlaceholder": "ابحث بالحدث أو المنفذ أو القناة...", "total": "{count} حدث", "type": "نوع الحدث",
+      "actor": "المنفذ", "channel": "القناة", "time": "الوقت", "details": "النشاط", "system": "النظام", "notChannelScoped": "غير مرتبط بقناة",
+      "category": "فئة الحدث", "empty": "لا توجد أحداث تدقيق مطابقة لهذه المرشحات.",
+      "categories": {
+        "all": "كل الفئات", "security": "الأمان", "channels": "القنوات", "messages": "الرسائل",
+        "memberships": "العضويات", "uploads": "الملفات", "delivery": "التسليم", "administration": "الإدارة", "system": "النظام"
+      }
+    },
+    "users": {
+      "searchPlaceholder": "ابحث باسم المستخدم أو البريد أو الاسم...", "total": "{count} مستخدم", "user": "المستخدم",
+      "status": "الحالة", "sessions": "الجلسات النشطة", "created": "تاريخ الإنشاء", "actions": "الإجراءات",
+      "superadmin": "مشرف عام", "active": "نشط", "inactive": "معطل", "revokeSessions": "إلغاء الجلسات",
+      "deactivate": "تعطيل", "reactivate": "إعادة تفعيل", "empty": "لا يوجد مستخدمون مطابقون لهذه المرشحات."
+    },
+    "channels": {
+      "searchPlaceholder": "ابحث عن قناة أو مالك...", "total": "{count} قناة", "channel": "القناة",
+      "owner": "المالك", "members": "الأعضاء", "messages": "الرسائل", "status": "الحالة", "actions": "الإجراءات",
+      "active": "نشطة", "suspended": "معلقة", "suspend": "تعليق", "restore": "استعادة",
+      "visibility": "الظهور", "public": "عامة", "private": "خاصة", "empty": "لا توجد قنوات مطابقة لهذه المرشحات."
+    },
+    "confirm": {
+      "cancel": "إلغاء", "confirm": "تأكيد الإجراء",
+      "deactivate": { "title": "تعطيل المستخدم؟", "description": "سيتم حظر {target} وإلغاء جلساته. سيُسجل هذا الإجراء في سجل التدقيق." },
+      "reactivate": { "title": "إعادة تفعيل المستخدم؟", "description": "سيُستعاد وصول {target} لتسجيل الدخول." },
+      "revokeSessions": { "title": "إلغاء جميع الجلسات؟", "description": "سيتم إلغاء جميع جلسات {target}. سيُسجل هذا الإجراء في سجل التدقيق." },
+      "suspend": { "title": "تعليق القناة؟", "description": "ستصبح {target} غير متاحة حتى يستعيدها مشرف عام. سيُسجل هذا الإجراء." },
+      "restore": { "title": "استعادة القناة؟", "description": "ستصبح {target} نشطة وستُستعاد روابط المشتركين." }
+    },
+    "eventDisplay": {
+      "yes": "نعم", "no": "لا", "bytes": "{count} بايت", "noSensitiveDetails": "لا توجد تفاصيل إضافية غير حساسة.",
+      "titles": {
+        "channelCreated": "إنشاء قناة", "channelUpdated": "تحديث إعدادات القناة", "channelDeleted": "تعليق قناة", "channelSlugResolved": "تعديل معرّف القناة", "channelRestored": "استعادة قناة",
+        "messagePublished": "نشر رسالة", "messageEncryptionFailed": "فشل تشفير رسالة", "messageDecryptionFailed": "فشل فك تشفير رسالة",
+        "membershipJoined": "انضمام عضو", "membershipApproved": "قبول عضوية", "membershipAdded": "إضافة عضو", "membershipLeft": "مغادرة عضو",
+        "memberPromoted": "ترقية عضو", "memberDemoted": "خفض رتبة عضو", "memberRemoved": "إزالة عضو", "memberPermissionsUpdated": "تحديث صلاحيات عضو",
+        "inviteCreated": "إنشاء دعوة", "inviteRevoked": "إلغاء دعوة", "inviteAccepted": "قبول دعوة",
+        "uploadCreated": "تسجيل ملف", "uploadStored": "تخزين ملف", "uploadAccessed": "الوصول إلى ملف", "uploadStoreFailed": "فشل تخزين ملف",
+        "loginFailed": "فشل محاولة تسجيل الدخول", "unauthorizedPublish": "منع نشر غير مصرح", "unauthorizedRead": "منع قراءة غير مصرح بها", "unauthorizedUploadAccess": "منع وصول غير مصرح إلى ملف", "superadminAccessDenied": "رفض وصول المشرف العام",
+        "deliveryRetryScheduled": "جدولة إعادة محاولة التسليم", "deliveryDeadLettered": "نقل التسليم إلى الرسائل الميتة", "deliveryManualRetry": "طلب إعادة محاولة يدوية",
+        "superadminBootstrapped": "تهيئة حساب المشرف العام", "userDeactivated": "تعطيل مستخدم", "userReactivated": "إعادة تفعيل مستخدم", "userSessionsRevoked": "إلغاء جلسات مستخدم"
+      },
+      "fields": {
+        "name": "الاسم", "target_username": "المستخدم", "username": "المستخدم", "identity": "الهوية", "role": "الدور", "visibility": "الظهور", "join_mode": "سياسة الانضمام", "channel_slug": "معرّف القناة",
+        "seq_id": "التسلسل", "content_type": "المحتوى", "attachment_count": "المرفقات", "filename": "الملف", "size_bytes": "الحجم", "expected_size_bytes": "الحجم المتوقع", "actual_size_bytes": "الحجم المستلم", "has_checksum": "تتوفر بصمة تحقق", "reason": "السبب",
+        "previous_status": "الحالة السابقة", "previous_attempt_count": "المحاولات السابقة", "attempt_count": "المحاولة", "max_attempts": "حد المحاولات", "retry_in_seconds": "مهلة الإعادة (ثانية)", "revoked_sessions": "الجلسات الملغاة", "manual_retry": "إعادة محاولة يدوية", "superadmin_override": "إجراء المشرف العام", "permissions": "الصلاحيات",
+        "resolved_slug": "المعرّف المعتمد", "requested_slug": "المعرّف المطلوب", "message_id": "مرجع الرسالة", "upload_id": "مرجع الملف", "outbox_id": "مرجع التسليم",
+        "target_user_id": "مرجع المستخدم المستهدف", "user_id": "مرجع المستخدم", "invite_id": "مرجع الدعوة", "channel_id": "مرجع القناة"
+      }
+    }
+  },
+  "notFound": {
+    "description": "الصفحة المطلوبة غير موجودة في هذه الواجهة.",
+    "title": "404 الصفحة غير موجودة"
+  }
+}

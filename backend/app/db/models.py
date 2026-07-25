@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import (
     JSON,
     BigInteger,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -18,6 +19,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.core.identifiers import SAFE_IDENTIFIER_PATTERN
 
 
 class Base(DeclarativeBase):
@@ -49,8 +52,11 @@ class ContentType(str, enum.Enum):
 
 class OutboxStatus(str, enum.Enum):
     pending = "pending"
-    sent = "sent"
+    publishing = "publishing"
+    published = "published"
+    retry_scheduled = "retry_scheduled"
     failed = "failed"
+    dead_lettered = "dead_lettered"
 
 
 class User(Base):
@@ -62,10 +68,19 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    wallpaper_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_superadmin: Mapped[bool] = mapped_column(default=False, server_default="false", nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true", nullable=False, index=True)
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deactivated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(f"username ~ '{SAFE_IDENTIFIER_PATTERN}'", name="ck_users_username_safe_identifier"),
     )
 
 
@@ -89,6 +104,7 @@ class Channel(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(Text)
+    channel_slug: Mapped[str] = mapped_column(String(64), unique=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     visibility: Mapped[ChannelVisibility] = mapped_column(Enum(ChannelVisibility, name="channel_visibility"), nullable=False)
@@ -99,6 +115,10 @@ class Channel(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seq_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+
+    __table_args__ = (
+        CheckConstraint(f"channel_slug ~ '{SAFE_IDENTIFIER_PATTERN}'", name="ck_channels_slug_safe_identifier"),
+    )
 
 
 class ChannelCounter(Base):
@@ -120,6 +140,7 @@ class ChannelMembership(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     role: Mapped[MembershipRole] = mapped_column(Enum(MembershipRole, name="membership_role"), nullable=False)
+    admin_permissions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -258,10 +279,17 @@ class Event(Base):
     event_type: Mapped[str] = mapped_column(String(128), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    previous_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    event_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    hash_algorithm: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    integrity_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    integrity_scope: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     __table_args__ = (
         Index("ix_events_channel_created", "channel_id", "created_at"),
         Index("ix_events_actor_created", "actor_user_id", "created_at"),
+        Index("ix_events_integrity_scope_created", "integrity_scope", "created_at", "id"),
+        Index("ix_events_event_hash", "event_hash"),
     )
 
 
@@ -279,13 +307,19 @@ class Outbox(Base):
         Enum(OutboxStatus, name="outbox_status"), nullable=False, default=OutboxStatus.pending, server_default="pending"
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_outbox_status_next_retry", "status", "next_retry_at"),
         Index("ix_outbox_published_at", "published_at"),
+        Index("ix_outbox_dead_lettered_at", "dead_lettered_at"),
     )

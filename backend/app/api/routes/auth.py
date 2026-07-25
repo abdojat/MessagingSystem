@@ -16,6 +16,7 @@ from app.schemas.auth import (
     TokenPair,
 )
 from app.services.auth_service import AuthService
+from app.services.event_service import log_event
 from app.services.rate_limit_service import RateLimitService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -63,6 +64,18 @@ async def login(req: LoginRequest, db: DBDep, request: Request, redis: RedisDep)
             refresh_ttl_days=settings.jwt_refresh_ttl_days,
         )
     except AppError as exc:
+        if exc.code == "AUTH_INVALID":
+            await log_event(
+                db,
+                "security.login_failed",
+                {
+                    "identity": req.username_or_email.strip().lower(),
+                    "ip": ip,
+                },
+                channel_id=None,
+                actor_user_id=None,
+            )
+            await db.commit()
         raise to_http_exception(exc) from exc
 
 

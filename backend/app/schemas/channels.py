@@ -2,36 +2,57 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from app.core.identifiers import normalize_avatar_url, validate_channel_slug as validate_channel_slug_value
 from app.db.models import ChannelJoinMode, ChannelVisibility, MembershipRole
 from app.schemas.messages import MessageResponse
 
 
 class ChannelCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    channel_slug: str | None = Field(default=None, min_length=1, max_length=50)
     description: str | None = Field(default=None, max_length=1000)
     avatar_url: str | None = Field(default=None, max_length=2048)
     visibility: ChannelVisibility
     join_mode: ChannelJoinMode
 
+    @field_validator("channel_slug")
+    @classmethod
+    def validate_channel_slug(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_channel_slug_value(value)
+
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url(cls, value: str | None) -> str | None:
+        return normalize_avatar_url(value)
+
 
 class ChannelPatchRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    channel_slug: str | None = Field(default=None, min_length=1, max_length=50)
     description: str | None = Field(default=None, max_length=1000)
     avatar_url: str | None = Field(default=None, max_length=2048)
     visibility: ChannelVisibility | None = None
     join_mode: ChannelJoinMode | None = None
 
+    @field_validator("channel_slug")
+    @classmethod
+    def validate_channel_slug(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_channel_slug_value(value)
+
+    @field_validator("avatar_url")
+    @classmethod
+    def validate_avatar_url(cls, value: str | None) -> str | None:
+        return normalize_avatar_url(value)
+
     @model_validator(mode="after")
     def validate_non_empty(self) -> "ChannelPatchRequest":
-        if (
-            self.name is None
-            and self.description is None
-            and self.avatar_url is None
-            and self.visibility is None
-            and self.join_mode is None
-        ):
+        if len(self.model_fields_set) == 0:
             raise ValueError("provide at least one field to update")
         return self
 
@@ -45,10 +66,19 @@ class ChannelPermissions(BaseModel):
     can_delete_channel: bool
 
 
+class AdminPermissions(BaseModel):
+    can_publish: bool
+    can_invite: bool
+    can_approve: bool
+    can_manage_members: bool
+    can_edit_channel: bool
+
+
 class ChannelBasePayload(BaseModel):
     id: UUID
     owner_user_id: UUID
     name: str
+    channel_slug: str
     description: str | None = None
     avatar_url: str | None = None
     visibility: ChannelVisibility
@@ -170,12 +200,36 @@ class InvitePreviewResponse(BaseModel):
 class ChannelMembershipItem(BaseModel):
     user_id: UUID
     username: str
+    display_name: str | None = None
+    avatar_url: str | None = None
     email: EmailStr | None
     role: MembershipRole
     created_at: datetime
     approved_at: datetime | None
     updated_at: datetime | None = None
     invited_by_user_id: UUID | None = None
+    admin_permissions: AdminPermissions | None = None
+
+
+class AdminPermissionsUpdateRequest(BaseModel):
+    can_publish: bool | None = None
+    can_invite: bool | None = None
+    can_approve: bool | None = None
+    can_manage_members: bool | None = None
+    can_edit_channel: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty(self) -> "AdminPermissionsUpdateRequest":
+        if len(self.model_fields_set) == 0:
+            raise ValueError("provide at least one permission field")
+        return self
+
+
+class AdminPermissionsUpdateResponse(BaseModel):
+    channel_id: UUID
+    user_id: UUID
+    role: MembershipRole
+    admin_permissions: AdminPermissions
 
 
 class ChannelMembershipListResponse(BaseModel):

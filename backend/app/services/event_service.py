@@ -3,7 +3,9 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.utils import utcnow
 from app.db.models import Event
+from app.services.event_integrity_service import EventIntegrityService
 
 
 async def log_event(
@@ -13,12 +15,17 @@ async def log_event(
     channel_id: UUID | None = None,
     actor_user_id: UUID | None = None,
 ) -> Event:
+    scope = EventIntegrityService.scope_for_event(channel_id)
+    await EventIntegrityService.lock_scope(db, scope)
     event = Event(
         channel_id=channel_id,
         actor_user_id=actor_user_id,
         event_type=event_type,
         payload=payload,
+        created_at=utcnow(),
     )
     db.add(event)
+    await db.flush()
+    await EventIntegrityService.attach_integrity(db, event, scope)
     await db.flush()
     return event

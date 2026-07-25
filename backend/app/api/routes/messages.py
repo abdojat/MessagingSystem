@@ -1,14 +1,12 @@
 from uuid import UUID
 
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
 from app.api.deps import CurrentUserDep, DBDep, RedisDep
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
-from app.db.models import Upload
+from app.db.models import Upload, User
 from app.schemas.messages import (
     MessageAroundResponse,
     MessageListResponse,
@@ -27,20 +25,34 @@ from app.schemas.messages import (
 )
 from app.services.message_service import MessageService
 from app.services.rate_limit_service import RateLimitService
+from app.services.event_service import log_event
 
 router = APIRouter(tags=["messages"])
 
 
-def _to_message_response(message) -> MessageResponse:
+def _to_message_response(
+    message,
+    *,
+    sender_username: str | None = None,
+    sender_display_name: str | None = None,
+    sender_avatar_url: str | None = None,
+) -> MessageResponse:
     is_deleted = message.deleted_at is not None
+    content_text = None
+    content_json = None
+    if not is_deleted:
+        content_text, content_json = MessageService._decrypt_message_content(message)
     return MessageResponse(
         id=message.id,
         channel_id=message.channel_id,
         sender_user_id=message.sender_user_id,
+        sender_username=sender_username,
+        sender_display_name=sender_display_name,
+        sender_avatar_url=sender_avatar_url,
         seq_id=message.seq_id,
         content_type=message.content_type.value,
-        content_text=None if is_deleted else message.content_text,
-        content_json=None if is_deleted else message.content_json,
+        content_text=content_text,
+        content_json=content_json,
         reply_to_message_id=message.reply_to_message_id,
         reply_to_seq_id=message.reply_to_seq_id,
         attachments=None if is_deleted else message.attachments,
@@ -54,8 +66,37 @@ def _to_message_response(message) -> MessageResponse:
     )
 
 
-async def _to_message_response_with_reactions(db: DBDep, user_id: UUID, message) -> MessageResponse:
-    response = _to_message_response(message)
+async def _to_message_response_with_reactions(
+    db: DBDep,
+    user_id: UUID,
+    message,
+    sender_cache: dict[UUID, User | None] | None = None,
+) -> MessageResponse:
+    sender: User | None
+    if sender_cache is not None and message.sender_user_id in sender_cache:
+        sender = sender_cache[message.sender_user_id]
+    else:
+        sender = await db.get(User, message.sender_user_id)
+        if sender_cache is not None:
+            sender_cache[message.sender_user_id] = sender
+
+    try:
+        response = _to_message_response(
+            message,
+            sender_username=sender.username if sender else None,
+            sender_display_name=sender.display_name if sender else None,
+            sender_avatar_url=sender.avatar_url if sender else None,
+        )
+    except AppError:
+        await log_event(
+            db,
+            "message.decryption_failed",
+            {"channel_id": str(message.channel_id), "message_id": str(message.id)},
+            channel_id=message.channel_id,
+            actor_user_id=user_id,
+        )
+        await db.commit()
+        raise
     response.reactions_summary = await MessageService._reaction_summary(db, message.id, user_id)
     return response
 
@@ -147,8 +188,9 @@ async def list_messages(
         )
     except AppError as exc:
         raise to_http_exception(exc) from exc
+    sender_cache: dict[UUID, User | None] = {}
     return MessageListResponse(
-        items=[await _to_message_response_with_reactions(db, user.id, m) for m in messages],
+        items=[await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in messages],
         next_before_seq_id=next_before,
         next_after_seq_id=next_after,
         has_more=has_more,
@@ -178,9 +220,10 @@ async def list_messages_around(
         items = await MessageService.messages_around(db, channel_id, user.id, seq_id, limit_before, limit_after)
     except AppError as exc:
         raise to_http_exception(exc) from exc
+    sender_cache: dict[UUID, User | None] = {}
     return MessageAroundResponse(
         seq_id=seq_id,
-        items=[await _to_message_response_with_reactions(db, user.id, m) for m in items],
+        items=[await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in items],
     )
 
 
@@ -295,7 +338,8 @@ async def list_pins(
         messages = await MessageService.list_pins(db, channel_id, user.id, limit)
     except AppError as exc:
         raise to_http_exception(exc) from exc
-    items = [await _to_message_response_with_reactions(db, user.id, m) for m in messages]
+    sender_cache: dict[UUID, User | None] = {}
+    items = [await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in messages]
     return PinListResponse(items=items)
 
 
@@ -327,12 +371,32 @@ async def put_upload_content(file_id: UUID, request: Request, db: DBDep, user: C
 @router.get("/uploads/{file_id}/content")
 async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> Response:
     upload = await db.get(Upload, file_id)
-    if not upload or not await MessageService.can_access_upload(db, user.id, file_id):
+    if not upload:
         raise to_http_exception(AppError("upload not found", 404, code="NOT_FOUND"))
+    if not await MessageService.can_access_upload(db, user.id, file_id):
+        await log_event(
+            db,
+            "security.unauthorized_upload_access",
+            {"upload_id": str(file_id)},
+            actor_user_id=user.id,
+        )
+        await db.commit()
+        raise to_http_exception(AppError("forbidden", 403, code="FORBIDDEN"))
     settings = get_settings()
-    path = Path(settings.uploads_base_dir) / upload.storage_path
+    path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
     if not path.exists():
         raise to_http_exception(AppError("upload content not found", 404, code="NOT_FOUND"))
+    await MessageService._safe_log_event(
+        db,
+        "upload.accessed",
+        {
+            "upload_id": str(file_id),
+            "content_type": upload.content_type,
+            "size_bytes": int(upload.size_bytes),
+        },
+        actor_user_id=user.id,
+        commit=True,
+    )
     return Response(content=path.read_bytes(), media_type=upload.content_type)
 
 
@@ -358,9 +422,10 @@ async def sync(req: SyncRequest, db: DBDep, user: CurrentUserDep) -> SyncRespons
         payload = await MessageService.sync(db, user.id, req)
     except AppError as exc:
         raise to_http_exception(exc) from exc
+    sender_cache: dict[UUID, User | None] = {}
     return SyncResponse(
         server_time=payload["server_time"],
         channel_updates=payload["channel_updates"],
         membership_updates=payload["membership_updates"],
-        messages=[await _to_message_response_with_reactions(db, user.id, m) for m in payload["messages"]],
+        messages=[await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in payload["messages"]],
     )

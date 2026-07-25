@@ -80,7 +80,13 @@ async def patch_channel(channel_id: UUID, req: ChannelPatchRequest, db: DBDep, u
         membership = await ChannelService.get_membership(db, channel_id, user.id)
     except AppError as exc:
         raise to_http_exception(exc) from exc
-    return ChannelResponse.model_validate(ChannelService.build_channel_payload(channel, membership.role if membership else None))
+    return ChannelResponse.model_validate(
+        ChannelService.build_channel_payload(
+            channel,
+            membership.role if membership else None,
+            membership.admin_permissions if membership else None,
+        )
+    )
 
 
 @router.delete("/{channel_id}")

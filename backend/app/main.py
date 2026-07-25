@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 
-from app.api.routes import auth, channels, events, health, memberships, messages, users
+from app.api.routes import admin, auth, channels, delivery, events, health, memberships, messages, users
 from app.core.config import get_settings
 from app.core.errors import AppError, default_error_code
 from app.core.logging import configure_logging
@@ -62,9 +62,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for route_module in (auth, users, channels, memberships, messages, events, health):
+for route_module in (auth, users, channels, memberships, messages, events, delivery, admin, health):
     app.include_router(route_module.router, prefix=settings.api_v1_prefix)
-for route_module in (auth, users, channels, memberships, messages, events, health):
+for route_module in (auth, users, channels, memberships, messages, events, delivery, admin, health):
     app.include_router(route_module.router, include_in_schema=False)
 
 
@@ -157,10 +157,10 @@ async def _run_websocket_with_token(websocket: WebSocket, token: str, pre_accept
             return
 
     manager: WSManager = app.state.ws_manager
-    await manager.connect(websocket, user.id, pre_accepted=pre_accepted)
+    await manager.connect(websocket, user.id, user.username, pre_accepted=pre_accepted)
     try:
-        await manager.run_socket(websocket, user.id)
+        await manager.run_socket(websocket, user.id, user.username)
     except WebSocketDisconnect:
         pass
     finally:
-        await manager.disconnect(websocket, user.id)
+        await manager.disconnect(websocket, user.username)

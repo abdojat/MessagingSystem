@@ -45,3 +45,28 @@ DBDep = Annotated[AsyncSession, Depends(get_db)]
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
 RedisDep = Annotated[Redis, Depends(get_redis)]
 AMQPDep = Annotated[aio_pika.RobustConnection, Depends(get_amqp)]
+
+
+async def get_current_superadmin(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if user.is_superadmin:
+        return user
+
+    from app.services.event_service import log_event
+
+    await log_event(
+        db,
+        "security.superadmin_access_denied",
+        {"actor_user_id": str(user.id)},
+        actor_user_id=user.id,
+    )
+    await db.commit()
+    raise HTTPException(
+        status_code=403,
+        detail={"code": "SUPERADMIN_REQUIRED", "message": "superadmin access required", "details": None},
+    )
+
+
+SuperadminDep = Annotated[User, Depends(get_current_superadmin)]

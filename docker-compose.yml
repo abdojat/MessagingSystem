@@ -46,6 +46,8 @@ services:
       - .env
     ports:
       - "8000:8000"
+    volumes:
+      - uploads_data:/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -62,6 +64,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    develop:
+      watch:
+        - path: ./backend
+          action: rebuild
 
   worker:
     build:
@@ -78,7 +84,30 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
+    develop:
+      watch:
+        - path: ./worker
+          action: rebuild
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/v1}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000/v1}
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    develop:
+      watch:
+        - path: ./frontend
+          action: rebuild
 
 volumes:
   pg_data:
   rabbit_data:
+  uploads_data:

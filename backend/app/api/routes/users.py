@@ -3,12 +3,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUserDep, DBDep
 from app.core.errors import AppError, to_http_exception
 from app.db.models import User
 from app.schemas.auth import MeResponse
-from app.schemas.users import UserPublicProfile, UserSearchItem, UserSearchResponse
+from app.schemas.users import UpdateMeRequest, UserPublicProfile, UserSearchItem, UserSearchResponse
+from app.services.message_service import MessageService
 
 router = APIRouter(tags=["users"])
 
@@ -21,10 +23,48 @@ async def me(user: CurrentUserDep) -> MeResponse:
         email=user.email,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
+        wallpaper_url=user.wallpaper_url,
         bio=user.bio,
+        is_superadmin=user.is_superadmin,
+        is_active=user.is_active,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
+
+
+@router.patch("/me", response_model=MeResponse)
+async def update_me(req: UpdateMeRequest, db: DBDep, user: CurrentUserDep) -> MeResponse:
+    payload = req.model_dump(exclude_unset=True)
+    if not payload:
+        return await me(user)
+
+    try:
+        if "avatar_url" in payload:
+            await MessageService.validate_avatar_upload_reference(db, user.id, payload["avatar_url"])
+        if "wallpaper_url" in payload:
+            await MessageService.validate_profile_image_upload_reference(
+                db,
+                user.id,
+                payload["wallpaper_url"],
+                label="wallpaper",
+            )
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
+
+    for field, value in payload.items():
+        setattr(user, field, value)
+
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        message = str(getattr(exc, "orig", exc)).lower()
+        if "email" in message and "unique" in message:
+            raise to_http_exception(AppError("email already in use", 409, code="CONFLICT")) from exc
+        raise to_http_exception(AppError("failed to update profile", 400, code="VALIDATION_ERROR")) from exc
+
+    await db.refresh(user)
+    return await me(user)
 
 
 def _encode_cursor(username: str, user_id: UUID) -> str:
