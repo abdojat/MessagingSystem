@@ -172,6 +172,8 @@ class WSManager:
         content_text = None
         content_json = None
         if not is_deleted:
+            # WebSocket payloads are decrypted only after the connection has
+            # passed channel membership checks.
             if m.content_type.value == "text":
                 content_text = decrypt_message(m.content_text) if m.content_text is not None else None
             elif m.content_type.value == "json":
@@ -183,6 +185,8 @@ class WSManager:
         if sender_cache is not None and m.sender_user_id in sender_cache:
             sender = sender_cache[m.sender_user_id]
         else:
+            # Batch syncs reuse sender records so reconnect/backfill responses do
+            # not issue one user lookup per message from the same sender.
             sender = await db.get(User, m.sender_user_id)
             if sender_cache is not None:
                 sender_cache[m.sender_user_id] = sender
@@ -283,6 +287,8 @@ class WSManager:
             return
         async with self._session_factory() as db:
             try:
+                # WebSocket seen events require a sequence marker; message-id
+                # resolution stays on the REST endpoint where richer validation fits.
                 state = await MessageService.mark_seen(
                     db,
                     req.channel_id,

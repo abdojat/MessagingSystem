@@ -19,6 +19,7 @@ class AppError(Exception):
 
 
 def default_error_code(status_code: int) -> str:
+    """Map HTTP status classes to the stable API error codes used by clients."""
     if status_code == 400:
         return "VALIDATION_ERROR"
     if status_code == 401:

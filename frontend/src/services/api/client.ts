@@ -14,16 +14,71 @@ class ApiError extends Error {
   }
 }
 
-let isRefreshing = false;
-let refreshSubscribers: ((token: string) => void)[] = [];
+// A shared refresh promise prevents parallel 401 responses from rotating the
+// same refresh token multiple times.
+let refreshPromise: Promise<string> | null = null;
 
-function onRefreshed(token: string) {
-  refreshSubscribers.forEach((callback) => callback(token));
-  refreshSubscribers = [];
+async function readApiResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch {
+      data = { message: response.statusText };
+    }
+    throw new ApiError(response.status, data);
+  }
+
+  if (response.status === 204) {
+    return {} as T;
+  }
+
+  return response.json() as Promise<T>;
 }
 
-function addRefreshSubscriber(callback: (token: string) => void) {
-  refreshSubscribers.push(callback);
+async function refreshAccessToken(baseUrl: string): Promise<string> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  const refreshToken = localStorage.getItem("chat_refresh_token");
+
+  if (!refreshToken) {
+    useAuthStore.getState().clearAuth();
+    throw new ApiError(401, { message: "Unauthorized" });
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const refreshRes = await fetch(`${baseUrl}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!refreshRes.ok) {
+        throw new Error("Refresh failed");
+      }
+
+      const data = await refreshRes.json();
+      const user = useAuthStore.getState().user;
+      if (!user) {
+        throw new Error("Missing user while refreshing session");
+      }
+
+      // Store both rotated tokens before replaying requests so every caller sees
+      // the same session state.
+      useAuthStore.getState().setAuth(user, data.access_token, data.refresh_token);
+      return data.access_token as string;
+    } catch (_error) {
+      useAuthStore.getState().clearAuth();
+      throw new ApiError(401, { message: "Session expired" });
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }
 
 export async function apiClient<T>(
@@ -44,81 +99,15 @@ export async function apiClient<T>(
   const response = await fetch(url, { ...options, headers });
 
   if (response.status === 401) {
-    const refreshToken = localStorage.getItem("chat_refresh_token");
-
-    if (!refreshToken) {
-      useAuthStore.getState().clearAuth();
-      throw new ApiError(401, { message: "Unauthorized" });
-    }
-
-    if (!isRefreshing) {
-      isRefreshing = true;
-      try {
-        const refreshRes = await fetch(`${baseUrl}/auth/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-
-        if (!refreshRes.ok) {
-          throw new Error("Refresh failed");
-        }
-
-        const data = await refreshRes.json();
-        const user = useAuthStore.getState().user;
-        if (!user) {
-          throw new Error("Missing user while refreshing session");
-        }
-        useAuthStore.getState().setAuth(user, data.access_token, data.refresh_token);
-        isRefreshing = false;
-        onRefreshed(data.access_token);
-      } catch (_error) {
-        isRefreshing = false;
-        useAuthStore.getState().clearAuth();
-        throw new ApiError(401, { message: "Session expired" });
-      }
-    }
-
-    return new Promise((resolve, reject) => {
-      addRefreshSubscriber((newToken) => {
-        const newHeaders = new Headers(headers);
-        newHeaders.set("Authorization", `Bearer ${newToken}`);
-        fetch(url, { ...options, headers: newHeaders })
-          .then(async (res) => {
-            if (!res.ok) {
-              let data: unknown;
-              try {
-                data = await res.json();
-              } catch {
-                data = { message: res.statusText };
-              }
-              throw new ApiError(res.status, data);
-            }
-            if (res.status === 204) {
-              return {} as T;
-            }
-            return res.json() as Promise<T>;
-          })
-          .then(resolve)
-          .catch(reject);
-      });
-    });
+    // A 401 usually means the short-lived access token expired. Refresh once,
+    // then replay only this request with the new bearer token.
+    const newToken = await refreshAccessToken(baseUrl);
+    const retryHeaders = new Headers(headers);
+    retryHeaders.set("Authorization", `Bearer ${newToken}`);
+    const retryResponse = await fetch(url, { ...options, headers: retryHeaders });
+    return readApiResponse<T>(retryResponse);
   }
 
-  if (!response.ok) {
-    let data: unknown;
-    try {
-      data = await response.json();
-    } catch {
-      data = { message: response.statusText };
-    }
-    throw new ApiError(response.status, data);
-  }
-
-  if (response.status === 204) {
-    return {} as T;
-  }
-
-  return response.json() as Promise<T>;
+  return readApiResponse<T>(response);
 }
 

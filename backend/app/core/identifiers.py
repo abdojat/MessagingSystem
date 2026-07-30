@@ -94,6 +94,8 @@ def normalize_profile_image_url(value: str | None, *, field_name: str = "image_u
 
     parsed = urlsplit(normalized)
     if parsed.scheme:
+        # External profile media is limited to normal web URLs; protected upload
+        # references are handled as paths below.
         if parsed.scheme.lower() not in {"http", "https"}:
             raise ValueError(f"{field_name} must use http, https, or a protected upload path")
         if not parsed.netloc:
@@ -103,6 +105,8 @@ def normalize_profile_image_url(value: str | None, *, field_name: str = "image_u
     if parsed.netloc or normalized.startswith("//"):
         raise ValueError(f"{field_name} must not be protocol-relative")
 
+    # Protected upload URLs are path-only so callers cannot smuggle tokens,
+    # query strings, or alternate hosts into stored profile media.
     if parsed.query or parsed.fragment:
         raise ValueError(f"protected upload {field_name} URLs cannot include query strings or fragments")
 

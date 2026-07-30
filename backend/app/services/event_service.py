@@ -16,6 +16,8 @@ async def log_event(
     actor_user_id: UUID | None = None,
 ) -> Event:
     scope = EventIntegrityService.scope_for_event(channel_id)
+    # Integrity metadata is written inside the caller's transaction so the
+    # event row and its hash-chain link commit or roll back together.
     await EventIntegrityService.lock_scope(db, scope)
     event = Event(
         channel_id=channel_id,

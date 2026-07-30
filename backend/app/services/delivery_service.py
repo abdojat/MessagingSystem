@@ -12,6 +12,10 @@ from app.services.rbac import normalize_admin_permissions
 
 
 class DeliveryService:
+    """Provides owner/admin visibility into failed outbox delivery and manual retry."""
+
+    # Manual retry is intentionally limited to rows where the worker has already
+    # failed, scheduled a retry, or moved the item to the dead-letter state.
     MANUAL_RETRY_STATUSES = {
         OutboxStatus.failed,
         OutboxStatus.retry_scheduled,
@@ -27,6 +31,8 @@ class DeliveryService:
         if role == MembershipRole.owner:
             return True
         if role == MembershipRole.admin:
+            # Delivery controls can cause broker republishing, so channel admins
+            # need the same authority used for member-management operations.
             return normalize_admin_permissions(admin_permissions)["can_manage_members"]
         return False
 
@@ -157,6 +163,8 @@ class DeliveryService:
         if outbox.status in DeliveryService.MANUAL_RETRY_STATUSES:
             previous_status = DeliveryService._status_value(outbox.status)
             previous_attempt_count = outbox.attempts
+            # The API only resets outbox state; the worker remains responsible
+            # for publishing so retry behavior stays in one place.
             DeliveryService._reset_for_manual_retry(outbox)
             await log_event(
                 db,
@@ -199,6 +207,8 @@ class DeliveryService:
         for outbox, channel_slug in rows:
             previous_status = DeliveryService._status_value(outbox.status)
             previous_attempt_count = outbox.attempts
+            # Bulk retry follows the same contract as retry_one: hand rows back
+            # to the outbox worker instead of publishing from the admin request.
             DeliveryService._reset_for_manual_retry(outbox)
             await log_event(
                 db,

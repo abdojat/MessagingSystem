@@ -584,6 +584,8 @@ class ChannelService:
 
         amqp_channel = await amqp.channel()
         try:
+            # The database tombstone is committed first, then broker bindings are
+            # removed so active subscribers stop receiving realtime messages.
             rows = await db.execute(
                 select(User.username)
                 .join(ChannelMembership, ChannelMembership.user_id == User.id)
@@ -1061,6 +1063,8 @@ class ChannelService:
         if target.role != MembershipRole.admin:
             raise AppError("target user must be an admin", 400, code="VALIDATION_ERROR")
 
+        # Admin permissions are sparse at the API boundary, so normalize first
+        # and then apply only the fields the owner actually changed.
         current_permissions = normalize_admin_permissions(target.admin_permissions)
         if req.can_publish is not None:
             current_permissions["can_publish"] = req.can_publish
@@ -1183,6 +1187,8 @@ class ChannelService:
         limit: int,
     ) -> tuple[list[tuple[ChannelMembership, User]], str | None, bool]:
         await ChannelService._assert_manage_membership_access(db, channel_id, actor_user_id)
+        # Member pages are ordered by operational importance first, then by a
+        # stable username/id cursor so pagination survives duplicate names.
         role_order = case(
             (ChannelMembership.role == MembershipRole.owner, 0),
             (ChannelMembership.role == MembershipRole.admin, 1),
@@ -1203,6 +1209,8 @@ class ChannelService:
             stmt = stmt.where(or_(User.username.ilike(pattern), User.display_name.ilike(pattern), User.email.ilike(pattern)))
         if cursor:
             cursor_role_weight, cursor_username, cursor_user_id = ChannelService._decode_member_cursor(cursor)
+            # Continue after the last role/name/id tuple returned on the prior
+            # page; this mirrors the ORDER BY exactly.
             stmt = stmt.where(
                 or_(
                     role_order > cursor_role_weight,
@@ -1306,12 +1314,16 @@ class ChannelService:
         invite = row.scalar_one_or_none()
         if not invite:
             raise AppError("invalid invite", 400, code="INVITE_INVALID")
+        # Validate the token lifecycle before checking target identity so stale
+        # or revoked invites fail consistently regardless of who presents them.
         if invite.revoked_at:
             raise AppError("invite revoked", 400, code="INVITE_REVOKED")
         if invite.accepted_at:
             raise AppError("invite already accepted", 409, code="INVITE_ALREADY_ACCEPTED")
         if invite.expires_at < utcnow():
             raise AppError("invite expired", 400, code="INVITE_EXPIRED")
+        # Targeted invites remain bound to the intended account or email; only
+        # generic invites skip these checks.
         if invite.invited_user_id and invite.invited_user_id != user_id:
             raise AppError("invite is not for this user", 403, code="FORBIDDEN")
         if invite.invited_email and invite.invited_email != user.email:
@@ -1411,6 +1423,8 @@ class ChannelService:
     ) -> dict:
         payload = ChannelService.build_channel_payload(channel, role, admin_permissions)
 
+        # Channel payloads carry demo-friendly aggregates next to the base row so
+        # the frontend can render lists without a follow-up request per channel.
         members_result = await db.execute(
             select(func.count(ChannelMembership.user_id)).where(
                 ChannelMembership.channel_id == channel.id,
@@ -1424,6 +1438,8 @@ class ChannelService:
             )
         )
         payload["member_count"] = int(members_result.scalar_one() or 0)
+        # Pending counts are management-only information for private/approval
+        # flows, so non-managers see zero rather than operational queue size.
         payload["pending_count"] = (
             int(pending_result.scalar_one() or 0)
             if ChannelService.build_permissions(role, admin_permissions)["can_manage_members"]
@@ -1483,6 +1499,8 @@ class ChannelService:
     async def get_channel_stats(db: AsyncSession, channel_id: UUID, user_id: UUID) -> dict:
         channel = await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, user_id)
+        # Public stats may be viewed by anyone who can discover the channel, but
+        # private channel stats require membership.
         if channel.visibility == ChannelVisibility.private and membership is None:
             raise AppError("forbidden", 403, code="FORBIDDEN")
         member_count_result = await db.execute(

@@ -86,6 +86,8 @@ class MessageService:
         content_text = None
         content_json = None
         if not is_deleted:
+            # Outbox and REST responses both expose plaintext only after service
+            # authorization has succeeded; deleted messages stay as tombstones.
             content_text, content_json = MessageService._decrypt_message_content(message)
         return {
             "id": str(message.id),
@@ -334,6 +336,8 @@ class MessageService:
         if order not in {"asc", "desc"}:
             raise AppError("order must be asc or desc", 400, code="VALIDATION_ERROR")
 
+        # Message history is paged by per-channel sequence numbers because they
+        # are stable across refreshes and simpler to reason about than timestamps.
         stmt = select(Message).where(Message.channel_id == channel_id)
         stmt = stmt.where(Message.deleted_at.is_(None))
         if before_seq_id is not None:
@@ -350,6 +354,8 @@ class MessageService:
         if not page:
             return page, None, None, has_more
 
+        # Return the next cursor matching the requested direction so clients can
+        # page older and newer history without guessing from item order.
         next_before_seq_id = None
         next_after_seq_id = None
         if order == "desc":
@@ -502,6 +508,8 @@ class MessageService:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         try:
+            # Edits reuse the same encryption path as publishing so stored
+            # message bodies keep one at-rest format.
             encrypted_text, encrypted_json = MessageService._encrypt_payload(req)
         except AppError:
             await MessageService._safe_log_event(
@@ -522,6 +530,8 @@ class MessageService:
             db,
             message.sender_user_id,
         )
+        # Message edits are sent through the outbox like new publications so
+        # realtime subscribers and REST history converge on the same payload.
         await enqueue_message_outbox(
             db,
             message.id,
@@ -554,6 +564,8 @@ class MessageService:
         if message.sender_user_id != actor_user_id and role not in {MembershipRole.owner, MembershipRole.admin}:
             raise AppError("forbidden", 403, code="FORBIDDEN")
         if message.deleted_at is None:
+            # Deletion is a tombstone: content is removed from future reads while
+            # the sequence number and reply relationships stay stable.
             message.deleted_at = utcnow()
             message.updated_at = message.deleted_at
             message.content_text = None
@@ -563,6 +575,8 @@ class MessageService:
                 db,
                 message.sender_user_id,
             )
+            # Subscribers receive the tombstone through the same update path used
+            # for edits, which keeps client cache handling simple.
             await enqueue_message_outbox(
                 db,
                 message.id,
@@ -614,6 +628,8 @@ class MessageService:
         )
         existing_reaction = existing.scalar_one_or_none()
         if existing_reaction is None:
+            # Reactions are idempotent per user/message/emoji; duplicate taps
+            # should return the current summary without creating another row.
             db.add(
                 MessageReaction(
                     channel_id=channel_id,
@@ -625,6 +641,8 @@ class MessageService:
             await db.flush()
         summary = await MessageService._reaction_summary(db, message_id, actor_user_id)
         if existing_reaction is None:
+            # Only a real state change is broadcast, keeping reaction update
+            # traffic quiet for duplicate client retries.
             await enqueue_message_outbox(
                 db,
                 message.id,
@@ -677,6 +695,8 @@ class MessageService:
             raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
         existing = await db.get(PinnedMessage, {"channel_id": channel_id, "message_id": message_id})
         if not existing:
+            # The separate pin row records who pinned it, while the denormalized
+            # message flag keeps list rendering cheap.
             db.add(PinnedMessage(channel_id=channel_id, message_id=message_id, pinned_by_user_id=actor_user_id))
         message.is_pinned = True
         await db.flush()
@@ -710,6 +730,8 @@ class MessageService:
             await db.delete(pin)
         message = await db.get(Message, message_id)
         if message and message.channel_id == channel_id:
+            # Missing message rows are tolerated during unpin so cleanup remains
+            # idempotent, but existing messages still broadcast their new state.
             message.is_pinned = False
             await db.flush()
             sender_username, sender_display_name, sender_avatar_url = await MessageService._load_sender_profile(
@@ -878,6 +900,8 @@ class MessageService:
     ) -> Upload:
         settings = get_settings()
         upload = await db.get(Upload, file_id)
+        # A user may only provide bytes for an upload record they created; later
+        # reads are authorized through ownership or message/channel membership.
         if not upload or upload.owner_user_id != actor_user_id:
             raise AppError("upload not found", 404, code="NOT_FOUND")
         if len(content) != upload.size_bytes:
@@ -895,6 +919,8 @@ class MessageService:
             )
             raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
         if upload.checksum:
+            # Optional checksums let the frontend or verifier prove the stored
+            # bytes are exactly the bytes that were intended at upload creation.
             digest = hashlib.sha256(content).hexdigest()
             if digest != upload.checksum:
                 await MessageService._safe_log_event(
@@ -910,6 +936,8 @@ class MessageService:
                 raise AppError("checksum mismatch", 400, code="VALIDATION_ERROR")
 
         full_path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
+        # The upload path resolver enforces containment; creating parents here is
+        # only for the generated storage layout, not user-controlled directories.
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(content)
         upload.public_url = f"/v1/uploads/{upload.id}/content"

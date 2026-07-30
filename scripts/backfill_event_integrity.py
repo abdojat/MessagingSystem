@@ -65,6 +65,8 @@ def _prepare_local_database_url() -> None:
     )
     if not database_url:
         database_url = "postgresql+asyncpg://postgres:postgres@postgres:5432/channels"
+    # The Docker service name works inside Compose; host runs need localhost
+    # while still respecting any explicit database URL the operator provided.
     os.environ["DATABASE_URL"] = _host_adjusted_database_url(database_url)
 
 
@@ -97,6 +99,8 @@ def _assign_integrity(event: Event, scope: str, previous_hash: str | None, *, dr
     event.integrity_scope = scope
     event_hash = compute_event_hash(event)
     if dry_run:
+        # Dry-run computes the exact hash without leaving mutated ORM fields in
+        # the session, which keeps the final rollback honest and easy to inspect.
         (
             event.previous_hash,
             event.hash_algorithm,
@@ -116,6 +120,8 @@ async def backfill_event_integrity(*, force: bool, dry_run: bool, scope_filter: 
             scope = EventIntegrityService.scope_for_event(event.channel_id)
             if scope_filter and scope != scope_filter:
                 continue
+            # Hash chains are scoped per channel plus one system chain so one
+            # busy channel cannot disturb the integrity history of another.
             groups[scope].append(event)
 
         stats = {
@@ -129,6 +135,8 @@ async def backfill_event_integrity(*, force: bool, dry_run: bool, scope_filter: 
         for scope in sorted(groups.keys()):
             stats["scopes"] += 1
             previous_hash: str | None = None
+            # Use the same scope lock as normal event writes, preventing a live
+            # write from racing a maintenance backfill in PostgreSQL.
             await EventIntegrityService.lock_scope(db, scope)
 
             for event in groups[scope]:
@@ -136,6 +144,8 @@ async def backfill_event_integrity(*, force: bool, dry_run: bool, scope_filter: 
                 has_existing = _has_existing_hash(event)
 
                 if has_existing and not force:
+                    # Existing metadata is kept only when it continues the chain
+                    # exactly; conflicts stop this scope unless --force rebuilds it.
                     is_valid_existing = (
                         event.integrity_scope == scope
                         and event.hash_algorithm == HASH_ALGORITHM
@@ -180,6 +190,8 @@ def main() -> None:
     try:
         stats = asyncio.run(backfill_event_integrity(force=args.force, dry_run=args.dry_run, scope_filter=args.scope))
     except Exception as exc:
+        # Failure output is operator-oriented: mask credentials and show the
+        # Docker commands most likely to work for a supervisor/demo environment.
         print("Event integrity backfill failed.", file=sys.stderr)
         print(f"- error: {type(exc).__name__}: {exc}", file=sys.stderr)
         print(f"- DATABASE_URL used: {_mask_database_url(os.environ.get('DATABASE_URL', ''))}", file=sys.stderr)

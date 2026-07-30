@@ -41,6 +41,8 @@ def _to_message_response(
     content_text = None
     content_json = None
     if not is_deleted:
+        # The route response decrypts only after the service has authorized the
+        # caller and returned a message they may read.
         content_text, content_json = MessageService._decrypt_message_content(message)
     return MessageResponse(
         id=message.id,
@@ -88,6 +90,8 @@ async def _to_message_response_with_reactions(
             sender_avatar_url=sender.avatar_url if sender else None,
         )
     except AppError:
+        # Decryption failures are audit events because they can indicate key
+        # mismatch, corrupt ciphertext, or tampering with stored message fields.
         await log_event(
             db,
             "message.decryption_failed",
@@ -109,6 +113,8 @@ async def publish_message(
     user: CurrentUserDep,
     redis: RedisDep,
 ) -> MessageResponse:
+    # The one-second limit catches accidental client loops; the ten-second
+    # limit caps sustained bursts without making normal typing feel throttled.
     burst_retry = await RateLimitService.hit(
         redis,
         f"rl:msg:{user.id}:{channel_id}:burst",
@@ -170,6 +176,8 @@ async def list_messages(
     limit: int = Query(default=50, ge=1, le=200),
     order: str = Query(default="desc", pattern="^(asc|desc)$"),
 ) -> MessageListResponse:
+    # Keep route adapters tolerant of odd query parsing while the service owns
+    # the actual sequence-window pagination rules.
     if not isinstance(before_seq_id, int):
         before_seq_id = None
     if not isinstance(after_seq_id, int):
@@ -370,6 +378,8 @@ async def put_upload_content(file_id: UUID, request: Request, db: DBDep, user: C
 
 @router.get("/uploads/{file_id}/content")
 async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> Response:
+    # Upload bytes are private by default. Access is inherited from ownership or
+    # from a message/channel that references the upload.
     upload = await db.get(Upload, file_id)
     if not upload:
         raise to_http_exception(AppError("upload not found", 404, code="NOT_FOUND"))
@@ -383,6 +393,8 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
         await db.commit()
         raise to_http_exception(AppError("forbidden", 403, code="FORBIDDEN"))
     settings = get_settings()
+    # The storage path is database-managed, but resolution still enforces that
+    # files stay under the configured uploads directory.
     path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
     if not path.exists():
         raise to_http_exception(AppError("upload content not found", 404, code="NOT_FOUND"))

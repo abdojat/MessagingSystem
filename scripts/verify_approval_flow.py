@@ -260,6 +260,8 @@ async def main_async() -> int:
             hello_event = json.loads(hello_raw)
             if hello_event.get("type") != "hello":
                 raise RuntimeError(f"Unexpected WebSocket hello payload: {hello_raw}")
+            # Keep another live subscription open so the approval test verifies
+            # membership updates on an already-connected socket.
             existing_subscribe_id = await _send_ws(
                 ws,
                 "subscribe",

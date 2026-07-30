@@ -21,6 +21,8 @@ export function resolveApiMediaUrl(url?: string | null): string | undefined {
     return trimmed;
   }
 
+  // Protocol-relative or unknown-scheme values are rejected instead of being
+  // normalized into something the browser might load from an unexpected origin.
   if (/^\/\//.test(trimmed) || hasExplicitScheme(trimmed)) {
     return undefined;
   }
@@ -41,6 +43,8 @@ export function isProtectedApiMediaUrl(url?: string | null): boolean {
     return false;
   }
 
+  // Only the upload-content route requires authenticated media fetching; public
+  // http(s) images can still be passed directly to <img>.
   if (resolvedUrl.startsWith("/")) {
     return PROTECTED_UPLOAD_PATH_PATTERN.test(resolvedUrl);
   }

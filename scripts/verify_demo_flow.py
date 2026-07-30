@@ -185,6 +185,8 @@ async def main_async() -> int:
         plaintext = f"Hello from demo {secrets.token_hex(3)}"
         _step("3) User B opens WebSocket before joining the channel")
         _info("hello timeout=10s, subscribe acknowledgement timeout=10s, live delivery timeout=30s")
+        # Opening the socket before joining proves the join-after-connect
+        # subscription refresh path, not just the initial connection bindings.
         websocket_verified = False
         join_after_connect_verified = False
         live_payload: dict | None = None

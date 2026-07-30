@@ -34,6 +34,8 @@ const AuthenticatedImage = React.forwardRef<HTMLImageElement, AuthenticatedImage
 
       async function loadProtectedImage() {
         try {
+          // Private uploads cannot be used as plain <img src> values because
+          // the browser will not attach the bearer token automatically.
           const response = await fetch(fetchUrl, {
             headers: { Authorization: `Bearer ${accessToken}` },
             signal: controller.signal,
@@ -49,6 +51,8 @@ const AuthenticatedImage = React.forwardRef<HTMLImageElement, AuthenticatedImage
           if (blob.type && !blob.type.toLowerCase().startsWith("image/")) {
             throw new Error("media blob is not an image");
           }
+          // The object URL gives <img> a local, revocable source after the
+          // authenticated fetch has already enforced API authorization.
           localObjectUrl = URL.createObjectURL(blob);
           setObjectUrl(localObjectUrl);
         } catch {
@@ -63,6 +67,8 @@ const AuthenticatedImage = React.forwardRef<HTMLImageElement, AuthenticatedImage
       return () => {
         controller.abort();
         if (localObjectUrl) {
+          // Revoke the fetch-local URL when the source changes to avoid keeping
+          // private blobs alive longer than the component needs them.
           URL.revokeObjectURL(localObjectUrl);
         }
       };

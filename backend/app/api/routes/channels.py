@@ -39,6 +39,8 @@ async def list_channels(
     visibility: str | None = Query(default=None, pattern="^(public|private)$"),
     scope: str = Query(default="my", pattern="^(my|discover)$"),
 ) -> ChannelListResponse:
+    # Normalize optional query values before converting them into service-level
+    # filters; FastAPI handles most cases, but this keeps adapter behavior stable.
     if not isinstance(q, str):
         q = None
     if not isinstance(visibility, str):

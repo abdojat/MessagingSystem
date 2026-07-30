@@ -21,6 +21,8 @@ class PublishMessageRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_content(self) -> "PublishMessageRequest":
+        # Publishing accepts text, JSON, or attachment-only messages; text and
+        # JSON stay mutually exclusive so encryption and rendering remain clear.
         has_text = self.content_text is not None
         has_json = self.content_json is not None
         has_attachments = bool(self.attachments)
@@ -66,6 +68,7 @@ class MessagePatchRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_content(self) -> "MessagePatchRequest":
+        # Edits must replace the body with exactly one concrete content shape.
         has_text = self.content_text is not None
         has_json = self.content_json is not None
         if has_text == has_json:
@@ -150,6 +153,8 @@ class SeenRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_required_marker(self) -> "SeenRequest":
+        # A seen update can be anchored by id or sequence, but not both; this
+        # keeps the service's monotonic marker update unambiguous.
         has_message = self.last_seen_message_id is not None
         has_seq = self.last_seen_seq_id is not None
         if has_message == has_seq:
