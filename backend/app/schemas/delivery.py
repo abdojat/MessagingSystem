@@ -4,7 +4,6 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
-# Defines the delivery stats response API data contract; Pydantic uses it while validating or serializing API data.
 class DeliveryStatsResponse(BaseModel):
     pending: int = 0
     publishing: int = 0
@@ -14,7 +13,6 @@ class DeliveryStatsResponse(BaseModel):
     dead_lettered: int = 0
 
 
-# Defines the delivery item response API data contract; Pydantic uses it while validating or serializing API data.
 class DeliveryItemResponse(BaseModel):
     id: UUID
     channel_id: UUID
@@ -34,12 +32,10 @@ class DeliveryItemResponse(BaseModel):
     dead_lettered_at: datetime | None = None
 
 
-# Defines the delivery list response API data contract; Pydantic uses it while validating or serializing API data.
 class DeliveryListResponse(BaseModel):
     items: list[DeliveryItemResponse]
 
 
-# Defines the delivery retry response API data contract; Pydantic uses it while validating or serializing API data.
 class DeliveryRetryResponse(BaseModel):
     status: str = "ok"
     retried_count: int

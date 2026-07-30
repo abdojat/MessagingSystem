@@ -25,15 +25,12 @@ from app.services.rbac import normalize_admin_permissions
 router = APIRouter(tags=["memberships"])
 
 
-# Joins channel; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/join", response_model=JoinOutcomeResponse)
 async def join_channel(channel_id: UUID, req: JoinRequest, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> JoinOutcomeResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         status, membership, message = await ChannelService.join_channel(db, amqp, channel_id, user.id, req)
         channel_row = await ChannelService.get_channel_or_404(db, channel_id)
         channel = ChannelService.build_channel_payload(channel_row, membership.role if membership else None)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return JoinOutcomeResponse(
@@ -44,19 +41,15 @@ async def join_channel(channel_id: UUID, req: JoinRequest, db: DBDep, user: Curr
     )
 
 
-# Leaves channel; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/leave")
 async def leave_channel(channel_id: UUID, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> dict:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         await ChannelService.leave_channel(db, amqp, channel_id, user.id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return {"status": "ok"}
 
 
-# Lists members; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/channels/{channel_id}/members", response_model=ChannelMembershipListResponse)
 async def list_members(
     channel_id: UUID,
@@ -67,13 +60,10 @@ async def list_members(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> ChannelMembershipListResponse:
-    # Run this conditional step only when `not isinstance(q, str)` is true.
     if not isinstance(q, str):
         q = None
-    # Run this conditional step only when `not isinstance(cursor, str)` is true.
     if not isinstance(cursor, str):
         cursor = None
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         rows, next_cursor, has_more = await ChannelService.list_members(
             db,
@@ -84,7 +74,6 @@ async def list_members(
             cursor,
             limit,
         )
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return ChannelMembershipListResponse(
@@ -109,7 +98,6 @@ async def list_members(
     )
 
 
-# Lists pending requests; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/channels/{channel_id}/requests", response_model=ChannelMembershipListResponse)
 async def list_pending_requests(
     channel_id: UUID,
@@ -119,13 +107,10 @@ async def list_pending_requests(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> ChannelMembershipListResponse:
-    # Run this conditional step only when `not isinstance(q, str)` is true.
     if not isinstance(q, str):
         q = None
-    # Run this conditional step only when `not isinstance(cursor, str)` is true.
     if not isinstance(cursor, str):
         cursor = None
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         rows, next_cursor, has_more = await ChannelService.list_members(
             db=db,
@@ -136,7 +121,6 @@ async def list_pending_requests(
             cursor=cursor,
             limit=limit,
         )
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return ChannelMembershipListResponse(
@@ -161,19 +145,15 @@ async def list_pending_requests(
     )
 
 
-# Creates invite; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/invite", response_model=InviteResponse)
 async def create_invite(channel_id: UUID, req: InviteRequest, db: DBDep, user: CurrentUserDep) -> InviteResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         invite, token = await ChannelService.create_invite(db, channel_id, user.id, req)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return InviteResponse(id=invite.id, token=token, channel_id=invite.channel_id, expires_at=invite.expires_at)
 
 
-# Lists invites; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/channels/{channel_id}/invites", response_model=InviteListResponse)
 async def list_invites(
     channel_id: UUID,
@@ -183,16 +163,12 @@ async def list_invites(
     limit: int = Query(default=50, ge=1, le=200),
     status: str | None = Query(default=None, pattern="^(active|revoked|accepted|expired)$"),
 ) -> InviteListResponse:
-    # Run this conditional step only when `not isinstance(cursor, str)` is true.
     if not isinstance(cursor, str):
         cursor = None
-    # Run this conditional step only when `not isinstance(status, str)` is true.
     if not isinstance(status, str):
         status = None
-    # Run this conditional step only when `not isinstance(limit, int)` is true.
     if not isinstance(limit, int):
         limit = 50
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         invites, next_cursor, has_more = await ChannelService.list_invites(
             db,
@@ -202,7 +178,6 @@ async def list_invites(
             limit=limit,
             status=status,
         )
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return InviteListResponse(
@@ -228,86 +203,66 @@ async def list_invites(
     )
 
 
-# Revokes invite; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/invites/{invite_id}/revoke")
 async def revoke_invite(channel_id: UUID, invite_id: UUID, db: DBDep, user: CurrentUserDep) -> dict:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         await ChannelService.revoke_invite(db, channel_id, invite_id, user.id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return {"status": "ok"}
 
 
-# Previews invite; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/invites/{token}", response_model=InvitePreviewResponse)
 async def preview_invite(token: str, db: DBDep) -> InvitePreviewResponse:
     payload = await ChannelService.get_invite_preview(db, token)
     return InvitePreviewResponse.model_validate(payload)
 
 
-# Accepts an invitation and creates the channel membership; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/invites/{token}/accept", response_model=MembershipActionResponse)
 async def accept_invite(token: str, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> MembershipActionResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         membership = await ChannelService.accept_invite(db, amqp, token, user.id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
-# Approves member; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/members/{user_id}/approve", response_model=MembershipActionResponse)
 async def approve_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> MembershipActionResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         membership = await ChannelService.approve_member(db, amqp, channel_id, user.id, user_id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
-# Adds member; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/members/{user_id}/add", response_model=MembershipActionResponse)
 async def add_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> MembershipActionResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         membership = await ChannelService.add_member_direct(db, amqp, channel_id, user.id, user_id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
-# Promotes member; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/members/{user_id}/promote", response_model=MembershipActionResponse)
 async def promote_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep) -> MembershipActionResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         membership = await ChannelService.promote_member(db, channel_id, user.id, user_id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
-# Demotes member; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/members/{user_id}/demote", response_model=MembershipActionResponse)
 async def demote_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep) -> MembershipActionResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         membership = await ChannelService.demote_member(db, channel_id, user.id, user_id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return MembershipActionResponse(channel_id=membership.channel_id, user_id=membership.user_id, role=membership.role)
 
 
-# Updates admin permissions; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.patch("/channels/{channel_id}/members/{user_id}/permissions", response_model=AdminPermissionsUpdateResponse)
 async def update_admin_permissions(
     channel_id: UUID,
@@ -316,10 +271,8 @@ async def update_admin_permissions(
     db: DBDep,
     user: CurrentUserDep,
 ) -> AdminPermissionsUpdateResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         membership = await ChannelService.update_admin_permissions(db, channel_id, user.id, user_id, req)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return AdminPermissionsUpdateResponse(
@@ -330,13 +283,10 @@ async def update_admin_permissions(
     )
 
 
-# Removes member; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.delete("/channels/{channel_id}/members/{user_id}")
 async def remove_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> dict:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         await ChannelService.remove_member(db, amqp, channel_id, user.id, user_id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return {"status": "ok"}

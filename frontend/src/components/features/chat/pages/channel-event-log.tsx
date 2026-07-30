@@ -81,31 +81,24 @@ const CLIENT_ID_KEYS = new Set(["client_msg_id"]);
 
 const HIDDEN_TECHNICAL_KEYS = new Set(["id"]);
 
-// Implements the short hash operation; the page component uses it to prepare or render the interface.
 function shortHash(value?: string | null) {
-  // Return early when `!value` because the remaining work is not applicable.
   if (!value) return "-";
-  // Return early when `value.length <= 20` because the remaining work is not applicable.
   if (value.length <= 20) return value;
   return `${value.slice(0, 12)}...${value.slice(-8)}`;
 }
 
-// Determines whether record; the page component uses it to prepare or render the interface.
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-// Determines whether uuid; the page component uses it to prepare or render the interface.
 function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID_RE.test(value);
 }
 
-// Implements the unique operation; the page component uses it to prepare or render the interface.
 function unique(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.filter((value): value is string => Boolean(value)))).sort();
 }
 
-// Implements the title case operation; the page component uses it to prepare or render the interface.
 function titleCase(value: string) {
   return value
     .replace(/[._-]+/g, " ")
@@ -114,7 +107,6 @@ function titleCase(value: string) {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-// Converts key; the page component uses it to prepare or render the interface.
 function humanizeKey(key: string, references: ReferenceMaps) {
   const t = references.t;
   const labels: Record<string, string> = {
@@ -157,58 +149,41 @@ function humanizeKey(key: string, references: ReferenceMaps) {
   return labels[key] ?? titleCase(key);
 }
 
-// Provides r display name behavior; React components use it to access or update application state.
 function userDisplayName(user?: UserPublicProfile | null) {
-  // Return early when `!user` because the remaining work is not applicable.
   if (!user) return null;
-  // Return early when `user.display_name?.trim()` because the remaining work is not applicable.
   if (user.display_name?.trim()) return `${user.display_name} (@${user.username})`;
   return `@${user.username}`;
 }
 
-// Provides r initial behavior; React components use it to access or update application state.
 function userInitial(user?: UserPublicProfile | null) {
   return (user?.display_name || user?.username || "U").slice(0, 1).toUpperCase();
 }
 
-// Implements the message preview operation; the page component uses it to prepare or render the interface.
 function messagePreview(message: MessageResponse | null | undefined, references: ReferenceMaps) {
   const t = references.t;
-  // Return early when `!message` because the remaining work is not applicable.
   if (!message) return null;
-  // Return early when `message.deleted_at` because the remaining work is not applicable.
   if (message.deleted_at) return t("references.deletedMessage");
-  // Return early when `message.content_text?.trim()` because the remaining work is not applicable.
   if (message.content_text?.trim()) return message.content_text.trim();
-  // Return early when `message.content_json` because the remaining work is not applicable.
   if (message.content_json) return t("references.jsonMessage");
-  // Return early when `message.attachments?.length` because the remaining work is not applicable.
   if (message.attachments?.length) return t("references.attachments", { count: message.attachments.length });
   return t("references.emptyMessage");
 }
 
-// Truncates; the page component uses it to prepare or render the interface.
 function truncate(value: string, maxLength = 96) {
-  // Return early when `value.length <= maxLength` because the remaining work is not applicable.
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength - 1)}...`;
 }
 
-// Masks internal ids; the page component uses it to prepare or render the interface.
 function maskInternalIds(value: string) {
   return value.replace(UUID_IN_TEXT_RE, "internal reference");
 }
 
-// Formats bytes; the page component uses it to prepare or render the interface.
 function formatBytes(value: unknown, references?: ReferenceMaps) {
-  // Return early when `typeof value !== "number" || Number.isNaN(value)` because the remaining work is not applicable.
   if (typeof value !== "number" || Number.isNaN(value)) return references?.commonT("notAvailable") ?? "N/A";
-  // Return early when `value < 1024` because the remaining work is not applicable.
   if (value < 1024) return `${value} B`;
   const units = ["KB", "MB", "GB"];
   let current = value / 1024;
   let unit = units[0];
-  // Repeat this indexed operation while `index < units.length && current >= 1024` remains true.
   for (let index = 1; index < units.length && current >= 1024; index += 1) {
     current /= 1024;
     unit = units[index];
@@ -216,116 +191,75 @@ function formatBytes(value: unknown, references?: ReferenceMaps) {
   return `${current.toFixed(current >= 10 ? 0 : 1)} ${unit}`;
 }
 
-// Normalizes status; the page component uses it to prepare or render the interface.
 function normalizeStatus(value: unknown) {
-  // Return early when `typeof value !== "string"` because the remaining work is not applicable.
   if (typeof value !== "string") return String(value);
   return value.replace(/_/g, " ");
 }
 
-// Implements the role label operation; the page component uses it to prepare or render the interface.
 function roleLabel(value: unknown, references: ReferenceMaps) {
-  // Return early when `typeof value !== "string"` because the remaining work is not applicable.
   if (typeof value !== "string") return String(value);
-  // Return early when `value === "owner"` because the remaining work is not applicable.
   if (value === "owner") return references.commonT("roles.owner");
-  // Return early when `value === "admin"` because the remaining work is not applicable.
   if (value === "admin") return references.commonT("roles.admin");
-  // Return early when `value === "member"` because the remaining work is not applicable.
   if (value === "member") return references.commonT("roles.member");
-  // Return early when `value === "pending"` because the remaining work is not applicable.
   if (value === "pending") return references.commonT("roles.pending");
   return titleCase(value);
 }
 
-// Implements the event category operation; the page component uses it to prepare or render the interface.
 function eventCategory(eventType: string) {
   return eventType.split(".")[0] || "event";
 }
 
-// Implements the event badge variant operation; the page component uses it to prepare or render the interface.
 function eventBadgeVariant(eventType: string): "default" | "secondary" | "destructive" | "outline" {
-  // Return early when `eventType.startsWith("security.") || eventType.includes("failed") ||...` because the remaining work is not applicable.
   if (eventType.startsWith("security.") || eventType.includes("failed") || eventType.includes("dead_lettered")) {
     return "destructive";
   }
-  // Return early when `eventType.startsWith("broker.")` because the remaining work is not applicable.
   if (eventType.startsWith("broker.")) return "secondary";
-  // Return early when `eventType.startsWith("message.")` because the remaining work is not applicable.
   if (eventType.startsWith("message.")) return "default";
   return "outline";
 }
 
-// Implements the event icon operation; the page component uses it to prepare or render the interface.
 function eventIcon(eventType: string) {
-  // Return early when `eventType.startsWith("security.")` because the remaining work is not applicable.
   if (eventType.startsWith("security.")) return LockKeyhole;
-  // Return early when `eventType === "channel.created"` because the remaining work is not applicable.
   if (eventType === "channel.created") return Hash;
-  // Return early when `eventType === "channel.updated" || eventType === "member.permissions....` because the remaining work is not applicable.
   if (eventType === "channel.updated" || eventType === "member.permissions.updated") return Settings;
-  // Return early when `eventType === "channel.deleted"` because the remaining work is not applicable.
   if (eventType === "channel.deleted") return UserX;
-  // Return early when `eventType.includes("invite")` because the remaining work is not applicable.
   if (eventType.includes("invite")) return Mail;
-  // Return early when `eventType === "membership.joined" || eventType === "membership.added"` because the remaining work is not applicable.
   if (eventType === "membership.joined" || eventType === "membership.added") return UserPlus;
-  // Return early when `eventType === "membership.approved" || eventType === "member.promoted"` because the remaining work is not applicable.
   if (eventType === "membership.approved" || eventType === "member.promoted") return UserCheck;
-  // Return early when `eventType === "membership.left" || eventType === "member.demoted"` because the remaining work is not applicable.
   if (eventType === "membership.left" || eventType === "member.demoted") return UserMinus;
-  // Return early when `eventType === "member.removed"` because the remaining work is not applicable.
   if (eventType === "member.removed") return UserX;
-  // Return early when `eventType.startsWith("message.")` because the remaining work is not applicable.
   if (eventType.startsWith("message.")) return MessageSquare;
-  // Return early when `eventType === "broker.dead_lettered"` because the remaining work is not applicable.
   if (eventType === "broker.dead_lettered") return ServerCrash;
-  // Return early when `eventType.startsWith("broker.")` because the remaining work is not applicable.
   if (eventType.startsWith("broker.")) return DatabaseZap;
   return CalendarClock;
 }
 
-// Retrieves event subject user id; the page component uses it to prepare or render the interface.
 function getEventSubjectUserId(event: EventResponse) {
   const payload = event.payload ?? {};
   const target = payload.target_user_id ?? payload.user_id ?? payload.sender_user_id ?? event.actor_user_id;
   return isUuid(target) ? target : null;
 }
 
-// Retrieves event message id; the page component uses it to prepare or render the interface.
 function getEventMessageId(event: EventResponse) {
   const payload = event.payload ?? {};
-  // Return early when `isUuid(payload.message_id)` because the remaining work is not applicable.
   if (isUuid(payload.message_id)) return payload.message_id;
-  // Return early when `event.event_type.startsWith("message.") && isUuid(payload.id)` because the remaining work is not applicable.
   if (event.event_type.startsWith("message.") && isUuid(payload.id)) return payload.id;
-  // Return early when `isUuid(payload.reply_to_message_id)` because the remaining work is not applicable.
   if (isUuid(payload.reply_to_message_id)) return payload.reply_to_message_id;
   return null;
 }
 
-// Retrieves reference kind; the page component uses it to prepare or render the interface.
 function getReferenceKind(key: string, value: unknown, eventType?: string): ReferenceKind | null {
-  // Return early when `key === "channel_id" && isUuid(value)` because the remaining work is not applicable.
   if (key === "channel_id" && isUuid(value)) return "channel";
-  // Return early when `USER_ID_KEYS.has(key) && isUuid(value)` because the remaining work is not applicable.
   if (USER_ID_KEYS.has(key) && isUuid(value)) return "user";
-  // Return early when `(MESSAGE_ID_KEYS.has(key) || (key === "id" && eventType?.startsWith("...` because the remaining work is not applicable.
   if ((MESSAGE_ID_KEYS.has(key) || (key === "id" && eventType?.startsWith("message."))) && isUuid(value)) return "message";
-  // Return early when `UPLOAD_ID_KEYS.has(key) && isUuid(value)` because the remaining work is not applicable.
   if (UPLOAD_ID_KEYS.has(key) && isUuid(value)) return "upload";
-  // Return early when `key === "invite_id" && isUuid(value)` because the remaining work is not applicable.
   if (key === "invite_id" && isUuid(value)) return "invite";
-  // Return early when `DELIVERY_ID_KEYS.has(key) && isUuid(value)` because the remaining work is not applicable.
   if (DELIVERY_ID_KEYS.has(key) && isUuid(value)) return "delivery";
-  // Return early when `CLIENT_ID_KEYS.has(key) && typeof value === "string"` because the remaining work is not applicable.
   if (CLIENT_ID_KEYS.has(key) && typeof value === "string") return "client";
-  // Return early when `isUuid(value)` because the remaining work is not applicable.
   if (isUuid(value)) return "internal";
   return null;
 }
 
-// Implements the collect references from payload operation; the page component uses it to prepare or render the interface.
 function collectReferencesFromPayload(
   value: unknown,
   eventType: string,
@@ -333,16 +267,13 @@ function collectReferencesFromPayload(
   messageIds: string[],
   uploads: Map<string, AttachmentItem>,
 ) {
-  // Run this conditional step only when `Array.isArray(value)` is true.
   if (Array.isArray(value)) {
     value.forEach((item) => collectReferencesFromPayload(item, eventType, userIds, messageIds, uploads));
     return;
   }
 
-  // Return early when `!isRecord(value)` because the remaining work is not applicable.
   if (!isRecord(value)) return;
 
-  // Run this conditional step only when `isUuid(value.file_id)` is true.
   if (isUuid(value.file_id)) {
     uploads.set(value.file_id, {
       file_id: value.file_id,
@@ -355,23 +286,18 @@ function collectReferencesFromPayload(
 
   Object.entries(value).forEach(([childKey, childValue]) => {
     const kind = getReferenceKind(childKey, childValue, eventType);
-    // Run this conditional step only when `kind === "user" && typeof childValue === "string"` is true.
     if (kind === "user" && typeof childValue === "string") userIds.push(childValue);
-    // Run this conditional step only when `kind === "message" && typeof childValue === "string"` is true.
     if (kind === "message" && typeof childValue === "string") messageIds.push(childValue);
     collectReferencesFromPayload(childValue, eventType, userIds, messageIds, uploads);
   });
 }
 
-// Implements the collect event references operation; the page component uses it to prepare or render the interface.
 function collectEventReferences(events: EventResponse[] | undefined) {
   const userIds: string[] = [];
   const messageIds: string[] = [];
   const uploads = new Map<string, AttachmentItem>();
 
-  // Process each item from `events ?? []` so this step covers the collection.
   for (const event of events ?? []) {
-    // Run this conditional step only when `isUuid(event.actor_user_id)` is true.
     if (isUuid(event.actor_user_id)) userIds.push(event.actor_user_id);
     collectReferencesFromPayload(event.payload ?? {}, event.event_type, userIds, messageIds, uploads);
   }
@@ -383,7 +309,6 @@ function collectEventReferences(events: EventResponse[] | undefined) {
   };
 }
 
-// Renders the loading reference component; the route adapter uses it for the matching application page.
 function LoadingReference({ label }: { label: string }) {
   return (
     <span className="inline-flex min-h-7 items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">
@@ -393,13 +318,10 @@ function LoadingReference({ label }: { label: string }) {
   );
 }
 
-// Renders the user reference component; the route adapter uses it for the matching application page.
 function UserReference({ userId, references, fallback }: { userId?: string | null; references: ReferenceMaps; fallback?: string }) {
-  // Return early when `!userId` because the remaining work is not applicable.
   if (!userId) return <span className="text-muted-foreground">{references.t("references.system")}</span>;
   const user = references.users.get(userId);
   const fallbackLabel = fallback ?? references.t("references.userUnavailable");
-  // Return early when `!user && references.loadingUserIds.has(userId)` because the remaining work is not applicable.
   if (!user && references.loadingUserIds.has(userId)) return <LoadingReference label={references.t("references.loadingUser")} />;
   const avatarUrl = resolveApiMediaUrl(user?.avatar_url);
 
@@ -417,7 +339,6 @@ function UserReference({ userId, references, fallback }: { userId?: string | nul
   );
 }
 
-// Renders the channel reference component; the route adapter uses it for the matching application page.
 function ChannelReference({ references }: { references: ReferenceMaps }) {
   return (
     <span className="inline-flex min-h-7 max-w-full items-center gap-2 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium">
@@ -430,7 +351,6 @@ function ChannelReference({ references }: { references: ReferenceMaps }) {
   );
 }
 
-// Renders the message reference component; the route adapter uses it for the matching application page.
 function MessageReference({
   messageId,
   event,
@@ -444,7 +364,6 @@ function MessageReference({
   const id = messageId ?? getEventMessageId(event as EventResponse);
   const message = id ? references.messages.get(id) : undefined;
 
-  // Return early when `id && !message && references.loadingMessageIds.has(id)` because the remaining work is not applicable.
   if (id && !message && references.loadingMessageIds.has(id)) {
     return <LoadingReference label={references.t("references.loadingMessage")} />;
   }
@@ -463,7 +382,6 @@ function MessageReference({
   );
 }
 
-// Renders the upload reference component; the route adapter uses it for the matching application page.
 function UploadReference({ uploadId, references }: { uploadId?: string | null; references: ReferenceMaps }) {
   const upload = uploadId ? references.uploads.get(uploadId) : undefined;
   return (
@@ -475,7 +393,6 @@ function UploadReference({ uploadId, references }: { uploadId?: string | null; r
   );
 }
 
-// Renders the generic reference component; the route adapter uses it for the matching application page.
 function GenericReference({
   kind,
   references,
@@ -497,7 +414,6 @@ function GenericReference({
   );
 }
 
-// Renders the reference value component; the route adapter uses it for the matching application page.
 function ReferenceValue({
   kind,
   value,
@@ -510,29 +426,20 @@ function ReferenceValue({
   event?: EventResponse;
 }) {
   const stringValue = typeof value === "string" ? value : null;
-  // Return early when `kind === "user"` because the remaining work is not applicable.
   if (kind === "user") return <UserReference userId={stringValue} references={references} />;
-  // Return early when `kind === "channel"` because the remaining work is not applicable.
   if (kind === "channel") return <ChannelReference references={references} />;
-  // Return early when `kind === "message"` because the remaining work is not applicable.
   if (kind === "message") return <MessageReference messageId={stringValue} event={event} references={references} />;
-  // Return early when `kind === "upload"` because the remaining work is not applicable.
   if (kind === "upload") return <UploadReference uploadId={stringValue} references={references} />;
   return <GenericReference kind={kind} references={references} />;
 }
 
-// Formats routing key; the page component uses it to prepare or render the interface.
 function formatRoutingKey(value: string, references: ReferenceMaps) {
-  // Return early when `value.startsWith("channel.")` because the remaining work is not applicable.
   if (value.startsWith("channel.")) return references.t("references.channelBrokerRoute", { name: references.channel.name });
-  // Return early when `value.startsWith("user.")` because the remaining work is not applicable.
   if (value.startsWith("user.")) return references.t("references.userDeliveryRoute");
-  // Return early when `value.startsWith("dead.")` because the remaining work is not applicable.
   if (value.startsWith("dead.")) return references.t("references.deadLetterBrokerRoute");
   return maskInternalIds(value);
 }
 
-// Renders the scalar value component; the route adapter uses it for the matching application page.
 function ScalarValue({
   fieldKey,
   value,
@@ -545,51 +452,37 @@ function ScalarValue({
   event?: EventResponse;
 }) {
   const referenceKind = getReferenceKind(fieldKey, value, event?.event_type);
-  // Return early when `referenceKind` because the remaining work is not applicable.
   if (referenceKind) {
     return <ReferenceValue kind={referenceKind} value={value} references={references} event={event} />;
   }
 
-  // Return early when `value === null || value === undefined || value === ""` because the remaining work is not applicable.
   if (value === null || value === undefined || value === "") {
     return <span className="text-muted-foreground">{references.t("values.notSet")}</span>;
   }
 
-  // Return early when `typeof value === "boolean"` because the remaining work is not applicable.
   if (typeof value === "boolean") {
     return <Badge variant={value ? "default" : "secondary"}>{value ? references.commonT("yes") : references.commonT("no")}</Badge>;
   }
 
-  // Run this conditional step only when `typeof value === "number"` is true.
   if (typeof value === "number") {
-    // Return early when `fieldKey === "size_bytes"` because the remaining work is not applicable.
     if (fieldKey === "size_bytes") return <span>{formatBytes(value, references)}</span>;
-    // Return early when `fieldKey === "retry_in_seconds"` because the remaining work is not applicable.
     if (fieldKey === "retry_in_seconds") return <span>{references.t("values.seconds", { count: value })}</span>;
     return <span>{formatNumberLocalized(value, references.locale)}</span>;
   }
 
-  // Run this conditional step only when `typeof value === "string"` is true.
   if (typeof value === "string") {
-    // Return early when `fieldKey === "routing_key"` because the remaining work is not applicable.
     if (fieldKey === "routing_key") return <span>{formatRoutingKey(value, references)}</span>;
-    // Return early when `fieldKey.endsWith("_url") || fieldKey === "url" || fieldKey === "publ...` because the remaining work is not applicable.
     if (fieldKey.endsWith("_url") || fieldKey === "url" || fieldKey === "public_url") {
       return <span>{value.includes("/uploads/") ? references.t("values.privateUploadLink") : maskInternalIds(value)}</span>;
     }
-    // Run this conditional step only when `fieldKey === "content_text" && event` is true.
     if (fieldKey === "content_text" && event) {
       const messageId = getEventMessageId(event);
       const message = messageId ? references.messages.get(messageId) : undefined;
       return <span>{message?.content_text ? truncate(message.content_text, 180) : references.t("values.storedMessageText")}</span>;
     }
-    // Return early when `fieldKey === "content_type"` because the remaining work is not applicable.
     if (fieldKey === "content_type") return <Badge variant="outline">{titleCase(value)}</Badge>;
-    // Return early when `fieldKey === "role" || fieldKey === "new_role"` because the remaining work is not applicable.
     if (fieldKey === "role" || fieldKey === "new_role") return <Badge variant="secondary">{roleLabel(value, references)}</Badge>;
-    // Return early when `fieldKey.includes("status")` because the remaining work is not applicable.
     if (fieldKey.includes("status")) return <Badge variant="outline">{normalizeStatus(value)}</Badge>;
-    // Return early when `ISO_DATE_RE.test(value)` because the remaining work is not applicable.
     if (ISO_DATE_RE.test(value)) return <span>{formatDateTimeLocalized(value, references.locale, references.commonT("notAvailable"))}</span>;
     return <span className="break-words">{maskInternalIds(value)}</span>;
   }
@@ -597,7 +490,6 @@ function ScalarValue({
   return <span>{String(value)}</span>;
 }
 
-// Renders the structured value component; the route adapter uses it for the matching application page.
 function StructuredValue({
   fieldKey,
   value,
@@ -611,9 +503,7 @@ function StructuredValue({
   event?: EventResponse;
   depth?: number;
 }) {
-  // Run this conditional step only when `Array.isArray(value)` is true.
   if (Array.isArray(value)) {
-    // Return early when `value.length === 0` because the remaining work is not applicable.
     if (value.length === 0) return <span className="text-muted-foreground">{references.t("values.none")}</span>;
 
     return (
@@ -627,17 +517,13 @@ function StructuredValue({
     );
   }
 
-  // Run this conditional step only when `isRecord(value)` is true.
   if (isRecord(value)) {
     const entries = Object.entries(value).filter(([key]) => !(depth > 0 && HIDDEN_TECHNICAL_KEYS.has(key)));
-    // Return early when `entries.length === 0` because the remaining work is not applicable.
     if (entries.length === 0) return <span className="text-muted-foreground">{references.t("values.noDetails")}</span>;
 
-    // Run this conditional step only when `fieldKey === "content_json" && "_enc_v1" in value` is true.
     if (fieldKey === "content_json" && "_enc_v1" in value) {
       const messageId = event ? getEventMessageId(event) : null;
       const message = messageId ? references.messages.get(messageId) : undefined;
-      // Return early when `message?.content_json` because the remaining work is not applicable.
       if (message?.content_json) {
         return <StructuredValue fieldKey={fieldKey} value={message.content_json} references={references} event={event} depth={depth + 1} />;
       }
@@ -659,12 +545,10 @@ function StructuredValue({
   return <ScalarValue fieldKey={fieldKey} value={value} references={references} event={event} />;
 }
 
-// Renders the structured payload component; the route adapter uses it for the matching application page.
 function StructuredPayload({ event, references }: { event: EventResponse; references: ReferenceMaps }) {
   const payload = event.payload ?? {};
   const entries = Object.entries(payload).filter(([key]) => !HIDDEN_TECHNICAL_KEYS.has(key));
 
-  // Return early when `entries.length === 0` because the remaining work is not applicable.
   if (entries.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
@@ -685,7 +569,6 @@ function StructuredPayload({ event, references }: { event: EventResponse; refere
   );
 }
 
-// Implements the describe event operation; the page component uses it to prepare or render the interface.
 function describeEvent(event: EventResponse, references: ReferenceMaps): { title: string; description: ReactNode } {
   const t = references.t;
   const payload = event.payload ?? {};
@@ -698,7 +581,6 @@ function describeEvent(event: EventResponse, references: ReferenceMaps): { title
   const channel = <ChannelReference references={references} />;
   const message = <MessageReference event={event} references={references} />;
 
-  // Select the matching behavior for `event.event_type`.
   switch (event.event_type) {
     case "channel.created":
       return { title: t("events.channelCreated.title"), description: <>{actor} {t("events.channelCreated.description")} {channel}</> };
@@ -751,7 +633,6 @@ function describeEvent(event: EventResponse, references: ReferenceMaps): { title
   }
 }
 
-// Renders the event references component; the route adapter uses it for the matching application page.
 function EventReferences({ event, references }: { event: EventResponse; references: ReferenceMaps }) {
   const messageId = getEventMessageId(event);
   const targetUserId = isUuid(event.payload?.target_user_id) ? event.payload.target_user_id : null;
@@ -777,7 +658,6 @@ function EventReferences({ event, references }: { event: EventResponse; referenc
   );
 }
 
-// Renders the event log item component; the route adapter uses it for the matching application page.
 function EventLogItem({ event, references }: { event: EventResponse; references: ReferenceMaps }) {
   const Icon = eventIcon(event.event_type);
   const description = describeEvent(event, references);
@@ -816,27 +696,20 @@ function EventLogItem({ event, references }: { event: EventResponse; references:
   );
 }
 
-// Retrieves integrity status; the page component uses it to prepare or render the interface.
 function getIntegrityStatus(
   result: EventIntegrityResponse | undefined,
   isFetching: boolean,
   isError: boolean,
   t: ReturnType<typeof useTranslations>,
 ): { label: string; variant: "default" | "secondary" | "destructive" | "outline" } {
-  // Return early when `isFetching` because the remaining work is not applicable.
   if (isFetching) return { label: t("integrity.checking"), variant: "secondary" };
-  // Return early when `isError` because the remaining work is not applicable.
   if (isError) return { label: t("integrity.checkFailed"), variant: "destructive" };
-  // Return early when `!result` because the remaining work is not applicable.
   if (!result) return { label: t("integrity.notChecked"), variant: "outline" };
-  // Return early when `result.valid` because the remaining work is not applicable.
   if (result.valid) return { label: t("integrity.verified"), variant: "default" };
-  // Return early when `result.reason === "missing_hash"` because the remaining work is not applicable.
   if (result.reason === "missing_hash") return { label: t("integrity.notInitialized"), variant: "secondary" };
   return { label: t("integrity.broken"), variant: "destructive" };
 }
 
-// Renders the channel event log skeleton component; the route adapter uses it for the matching application page.
 function ChannelEventLogSkeleton() {
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
@@ -865,7 +738,6 @@ function ChannelEventLogSkeleton() {
   );
 }
 
-// Renders the channel event log page; the route adapter uses it for the matching application page.
 export default function ChannelEventLogPage() {
   const params = useParams<{ channelId?: string | string[] }>();
   const channelId = Array.isArray(params?.channelId) ? params.channelId[0] : params?.channelId;
@@ -907,22 +779,18 @@ export default function ChannelEventLogPage() {
   });
 
   const references = useMemo<ReferenceMaps | null>(() => {
-    // Return early when `!channel` because the remaining work is not applicable.
     if (!channel) return null;
 
     const users = new Map<string, UserPublicProfile>();
-    // Run this conditional step only when `authUser` is true.
     if (authUser) users.set(authUser.id, authUser);
     collectedReferences.userIds.forEach((userId, index) => {
       const data = userQueries[index]?.data;
-      // Run this conditional step only when `data` is true.
       if (data) users.set(userId, data);
     });
 
     const messages = new Map<string, MessageResponse>();
     collectedReferences.messageIds.forEach((messageId, index) => {
       const data = messageQueries[index]?.data;
-      // Run this conditional step only when `data` is true.
       if (data) messages.set(messageId, data);
     });
 
@@ -942,21 +810,17 @@ export default function ChannelEventLogPage() {
   }, [authUser, channel, collectedReferences, commonT, locale, localePath, messageQueries, t, userQueries]);
 
   useEffect(() => {
-    // Run this conditional step only when `!isInitializing && !isAuthenticated` is true.
     if (!isInitializing && !isAuthenticated) {
       router.replace(localePath("/login"));
     }
   }, [isAuthenticated, isInitializing, localePath, router]);
 
-  // Return early when `isInitializing || isLoading` because the remaining work is not applicable.
   if (isInitializing || isLoading) {
     return <ChannelEventLogSkeleton />;
   }
 
-  // Return early when `!isAuthenticated` because the remaining work is not applicable.
   if (!isAuthenticated) return null;
 
-  // Return early when `isError || !channel` because the remaining work is not applicable.
   if (isError || !channel) {
     return (
       <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
@@ -982,7 +846,6 @@ export default function ChannelEventLogPage() {
     );
   }
 
-  // Return early when `!canManageMembers` because the remaining work is not applicable.
   if (!canManageMembers) {
     return (
       <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">

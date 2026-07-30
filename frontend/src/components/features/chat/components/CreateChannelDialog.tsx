@@ -69,7 +69,6 @@ const initialForm = {
   joinMode: "open" as JoinMode,
 };
 
-// Renders the create channel dialog component; parent React views use it to render or control the interface.
 export function CreateChannelDialog({
   open,
   onOpenChange,
@@ -82,7 +81,6 @@ export function CreateChannelDialog({
   const [form, setForm] = useState(initialForm);
 
   useEffect(() => {
-    // Run this conditional step only when `!open` is true.
     if (!open) {
       setForm(initialForm);
     }
@@ -132,7 +130,6 @@ export function CreateChannelDialog({
     (option) => option.value === form.joinMode,
   );
 
-  // Applies preset; parent React views use it to render or control the interface.
   function applyPreset(visibility: Visibility, joinMode: JoinMode) {
     setForm((current) => ({
       ...current,
@@ -141,14 +138,12 @@ export function CreateChannelDialog({
     }));
   }
 
-  // Handles submit; parent React views use it to render or control the interface.
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const trimmedName = form.name.trim();
     const trimmedDescription = form.description.trim();
 
-    // Run this conditional step only when `!trimmedName` is true.
     if (!trimmedName) {
       toast({
         title: t("toasts.nameRequiredTitle"),

@@ -14,11 +14,9 @@ branch_labels = None
 depends_on = None
 
 
-# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wallpaper_url text;")
 
 
-# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.execute("ALTER TABLE users DROP COLUMN IF EXISTS wallpaper_url;")

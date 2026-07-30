@@ -20,18 +20,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
 
-// Retrieves channel activity at; parent React views use it to render or control the interface.
 function getChannelActivityAt(channel: ChannelResponse) {
   const timestamp = channel.last_message_at ?? channel.created_at ?? "";
   const parsed = timestamp ? Date.parse(timestamp) : 0;
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-// Sorts channels by activity; parent React views use it to render or control the interface.
 function sortChannelsByActivity(channels: ChannelResponse[], locale: string) {
   return [...channels].sort((left, right) => {
     const activityDiff = getChannelActivityAt(right) - getChannelActivityAt(left);
-    // Return early when `activityDiff !== 0` because the remaining work is not applicable.
     if (activityDiff !== 0) {
       return activityDiff;
     }
@@ -40,7 +37,6 @@ function sortChannelsByActivity(channels: ChannelResponse[], locale: string) {
   });
 }
 
-// Renders the channel list item component; parent React views use it to render or control the interface.
 function ChannelListItem({
   channel,
   href,
@@ -91,7 +87,6 @@ function ChannelListItem({
   );
 }
 
-// Renders the sidebar section component; parent React views use it to render or control the interface.
 function SidebarSection({
   title,
   isOpen,
@@ -129,7 +124,6 @@ function SidebarSection({
   );
 }
 
-// Renders the channel list skeleton component; parent React views use it to render or control the interface.
 function ChannelListSkeleton() {
   return (
     <div className="space-y-2">
@@ -146,7 +140,6 @@ function ChannelListSkeleton() {
   );
 }
 
-// Renders the app sidebar component; parent React views use it to render or control the interface.
 export function AppSidebar() {
   const pathname = usePathname();
   const localePath = useLocalePath();

@@ -3,7 +3,6 @@
 import { useParams } from "next/navigation";
 import { useCallback } from "react";
 
-// Provides locale path behavior; React components use it to access or update application state.
 export function useLocalePath() {
   const params = useParams<{ locale?: string | string[] }>();
   const rawLocale = params?.locale;

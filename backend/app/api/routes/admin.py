@@ -18,20 +18,17 @@ from app.services.channel_service import ChannelService
 router = APIRouter(prefix="/admin", tags=["superadmin"])
 
 
-# Implements the prevent sensitive caching operation; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 def _prevent_sensitive_caching(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
 
 
-# Implements the overview operation; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/overview", response_model=AdminOverviewResponse)
 async def overview(db: DBDep, _: SuperadminDep, response: Response) -> AdminOverviewResponse:
     _prevent_sensitive_caching(response)
     return await AdminService.overview(db)
 
 
-# Lists events; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/events", response_model=AdminEventListResponse)
 async def list_events(
     db: DBDep,
@@ -59,7 +56,6 @@ async def list_events(
     return AdminEventListResponse(items=items, total=total)
 
 
-# Lists users; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/users", response_model=AdminUserListResponse)
 async def list_users(
     db: DBDep,
@@ -75,7 +71,6 @@ async def list_users(
     return AdminUserListResponse(items=items, total=total)
 
 
-# Updates user status; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.patch("/users/{user_id}/status", response_model=AdminActionResponse)
 async def update_user_status(
     user_id: UUID,
@@ -84,31 +79,24 @@ async def update_user_status(
     superadmin: SuperadminDep,
     request: Request,
 ) -> AdminActionResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         count = await AdminService.set_user_active(db, superadmin, user_id, req.is_active)
-        # Run this conditional step only when `not req.is_active` is true.
         if not req.is_active:
             await request.app.state.ws_manager.disconnect_user(user_id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return AdminActionResponse(affected_sessions=count)
 
 
-# Revokes user sessions; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/users/{user_id}/revoke-sessions", response_model=AdminActionResponse)
 async def revoke_user_sessions(user_id: UUID, db: DBDep, superadmin: SuperadminDep) -> AdminActionResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         count = await AdminService.revoke_user_sessions(db, superadmin, user_id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return AdminActionResponse(affected_sessions=count)
 
 
-# Lists channels; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/channels", response_model=AdminChannelListResponse)
 async def list_channels(
     db: DBDep,
@@ -134,7 +122,6 @@ async def list_channels(
     return AdminChannelListResponse(items=items, total=total)
 
 
-# Deactivates channel; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.delete("/channels/{channel_id}", response_model=AdminActionResponse)
 async def deactivate_channel(
     channel_id: UUID,
@@ -142,16 +129,13 @@ async def deactivate_channel(
     superadmin: SuperadminDep,
     amqp: AMQPDep,
 ) -> AdminActionResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         await ChannelService.delete_channel(db, channel_id, superadmin.id, amqp)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return AdminActionResponse()
 
 
-# Restores channel; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/restore", response_model=AdminActionResponse)
 async def restore_channel(
     channel_id: UUID,
@@ -159,10 +143,8 @@ async def restore_channel(
     superadmin: SuperadminDep,
     amqp: AMQPDep,
 ) -> AdminActionResponse:
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         await AdminService.restore_channel(db, amqp, superadmin, channel_id)
-    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return AdminActionResponse()

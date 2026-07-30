@@ -17,21 +17,17 @@ os.environ.setdefault("MESSAGE_ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY
 os.environ.setdefault("JWT_SECRET", "test-secret")
 
 
-# Clears settings cache; pytest runs it as a regression check.
 @pytest.fixture(autouse=True)
 def _clear_settings_cache() -> None:
     get_settings.cache_clear()
     encryption._build_fernet.cache_clear()
 
 
-# Provides an isolated database session to each test; pytest runs it as a regression check.
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     database_url = os.environ.get("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@postgres:5432/channels")
     engine = create_async_engine(database_url, future=True)
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
-        # Keep `engine.begin()` active while this scoped operation is performed.
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             await conn.execute(text("ALTER TYPE outbox_status ADD VALUE IF NOT EXISTS 'publishing'"))
@@ -51,12 +47,10 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at timestamptz"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_by_user_id uuid"))
-    # Handle `Exception` here so this workflow can recover or report the failure consistently.
     except Exception as exc:
         await engine.dispose()
         pytest.skip(f"PostgreSQL test database is not reachable for DATABASE_URL={database_url!r}: {exc}")
     session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    # Keep `session_maker()` active while this scoped operation is performed.
     async with session_maker() as session:
         # Isolate test cases while reusing a migrated schema.
         await session.execute(text("TRUNCATE TABLE outbox, events, user_channel_state, pinned_messages, message_reactions, messages, channel_invites, channel_memberships, channel_counters, channels, user_sessions, users RESTART IDENTITY CASCADE"))

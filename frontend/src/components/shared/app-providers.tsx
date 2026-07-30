@@ -11,7 +11,6 @@ interface AppProvidersProps {
   children: ReactNode;
 }
 
-// Renders the app providers component; parent React views use it to render or control the interface.
 export function AppProviders({ children }: AppProvidersProps) {
   const [queryClient] = useState(
     () =>

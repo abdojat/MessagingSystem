@@ -12,7 +12,6 @@ interface WSContextType {
 
 const WSContext = createContext<WSContextType>({ status: 'disconnected', emit: () => {} });
 
-// Renders the wsprovider component; React components use it to access or update application state.
 export function WSProvider({ children }: { children: React.ReactNode }) {
   const { accessToken, isAuthenticated, user } = useAuthStore();
   const queryClient = useQueryClient();
@@ -24,15 +23,12 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
   const maxBackoff = 30000;
 
   useEffect(() => {
-    // Run this conditional step only when `!isAuthenticated || !accessToken` is true.
     if (!isAuthenticated || !accessToken) {
       shouldReconnect.current = false;
-      // Run this conditional step only when `reconnectTimer.current !== null` is true.
       if (reconnectTimer.current !== null) {
         window.clearTimeout(reconnectTimer.current);
         reconnectTimer.current = null;
       }
-      // Run this conditional step only when `ws.current` is true.
       if (ws.current) {
         ws.current.close();
         ws.current = null;
@@ -44,9 +40,7 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
     let isUnmounted = false;
     shouldReconnect.current = true;
 
-    // Connects; React components use it to access or update application state.
     const connect = () => {
-      // Return early when `isUnmounted || !shouldReconnect.current` because the remaining work is not applicable.
       if (isUnmounted || !shouldReconnect.current) return;
       setStatus('connecting');
       const wsUrl = getWsUrl(accessToken);
@@ -55,7 +49,6 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
       ws.current.onopen = () => {
         setStatus('connected');
         reconnectAttempt.current = 0;
-        // Run this conditional step only when `reconnectTimer.current !== null` is true.
         if (reconnectTimer.current !== null) {
           window.clearTimeout(reconnectTimer.current);
           reconnectTimer.current = null;
@@ -63,7 +56,6 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
       };
 
       ws.current.onmessage = (event) => {
-        // Attempt this operation and recover from expected failures in the catch block below.
         try {
           const data = JSON.parse(event.data) as { type?: string; payload?: any };
           const payload = data.payload;
@@ -88,9 +80,7 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
             );
           };
 
-          // Choose the appropriate path based on whether `data.type === 'sync' && payload?.messages` is true.
           if (data.type === 'sync' && payload?.messages) {
-            // Process each item from `payload.messages as MessageResponse[]` so this step covers the collection.
             for (const msg of payload.messages as MessageResponse[]) {
               queryClient.setQueryData(
                 ['/channels', msg.channel_id, 'messages'],
@@ -115,7 +105,6 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
                 };
               });
             }
-          // Otherwise, update cached channel messages for create or edit events.
           } else if (data.type === 'message' || data.type === 'message_updated') {
             const msg = payload as MessageResponse;
             queryClient.setQueryData(
@@ -143,7 +132,6 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
                 unread_count: shouldIncrementUnread ? channel.unread_count + 1 : channel.unread_count,
               };
             });
-          // Otherwise, merge seen-state updates into the cached channel summary.
           } else if (data.type === 'seen') {
             const seenState = payload as {
               channel_id: string;
@@ -152,7 +140,6 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
               unread_count?: number | null;
             };
 
-            // Run this conditional step only when `seenState.user_id === user?.id` is true.
             if (seenState.user_id === user?.id) {
               updateChannelCaches(seenState.channel_id, (channel) => ({
                 ...channel,
@@ -160,7 +147,6 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
                 unread_count: seenState.unread_count ?? 0,
               }));
             }
-          // Otherwise, refresh the affected message when its reactions change.
           } else if (data.type === 'reaction_updated') {
             const reactionEvent = payload as {
               channel_id: string;
@@ -186,15 +172,11 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
                     : message
                 )
             );
-          // Otherwise, refresh channel data when channel or membership state changes.
           } else if (data.type === 'channel_updated' || data.type === 'membership_update') {
             queryClient.invalidateQueries({ queryKey: ['/channels'] });
-            // Run this conditional step only when `data.type === 'membership_update' && payload?.channel_id` is true.
             if (data.type === 'membership_update' && payload?.channel_id) {
               queryClient.invalidateQueries({ queryKey: ['/channels', payload.channel_id] });
-              // Run this conditional step only when `payload.user_id === user?.id` is true.
               if (payload.user_id === user?.id) {
-                // Choose the appropriate path based on whether `['owner', 'admin', 'member'].includes(payload.new_role)` is true.
                 if (['owner', 'admin', 'member'].includes(payload.new_role)) {
                   ws.current?.send(JSON.stringify({
                     type: 'subscribe',
@@ -202,7 +184,6 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
                     ts: new Date().toISOString(),
                   }));
                   queryClient.invalidateQueries({ queryKey: ['/channels', payload.channel_id, 'messages'] });
-                // Handle the fallback path when the preceding condition is false.
                 } else {
                   ws.current?.send(JSON.stringify({
                     type: 'unsubscribe',
@@ -214,7 +195,6 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
               }
             }
           }
-        // Recover from the attempted operation by applying this error-handling path.
         } catch (e) {
           console.error("WS Parse error", e);
         }
@@ -223,7 +203,6 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
       ws.current.onclose = () => {
         setStatus('disconnected');
         ws.current = null;
-        // Run this conditional step only when `!isUnmounted && shouldReconnect.current` is true.
         if (!isUnmounted && shouldReconnect.current) {
           const backoff = Math.min(1000 * Math.pow(2, reconnectAttempt.current), maxBackoff);
           reconnectAttempt.current += 1;
@@ -237,12 +216,10 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
     return () => {
       isUnmounted = true;
       shouldReconnect.current = false;
-      // Run this conditional step only when `reconnectTimer.current !== null` is true.
       if (reconnectTimer.current !== null) {
         window.clearTimeout(reconnectTimer.current);
         reconnectTimer.current = null;
       }
-      // Run this conditional step only when `ws.current` is true.
       if (ws.current) {
         ws.current.close();
         ws.current = null;
@@ -250,9 +227,7 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
     };
   }, [isAuthenticated, accessToken, queryClient, user?.id]);
 
-  // Emits; React components use it to access or update application state.
   const emit = (type: string, payload: any) => {
-    // Run this conditional step only when `ws.current?.readyState === WebSocket.OPEN` is true.
     if (ws.current?.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ type, payload, ts: new Date().toISOString() }));
     }
@@ -265,5 +240,4 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Provides ws behavior; React components use it to access or update application state.
 export const useWS = () => useContext(WSContext);

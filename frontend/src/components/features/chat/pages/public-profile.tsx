@@ -21,7 +21,6 @@ import {
   formatRelativeTimeStrictLocalized,
 } from "@/lib/i18n-format";
 
-// Retrieves initials; the page component uses it to prepare or render the interface.
 function getInitials(value: string) {
   return (
     value
@@ -33,7 +32,6 @@ function getInitials(value: string) {
   );
 }
 
-// Renders the public profile skeleton component; the route adapter uses it for the matching application page.
 function PublicProfileSkeleton() {
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
@@ -66,7 +64,6 @@ function PublicProfileSkeleton() {
   );
 }
 
-// Renders the public profile page; the route adapter uses it for the matching application page.
 export default function PublicProfilePage() {
   const params = useParams<{ userId?: string | string[] }>();
   const userId = Array.isArray(params?.userId) ? params.userId[0] : params?.userId;
@@ -82,28 +79,23 @@ export default function PublicProfilePage() {
   const profileQuery = useUserProfile(userId || "", Boolean(isAuthenticated && !isOwnProfile));
 
   useEffect(() => {
-    // Run this conditional step only when `!isInitializing && (!isAuthenticated || !userId)` is true.
     if (!isInitializing && (!isAuthenticated || !userId)) {
       router.replace(localePath("/login"));
     }
   }, [isAuthenticated, isInitializing, localePath, router, userId]);
 
   useEffect(() => {
-    // Run this conditional step only when `!isInitializing && isAuthenticated && isOwnProfile` is true.
     if (!isInitializing && isAuthenticated && isOwnProfile) {
       router.replace(localePath("/app/profile"));
     }
   }, [isAuthenticated, isInitializing, isOwnProfile, localePath, router]);
 
-  // Return early when `isInitializing || isOwnProfile || profileQuery.isLoading` because the remaining work is not applicable.
   if (isInitializing || isOwnProfile || profileQuery.isLoading) {
     return <PublicProfileSkeleton />;
   }
 
-  // Return early when `!isAuthenticated` because the remaining work is not applicable.
   if (!isAuthenticated) return null;
 
-  // Return early when `profileQuery.isError || !profileQuery.data` because the remaining work is not applicable.
   if (profileQuery.isError || !profileQuery.data) {
     return (
       <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">

@@ -16,7 +16,6 @@ branch_labels = None
 depends_on = None
 
 
-# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.add_column("channels", sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("user_sessions", sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=True))
@@ -28,7 +27,6 @@ def upgrade() -> None:
     )
 
 
-# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.drop_constraint("uq_messages_client_msg", "messages", type_="unique")
     op.drop_column("messages", "client_msg_id")

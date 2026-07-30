@@ -3,7 +3,6 @@ import { apiClient } from '@/services/api/client';
 import { AttachmentItem, ChannelResponse, MessageResponse, ReactionSummaryResponse } from '../types/api';
 import { isChannelListQueryKey } from '@/hooks/query-keys';
 
-// Provides messages behavior; React components use it to access or update application state.
 export function useMessages(channelId: string) {
   return useQuery({
     queryKey: ['/channels', channelId, 'messages'],
@@ -12,7 +11,6 @@ export function useMessages(channelId: string) {
   });
 }
 
-// Provides send message behavior; React components use it to access or update application state.
 export function useSendMessage() {
   const queryClient = useQueryClient();
 
@@ -30,11 +28,9 @@ export function useSendMessage() {
         reply_to_message_id,
         reply_to_seq_id,
       };
-      // Run this conditional step only when `content_text?.trim()` is true.
       if (content_text?.trim()) {
         body.content_text = content_text;
       }
-      // Run this conditional step only when `attachments?.length` is true.
       if (attachments?.length) {
         body.attachments = attachments;
       }
@@ -84,7 +80,6 @@ interface SeenResponse {
   unread_count?: number | null;
 }
 
-// Provides mark seen behavior; React components use it to access or update application state.
 export function useMarkSeen() {
   const queryClient = useQueryClient();
 
@@ -95,7 +90,6 @@ export function useMarkSeen() {
         body: JSON.stringify({ last_seen_seq_id: lastSeenSeqId }),
       }),
     onSuccess: (seenState, variables) => {
-      // Applies seen state; React components use it to access or update application state.
       const applySeenState = (channel: ChannelResponse) => ({
         ...channel,
         my_last_seen_seq_id: seenState.last_seen_seq_id ?? variables.lastSeenSeqId,
@@ -117,7 +111,6 @@ export function useMarkSeen() {
   });
 }
 
-// Provides toggle reaction behavior; React components use it to access or update application state.
 export function useToggleReaction() {
   const queryClient = useQueryClient();
 
@@ -130,7 +123,6 @@ export function useToggleReaction() {
 
   return useMutation({
     mutationFn: async ({ channelId, messageId, emoji, remove }: ToggleReactionInput) => {
-      // Return early when `remove` because the remaining work is not applicable.
       if (remove) {
         return apiClient<ReactionSummaryResponse>(
           `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`,
@@ -148,10 +140,8 @@ export function useToggleReaction() {
       const previousMessages = queryClient.getQueryData<MessageResponse[]>(queryKey);
 
       queryClient.setQueryData<MessageResponse[]>(queryKey, (old) => {
-        // Return early when `!old` because the remaining work is not applicable.
         if (!old) return old;
         return old.map((message) => {
-          // Return early when `message.id !== variables.messageId` because the remaining work is not applicable.
           if (message.id !== variables.messageId) return message;
           const prevCounts = message.reactions_summary?.counts ?? {};
           const prevMine = message.reactions_summary?.my_reaction ?? [];
@@ -163,10 +153,8 @@ export function useToggleReaction() {
             : Array.from(new Set([...prevMine, variables.emoji]));
           const nextCountValue = Math.max(0, (prevCounts[variables.emoji] ?? 0) + (shouldRemove ? -1 : 1));
           const nextCounts = { ...prevCounts };
-          // Choose the appropriate path based on whether `nextCountValue === 0` is true.
           if (nextCountValue === 0) {
             delete nextCounts[variables.emoji];
-          // Handle the fallback path when the preceding condition is false.
           } else {
             nextCounts[variables.emoji] = nextCountValue;
           }
@@ -184,7 +172,6 @@ export function useToggleReaction() {
       return { previousMessages, queryKey };
     },
     onError: (_error, _variables, context) => {
-      // Run this conditional step only when `context?.previousMessages` is true.
       if (context?.previousMessages) {
         queryClient.setQueryData(context.queryKey, context.previousMessages);
       }

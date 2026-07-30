@@ -5,7 +5,6 @@ interface ThemeProviderProps {
   children: ReactNode;
 }
 
-// Renders the theme provider component; parent React views use it to render or control the interface.
 export function ThemeProvider({ children }: ThemeProviderProps) {
   return (
     <NextThemesProvider

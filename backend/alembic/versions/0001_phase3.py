@@ -23,7 +23,6 @@ content_type = sa.Enum("text", "json", name="content_type")
 outbox_status = sa.Enum("pending", "sent", "failed", name="outbox_status")
 
 
-# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.create_table(
         "users",
@@ -173,7 +172,6 @@ def upgrade() -> None:
     op.create_index("ix_outbox_status_next_retry", "outbox", ["status", "next_retry_at"], unique=False)
 
 
-# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.drop_index("ix_outbox_status_next_retry", table_name="outbox")
     op.drop_table("outbox")

@@ -6,7 +6,6 @@ DEAD_LETTER_QUEUE_NAME = "q.dead.messages"
 DEAD_LETTER_BINDING_KEY = "dead.#"
 
 
-# Ensures topology; the worker runtime uses it for asynchronous broker delivery.
 async def ensure_topology(connection: aio_pika.RobustConnection) -> aio_pika.abc.AbstractRobustExchange:
     channel = await connection.channel()
     exchange = await channel.declare_exchange(EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC, durable=True)

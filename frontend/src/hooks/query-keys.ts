@@ -1,4 +1,3 @@
-// Determines whether channel list query key; React components use it to access or update application state.
 export function isChannelListQueryKey(queryKey: readonly unknown[]): boolean {
   const params = queryKey[1];
   return (

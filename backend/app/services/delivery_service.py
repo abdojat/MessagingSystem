@@ -11,7 +11,6 @@ from app.services.event_service import log_event
 from app.services.rbac import normalize_admin_permissions
 
 
-# Groups the delivery business operations; API route handlers call it to enforce application business rules.
 class DeliveryService:
     MANUAL_RETRY_STATUSES = {
         OutboxStatus.failed,
@@ -19,27 +18,21 @@ class DeliveryService:
         OutboxStatus.dead_lettered,
     }
 
-    # Implements the status value operation; API route handlers call it to enforce application business rules.
     @staticmethod
     def _status_value(status: OutboxStatus | str) -> str:
         return status.value if isinstance(status, OutboxStatus) else str(status)
 
-    # Implements the can manage delivery operation; API route handlers call it to enforce application business rules.
     @staticmethod
     def _can_manage_delivery(role: MembershipRole, admin_permissions: dict | None) -> bool:
-        # Return early when `role == MembershipRole.owner` because the remaining work is not applicable.
         if role == MembershipRole.owner:
             return True
-        # Return early when `role == MembershipRole.admin` because the remaining work is not applicable.
         if role == MembershipRole.admin:
             return normalize_admin_permissions(admin_permissions)["can_manage_members"]
         return False
 
-    # Retrieves managed channel ids; API route handlers call it to enforce application business rules.
     @staticmethod
     async def get_managed_channel_ids(db: AsyncSession, actor_user_id: UUID) -> list[UUID]:
         actor = await db.get(User, actor_user_id)
-        # Run this conditional step only when `actor and actor.is_superadmin` is true.
         if actor and actor.is_superadmin:
             rows = await db.execute(select(Channel.id).where(Channel.deleted_at.is_(None)))
             return list(rows.scalars().all())
@@ -56,7 +49,6 @@ class DeliveryService:
             for row in rows
             if DeliveryService._can_manage_delivery(row.role, row.admin_permissions)
         ]
-        # Reject the operation when `not channel_ids` to keep invalid state from progressing.
         if not channel_ids:
             raise AppError(
                 "delivery monitor requires channel owner/admin permissions",
@@ -65,7 +57,6 @@ class DeliveryService:
             )
         return channel_ids
 
-    # Converts item; API route handlers call it to enforce application business rules.
     @staticmethod
     def _to_item(outbox: Outbox, channel_slug: str | None = None) -> DeliveryItemResponse:
         status = DeliveryService._status_value(outbox.status)
@@ -90,7 +81,6 @@ class DeliveryService:
             dead_lettered_at=outbox.dead_lettered_at,
         )
 
-    # Retrieves stats; API route handlers call it to enforce application business rules.
     @staticmethod
     async def get_stats(db: AsyncSession, actor_user_id: UUID) -> DeliveryStatsResponse:
         channel_ids = await DeliveryService.get_managed_channel_ids(db, actor_user_id)
@@ -102,18 +92,14 @@ class DeliveryService:
             )
         ).all()
         counts = DeliveryStatsResponse().model_dump()
-        # Process each `(status, count)` from `rows` to apply this step to the full collection.
         for status, count in rows:
             status_value = DeliveryService._status_value(status)
-            # Choose the appropriate path based on whether `status_value == 'sent'` is true.
             if status_value == "sent":
                 counts["published"] += int(count)
-            # Run this conditional step only when `status_value in counts` is true.
             elif status_value in counts:
                 counts[status_value] = int(count)
         return DeliveryStatsResponse(**counts)
 
-    # Lists failed; API route handlers call it to enforce application business rules.
     @staticmethod
     async def list_failed(db: AsyncSession, actor_user_id: UUID, limit: int = 100) -> list[DeliveryItemResponse]:
         return await DeliveryService._list_by_statuses(
@@ -123,7 +109,6 @@ class DeliveryService:
             limit,
         )
 
-    # Lists dead lettered; API route handlers call it to enforce application business rules.
     @staticmethod
     async def list_dead_lettered(db: AsyncSession, actor_user_id: UUID, limit: int = 100) -> list[DeliveryItemResponse]:
         return await DeliveryService._list_by_statuses(
@@ -133,7 +118,6 @@ class DeliveryService:
             limit,
         )
 
-    # Lists by statuses; API route handlers call it to enforce application business rules.
     @staticmethod
     async def _list_by_statuses(
         db: AsyncSession,
@@ -154,7 +138,6 @@ class DeliveryService:
         ).all()
         return [DeliveryService._to_item(outbox, channel_slug) for outbox, channel_slug in rows]
 
-    # Retries one; API route handlers call it to enforce application business rules.
     @staticmethod
     async def retry_one(db: AsyncSession, actor_user_id: UUID, outbox_id: UUID) -> DeliveryRetryResponse:
         channel_ids = await DeliveryService.get_managed_channel_ids(db, actor_user_id)
@@ -166,13 +149,11 @@ class DeliveryService:
                 .where(Outbox.channel_id.in_(channel_ids))
             )
         ).first()
-        # Reject the operation when `row is None` to keep invalid state from progressing.
         if row is None:
             raise AppError("delivery record not found", 404, code="NOT_FOUND")
 
         outbox, channel_slug = row
         retried_count = 0
-        # Choose the appropriate path based on whether `outbox.status in DeliveryService.MANUAL_RETRY_STATUSES` is true.
         if outbox.status in DeliveryService.MANUAL_RETRY_STATUSES:
             previous_status = DeliveryService._status_value(outbox.status)
             previous_attempt_count = outbox.attempts
@@ -192,7 +173,6 @@ class DeliveryService:
             retried_count = 1
             await db.commit()
             await db.refresh(outbox)
-        # Handle the alternate path after the preceding branch or loop does not produce a result.
         else:
             await db.rollback()
 
@@ -201,7 +181,6 @@ class DeliveryService:
             items=[DeliveryService._to_item(outbox, channel_slug)],
         )
 
-    # Retries all; API route handlers call it to enforce application business rules.
     @staticmethod
     async def retry_all(db: AsyncSession, actor_user_id: UUID, limit: int = 200) -> DeliveryRetryResponse:
         channel_ids = await DeliveryService.get_managed_channel_ids(db, actor_user_id)
@@ -217,7 +196,6 @@ class DeliveryService:
         ).all()
 
         items: list[DeliveryItemResponse] = []
-        # Process each `(outbox, channel_slug)` from `rows` to apply this step to the full collection.
         for outbox, channel_slug in rows:
             previous_status = DeliveryService._status_value(outbox.status)
             previous_attempt_count = outbox.attempts
@@ -236,20 +214,16 @@ class DeliveryService:
             )
             items.append(DeliveryService._to_item(outbox, channel_slug))
 
-        # Choose the appropriate path based on whether `rows` is true.
         if rows:
             await db.commit()
-            # Process each `(outbox, _)` from `rows` to apply this step to the full collection.
             for outbox, _ in rows:
                 await db.refresh(outbox)
             items = [DeliveryService._to_item(outbox, channel_slug) for outbox, channel_slug in rows]
-        # Handle the alternate path after the preceding branch or loop does not produce a result.
         else:
             await db.rollback()
 
         return DeliveryRetryResponse(retried_count=len(rows), items=items)
 
-    # Implements the reset for manual retry operation; API route handlers call it to enforce application business rules.
     @staticmethod
     def _reset_for_manual_retry(outbox: Outbox) -> None:
         outbox.status = OutboxStatus.pending

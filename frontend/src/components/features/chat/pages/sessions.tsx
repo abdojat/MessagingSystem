@@ -9,7 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { formatDateTimeLocalized } from "@/lib/i18n-format";
 
-// Renders the sessions skeleton component; the route adapter uses it for the matching application page.
 function SessionsSkeleton() {
   return (
     <div className="grid gap-4">
@@ -29,7 +28,6 @@ function SessionsSkeleton() {
   );
 }
 
-// Renders the sessions component; the route adapter uses it for the matching application page.
 export default function Sessions() {
   const localePath = useLocalePath();
   const locale = useLocale();
@@ -39,12 +37,9 @@ export default function Sessions() {
   const deleteSession = useDeleteSession();
   const logoutAll = useLogoutAll();
 
-  // Retrieves device icon; the page component uses it to prepare or render the interface.
   const getDeviceIcon = (agent?: string | null) => {
     const ua = (agent || '').toLowerCase();
-    // Return early when `ua.includes('mobile') || ua.includes('android') || ua.includes('iphone')` because the remaining work is not applicable.
     if (ua.includes('mobile') || ua.includes('android') || ua.includes('iphone')) return <Smartphone className="w-6 h-6" />;
-    // Return early when `ua.includes('mac') || ua.includes('windows') || ua.includes('linux')` because the remaining work is not applicable.
     if (ua.includes('mac') || ua.includes('windows') || ua.includes('linux')) return <Laptop className="w-6 h-6" />;
     return <Globe className="w-6 h-6" />;
   };

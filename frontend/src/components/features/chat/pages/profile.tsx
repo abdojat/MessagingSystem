@@ -67,28 +67,22 @@ type UploadContentResponse = {
   public_url: string;
 };
 
-// Normalizes form value; the page component uses it to prepare or render the interface.
 function normalizeFormValue(value: string): string | null {
   const normalized = value.trim();
   return normalized || null;
 }
 
-// Retrieves error message; the page component uses it to prepare or render the interface.
 function getErrorMessage(error: unknown, fallback: string) {
-  // Return early when `error instanceof Error && error.message` because the remaining work is not applicable.
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 }
 
-// Copies text to the browser clipboard; the page component uses it to prepare or render the interface.
 async function copyToClipboard(value: string) {
-  // Run this conditional step only when `typeof navigator !== "undefined" && navigator.clipboard?.writeText` is true.
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
     return;
   }
 
-  // Reject this path when `typeof document === "undefined"` to prevent invalid state from progressing.
   if (typeof document === "undefined") {
     throw new Error("Clipboard is not available in this environment.");
   }
@@ -103,13 +97,11 @@ async function copyToClipboard(value: string) {
   const copied = document.execCommand("copy");
   document.body.removeChild(textarea);
 
-  // Reject this path when `!copied` to prevent invalid state from progressing.
   if (!copied) {
     throw new Error("Copy action was blocked by the browser.");
   }
 }
 
-// Downloads profile snapshot; the page component uses it to prepare or render the interface.
 function downloadProfileSnapshot(user: MeResponse, activeSessionCount: number) {
   const payload = {
     exported_at: new Date().toISOString(),
@@ -128,7 +120,6 @@ function downloadProfileSnapshot(user: MeResponse, activeSessionCount: number) {
   URL.revokeObjectURL(objectUrl);
 }
 
-// Renders the profile skeleton component; the route adapter uses it for the matching application page.
 function ProfileSkeleton() {
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
@@ -206,7 +197,6 @@ function ProfileSkeleton() {
   );
 }
 
-// Renders the profile page; the route adapter uses it for the matching application page.
 export default function ProfilePage() {
   const router = useRouter();
   const localePath = useLocalePath();
@@ -228,7 +218,6 @@ export default function ProfilePage() {
   });
 
   useEffect(() => {
-    // Return early when `!user` because the remaining work is not applicable.
     if (!user) return;
     setFormState({
       display_name: user.display_name ?? "",
@@ -242,7 +231,6 @@ export default function ProfilePage() {
   }, [user?.avatar_url, user?.updated_at]);
 
   useEffect(() => {
-    // Run this conditional step only when `!isInitializing && (!isAuthenticated || !user)` is true.
     if (!isInitializing && (!isAuthenticated || !user)) {
       router.replace(localePath("/login"));
     }
@@ -267,22 +255,18 @@ export default function ProfilePage() {
     },
   });
 
-  // Builds update payload; the page component uses it to prepare or render the interface.
   const buildUpdatePayload = (currentUser: MeResponse): UpdateMeRequest => {
     const payload: UpdateMeRequest = {};
     const nextDisplayName = normalizeFormValue(formState.display_name);
     const nextEmail = normalizeFormValue(formState.email);
     const nextBio = normalizeFormValue(formState.bio);
 
-    // Run this conditional step only when `(currentUser.display_name?.trim() || null) !== nextDisplayName` is true.
     if ((currentUser.display_name?.trim() || null) !== nextDisplayName) {
       payload.display_name = nextDisplayName;
     }
-    // Run this conditional step only when `(currentUser.email?.trim() || null) !== nextEmail` is true.
     if ((currentUser.email?.trim() || null) !== nextEmail) {
       payload.email = nextEmail;
     }
-    // Run this conditional step only when `(currentUser.bio?.trim() || null) !== nextBio` is true.
     if ((currentUser.bio?.trim() || null) !== nextBio) {
       payload.bio = nextBio;
     }
@@ -315,7 +299,6 @@ export default function ProfilePage() {
 
   const uploadAvatar = useMutation({
     mutationFn: async (file: File): Promise<string> => {
-      // Reject this path when `!accessToken` to prevent invalid state from progressing.
       if (!accessToken) {
         throw new Error(t("errors.signInBeforeUpload"));
       }
@@ -330,7 +313,6 @@ export default function ProfilePage() {
       });
 
       const uploadAccessToken = useAuthStore.getState().accessToken;
-      // Reject this path when `!uploadAccessToken` to prevent invalid state from progressing.
       if (!uploadAccessToken) {
         throw new Error(t("errors.signInBeforeUpload"));
       }
@@ -344,7 +326,6 @@ export default function ProfilePage() {
 
       const uploadHeaders = new Headers(created.headers || {});
       uploadHeaders.set("Authorization", `Bearer ${uploadAccessToken}`);
-      // Run this conditional step only when `!uploadHeaders.has("Content-Type")` is true.
       if (!uploadHeaders.has("Content-Type")) {
         uploadHeaders.set("Content-Type", file.type || "application/octet-stream");
       }
@@ -355,29 +336,22 @@ export default function ProfilePage() {
         body: file,
       });
 
-      // Run this conditional step only when `!putResponse.ok` is true.
       if (!putResponse.ok) {
         let message = t("errors.avatarUpload");
-        // Attempt this operation and recover from expected failures in the catch block below.
         try {
           const error = (await putResponse.json()) as { detail?: { message?: string } | string };
-          // Choose the appropriate path based on whether `typeof error.detail === "string"` is true.
           if (typeof error.detail === "string") {
             message = error.detail;
-          // Otherwise, use the backend detail message when no field error is available.
           } else if (error.detail?.message) {
             message = error.detail.message;
           }
-        // Recover from the attempted operation by applying this error-handling path.
         } catch {
-          // Keep default message.
         }
         throw new Error(message);
       }
 
       const uploaded = (await putResponse.json()) as UploadContentResponse;
       const nextAvatarUrl = normalizeFormValue(uploaded.public_url || created.public_url || "");
-      // Reject this path when `!nextAvatarUrl` to prevent invalid state from progressing.
       if (!nextAvatarUrl) {
         throw new Error(t("errors.avatarMissingUrl"));
       }
@@ -386,23 +360,19 @@ export default function ProfilePage() {
   });
 
   const avatarPreviewUrl = useMemo(() => {
-    // Return early when `avatarFile` because the remaining work is not applicable.
     if (avatarFile) return URL.createObjectURL(avatarFile);
     return resolveApiMediaUrl(user?.avatar_url);
   }, [avatarFile, user?.avatar_url]);
 
   useEffect(() => {
-    // Return early when `!avatarFile || !avatarPreviewUrl` because the remaining work is not applicable.
     if (!avatarFile || !avatarPreviewUrl) return;
     return () => URL.revokeObjectURL(avatarPreviewUrl);
   }, [avatarFile, avatarPreviewUrl]);
 
-  // Return early when `isInitializing` because the remaining work is not applicable.
   if (isInitializing) {
     return <ProfileSkeleton />;
   }
 
-  // Return early when `!isAuthenticated || !user` because the remaining work is not applicable.
   if (!isAuthenticated || !user) return null;
 
   const updatePayload = buildUpdatePayload(user);
@@ -469,10 +439,8 @@ export default function ProfilePage() {
     },
   ];
 
-  // Handles copy; the page component uses it to prepare or render the interface.
   const handleCopy = async (label: string, value?: string | null) => {
     const safeValue = value?.trim();
-    // Run this conditional step only when `!safeValue` is true.
     if (!safeValue) {
       toast({
         title: t("toasts.copyMissingTitle", { label }),
@@ -482,14 +450,12 @@ export default function ProfilePage() {
       return;
     }
 
-    // Attempt this operation and recover from expected failures in the catch block below.
     try {
       await copyToClipboard(safeValue);
       toast({
         title: t("toasts.copiedTitle", { label }),
         description: t("toasts.copiedDescription"),
       });
-    // Recover from the attempted operation by applying this error-handling path.
     } catch (_error) {
       toast({
         title: t("toasts.copyFailedTitle"),
@@ -499,16 +465,13 @@ export default function ProfilePage() {
     }
   };
 
-  // Handles download profile; the page component uses it to prepare or render the interface.
   const handleDownloadProfile = () => {
-    // Attempt this operation and recover from expected failures in the catch block below.
     try {
       downloadProfileSnapshot(user, activeSessions.length);
       toast({
         title: t("toasts.exportedTitle"),
         description: t("toasts.exportedDescription"),
       });
-    // Recover from the attempted operation by applying this error-handling path.
     } catch (error) {
       toast({
         title: t("toasts.exportFailedTitle"),
@@ -518,12 +481,10 @@ export default function ProfilePage() {
     }
   };
 
-  // Handles form change; the page component uses it to prepare or render the interface.
   const handleFormChange = (field: keyof ProfileFormState, value: string) => {
     setFormState((previous) => ({ ...previous, [field]: value }));
   };
 
-  // Handles reset form; the page component uses it to prepare or render the interface.
   const handleResetForm = () => {
     setFormState({
       display_name: user.display_name ?? "",
@@ -533,16 +494,12 @@ export default function ProfilePage() {
     setAvatarFile(null);
   };
 
-  // Handles save profile; the page component uses it to prepare or render the interface.
   const handleSaveProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const payload = buildUpdatePayload(user);
-    // Run this conditional step only when `avatarFile` is true.
     if (avatarFile) {
-      // Attempt this operation and recover from expected failures in the catch block below.
       try {
         payload.avatar_url = await uploadAvatar.mutateAsync(avatarFile);
-      // Recover from the attempted operation by applying this error-handling path.
       } catch (error) {
         toast({
           title: t("toasts.avatarUploadFailedTitle"),
@@ -553,7 +510,6 @@ export default function ProfilePage() {
       }
     }
 
-    // Run this conditional step only when `!Object.keys(payload).length` is true.
     if (!Object.keys(payload).length) {
       toast({
         title: t("toasts.noChangesTitle"),

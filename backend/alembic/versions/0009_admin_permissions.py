@@ -17,7 +17,6 @@ depends_on = None
 ADMIN_PERMISSIONS_JSON = "{\"can_publish\": true, \"can_invite\": true, \"can_approve\": true, \"can_manage_members\": true}"
 
 
-# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.execute("ALTER TABLE channel_memberships ADD COLUMN IF NOT EXISTS admin_permissions JSON;")
     op.execute(
@@ -33,6 +32,5 @@ def upgrade() -> None:
     op.execute("UPDATE channel_memberships SET admin_permissions = NULL WHERE role <> 'admin';")
 
 
-# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.execute("ALTER TABLE channel_memberships DROP COLUMN IF EXISTS admin_permissions;")

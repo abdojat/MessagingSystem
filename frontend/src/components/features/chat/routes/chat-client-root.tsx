@@ -8,7 +8,6 @@ interface ChatClientRootProps {
   children: React.ReactNode;
 }
 
-// Renders the chat client root component; parent React views use it to render or control the interface.
 export function ChatClientRoot({ children }: ChatClientRootProps) {
   const [mounted, setMounted] = useState(false);
 
@@ -18,7 +17,6 @@ export function ChatClientRoot({ children }: ChatClientRootProps) {
     setMounted(true);
   }, []);
 
-  // Return early when `!mounted` because the remaining work is not applicable.
   if (!mounted) {
     return null;
   }

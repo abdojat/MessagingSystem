@@ -14,7 +14,6 @@ branch_labels = None
 depends_on = None
 
 
-# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS previous_hash varchar(64);")
     op.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS event_hash varchar(64);")
@@ -27,7 +26,6 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_events_event_hash ON events (event_hash);")
 
 
-# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_events_event_hash;")
     op.execute("DROP INDEX IF EXISTS ix_events_integrity_scope_created;")

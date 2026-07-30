@@ -10,7 +10,6 @@ import { Hash, LogIn } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 
-// Renders the invite skeleton component; the route adapter uses it for the matching application page.
 function InviteSkeleton() {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 relative overflow-hidden">
@@ -25,7 +24,6 @@ function InviteSkeleton() {
   );
 }
 
-// Renders the invite component; the route adapter uses it for the matching application page.
 export default function Invite() {
   const params = useParams<{ token?: string | string[] }>();
   const token = Array.isArray(params?.token) ? params.token[0] : params?.token;
@@ -44,23 +42,18 @@ export default function Invite() {
   const acceptInvite = useMutation({
     mutationFn: () => apiClient(`/invites/${token}/accept`, { method: 'POST' }),
     onSuccess: () => {
-      // Choose the appropriate path based on whether `invite?.channel?.id` is true.
       if (invite?.channel?.id) {
         router.push(localePath(`/app/channels/${invite.channel.id}`));
-      // Handle the fallback path when the preceding condition is false.
       } else {
         router.push(localePath("/app"));
       }
     }
   });
 
-  // Return early when `!token` because the remaining work is not applicable.
   if (!token) return null;
 
-  // Return early when `isLoading` because the remaining work is not applicable.
   if (isLoading) return <InviteSkeleton />;
 
-  // Return early when `isError || !invite || !invite.is_valid` because the remaining work is not applicable.
   if (isError || !invite || !invite.is_valid) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 text-center">

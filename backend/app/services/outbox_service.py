@@ -8,27 +8,22 @@ from app.core.identifiers import normalize_channel_slug, normalize_username
 from app.db.models import Channel, Outbox, OutboxStatus, User
 
 
-# Retrieves channel slug; API route handlers call it to enforce application business rules.
 async def _get_channel_slug(db: AsyncSession, channel_id: UUID) -> str:
     row = await db.execute(select(Channel.channel_slug).where(Channel.id == channel_id))
     channel_slug = row.scalar_one_or_none()
-    # Reject the operation when `channel_slug is None` to keep invalid state from progressing.
     if channel_slug is None:
         raise ValueError(f"channel not found for outbox routing: {channel_id}")
     return normalize_channel_slug(str(channel_slug))
 
 
-# Retrieves username; API route handlers call it to enforce application business rules.
 async def _get_username(db: AsyncSession, user_id: UUID) -> str:
     row = await db.execute(select(User.username).where(User.id == user_id))
     username = row.scalar_one_or_none()
-    # Reject the operation when `username is None` to keep invalid state from progressing.
     if username is None:
         raise ValueError(f"user not found for outbox routing: {user_id}")
     return normalize_username(str(username))
 
 
-# Enqueues message outbox; API route handlers call it to enforce application business rules.
 async def enqueue_message_outbox(
     db: AsyncSession,
     message_id: UUID,
@@ -52,7 +47,6 @@ async def enqueue_message_outbox(
     return row
 
 
-# Enqueues channel event outbox; API route handlers call it to enforce application business rules.
 async def enqueue_channel_event_outbox(
     db: AsyncSession,
     aggregate_id: UUID,
@@ -77,7 +71,6 @@ async def enqueue_channel_event_outbox(
     return row
 
 
-# Enqueues user event outbox; API route handlers call it to enforce application business rules.
 async def enqueue_user_event_outbox(
     db: AsyncSession,
     aggregate_id: UUID,

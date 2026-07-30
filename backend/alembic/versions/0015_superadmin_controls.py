@@ -13,7 +13,6 @@ branch_labels = None
 depends_on = None
 
 
-# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin boolean NOT NULL DEFAULT false;")
     op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;")
@@ -23,7 +22,6 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_users_is_active ON users (is_active);")
 
 
-# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_users_is_active;")
     op.execute("DROP INDEX IF EXISTS ix_users_is_superadmin;")

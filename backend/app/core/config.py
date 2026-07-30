@@ -6,7 +6,6 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# Defines the settings project abstraction; the application layers use it as shared infrastructure.
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -40,35 +39,26 @@ class Settings(BaseSettings):
     superadmin_email: str = ""
     superadmin_password: str = ""
 
-    # Parses cors origins; the application layers use it as shared infrastructure.
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _parse_cors_origins(cls, value: Any) -> list[str]:
-        # Return early when `isinstance(value, list)` because the remaining work is not applicable.
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
-        # Run this conditional step only when `isinstance(value, str)` is true.
         if isinstance(value, str):
             raw = value.strip()
-            # Return early when `not raw` because the remaining work is not applicable.
             if not raw:
                 return []
-            # Run this conditional step only when `raw.startswith('[')` is true.
             if raw.startswith("["):
-                # Attempt this operation and handle expected failures in the exception branches below.
                 try:
                     parsed = json.loads(raw)
-                    # Return early when `isinstance(parsed, list)` because the remaining work is not applicable.
                     if isinstance(parsed, list):
                         return [str(item).strip() for item in parsed if str(item).strip()]
-                # Handle `json.JSONDecodeError` here so this workflow can recover or report the failure consistently.
                 except json.JSONDecodeError:
                     pass
             return [part.strip() for part in raw.split(",") if part.strip()]
         return ["http://localhost:3000", "http://localhost:5173"]
 
 
-# Retrieves settings; the application layers use it as shared infrastructure.
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

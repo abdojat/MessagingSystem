@@ -9,14 +9,12 @@ interface LocaleLayoutProps {
   params: Promise<{ locale: string }>;
 }
 
-// Renders the locale layout; Next.js invokes it while routing and rendering the application.
 export default async function LocaleLayout({
   children,
   params,
 }: LocaleLayoutProps) {
   const { locale } = await params;
 
-  // Run this conditional step only when `!isValidLocale(locale)` is true.
   if (!isValidLocale(locale)) {
     notFound();
   }

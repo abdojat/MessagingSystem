@@ -11,23 +11,17 @@ from app.services.channel_service import ChannelService
 from app.services.event_integrity_service import EventIntegrityService
 
 
-# Stores fake amqp channel state for the verification flow; pytest runs it as a regression check.
 class _FakeAmqpChannel:
-    # Closes; pytest runs it as a regression check.
     async def close(self) -> None:
         return None
 
 
-# Stores fake amqp connection state for the verification flow; pytest runs it as a regression check.
 class _FakeAmqpConnection:
-    # Creates a mocked broker channel; pytest runs it as a regression check.
     async def channel(self) -> _FakeAmqpChannel:
         return _FakeAmqpChannel()
 
 
-# Creates open channel; pytest runs it as a regression check.
 async def _create_open_channel(db_session, monkeypatch, owner_username: str = "integrity_owner"):
-    # Provides a no-op broker binding for isolated tests; pytest runs it as a regression check.
     async def _noop_bind(*args, **kwargs):
         return None
 
@@ -45,7 +39,6 @@ async def _create_open_channel(db_session, monkeypatch, owner_username: str = "i
     return owner, channel
 
 
-# Implements the channel events operation; pytest runs it as a regression check.
 async def _channel_events(db_session, channel_id):
     rows = await db_session.execute(
         select(Event).where(Event.channel_id == channel_id).order_by(Event.created_at.asc(), Event.id.asc())
@@ -53,7 +46,6 @@ async def _channel_events(db_session, channel_id):
     return list(rows.scalars().all())
 
 
-# Verifies new events receive hash chain metadata; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_new_events_receive_hash_chain_metadata(db_session, monkeypatch):
     owner, channel = await _create_open_channel(db_session, monkeypatch)
@@ -75,7 +67,6 @@ async def test_new_events_receive_hash_chain_metadata(db_session, monkeypatch):
     assert events[1].event_hash is not None
 
 
-# Verifies integrity verification returns valid for unchanged chain; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_integrity_verification_returns_valid_for_unchanged_chain(db_session, monkeypatch):
     _, channel = await _create_open_channel(db_session, monkeypatch, "integrity_valid")
@@ -88,7 +79,6 @@ async def test_integrity_verification_returns_valid_for_unchanged_chain(db_sessi
     assert result["broken_event_id"] is None
 
 
-# Verifies integrity verification detects payload tampering; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_integrity_verification_detects_payload_tampering(db_session, monkeypatch):
     _, channel = await _create_open_channel(db_session, monkeypatch, "integrity_payload")
@@ -104,7 +94,6 @@ async def test_integrity_verification_detects_payload_tampering(db_session, monk
     assert result["broken_event_id"] == str(event.id)
 
 
-# Verifies integrity verification detects event type tampering; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_integrity_verification_detects_event_type_tampering(db_session, monkeypatch):
     _, channel = await _create_open_channel(db_session, monkeypatch, "integrity_type")
@@ -120,7 +109,6 @@ async def test_integrity_verification_detects_event_type_tampering(db_session, m
     assert result["broken_event_id"] == str(event.id)
 
 
-# Verifies integrity verification detects previous hash tampering; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_integrity_verification_detects_previous_hash_tampering(db_session, monkeypatch):
     _, channel = await _create_open_channel(db_session, monkeypatch, "integrity_previous")
@@ -141,7 +129,6 @@ async def test_integrity_verification_detects_previous_hash_tampering(db_session
     assert result["broken_event_id"] == str(event.id)
 
 
-# Verifies integrity verification reports legacy missing hash; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_integrity_verification_reports_legacy_missing_hash(db_session, monkeypatch):
     _, channel = await _create_open_channel(db_session, monkeypatch, "integrity_legacy")
@@ -161,7 +148,6 @@ async def test_integrity_verification_reports_legacy_missing_hash(db_session, mo
     assert result["broken_event_id"] == str(event.id)
 
 
-# Verifies unauthorized user cannot verify channel event integrity; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_unauthorized_user_cannot_verify_channel_event_integrity(db_session, monkeypatch):
     _, channel = await _create_open_channel(db_session, monkeypatch, "integrity_authz")
@@ -170,7 +156,6 @@ async def test_unauthorized_user_cannot_verify_channel_event_integrity(db_sessio
         RegisterRequest(username="integrity_outsider", email="integrity_outsider@x.com", password="password123"),
     )
 
-    # Keep `pytest.raises(HTTPException)` active while this scoped operation is performed.
     with pytest.raises(HTTPException) as exc_info:
         await verify_channel_event_integrity(channel.id, db_session, outsider)
 

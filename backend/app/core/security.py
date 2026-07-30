@@ -9,17 +9,14 @@ from app.core.config import get_settings
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
-# Hashes password; the application layers use it as shared infrastructure.
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
-# Verifies password; the application layers use it as shared infrastructure.
 def verify_password(password: str, password_hash: str) -> bool:
     return pwd_context.verify(password, password_hash)
 
 
-# Creates access token; the application layers use it as shared infrastructure.
 def create_access_token(user_id: UUID) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
@@ -32,7 +29,6 @@ def create_access_token(user_id: UUID) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
-# Creates refresh token; the application layers use it as shared infrastructure.
 def create_refresh_token(user_id: UUID, session_id: UUID) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
@@ -46,12 +42,9 @@ def create_refresh_token(user_id: UUID, session_id: UUID) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
-# Decodes token; the application layers use it as shared infrastructure.
 def decode_token(token: str) -> dict:
     settings = get_settings()
-    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-    # Handle `JWTError` here so this workflow can recover or report the failure consistently.
     except JWTError as exc:
         raise ValueError("invalid token") from exc

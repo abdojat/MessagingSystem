@@ -7,7 +7,6 @@ import type {
   AdminUserItem,
 } from "@/types/api";
 
-// Provides admin overview behavior; React components use it to access or update application state.
 export function useAdminOverview(enabled = true) {
   return useQuery({
     queryKey: ["/admin/overview"],
@@ -17,12 +16,9 @@ export function useAdminOverview(enabled = true) {
   });
 }
 
-// Provides admin users behavior; React components use it to access or update application state.
 export function useAdminUsers(q = "", isActive: boolean | null = null, offset = 0, limit = 25, enabled = true) {
   const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
-  // Run this conditional step only when `q` is true.
   if (q) params.set("q", q);
-  // Run this conditional step only when `isActive !== null` is true.
   if (isActive !== null) params.set("is_active", String(isActive));
   return useQuery({
     queryKey: ["/admin/users", { q, isActive, offset, limit }],
@@ -35,7 +31,6 @@ export function useAdminUsers(q = "", isActive: boolean | null = null, offset = 
   });
 }
 
-// Provides admin channels behavior; React components use it to access or update application state.
 export function useAdminChannels(
   q = "",
   state = "",
@@ -45,11 +40,8 @@ export function useAdminChannels(
   enabled = true,
 ) {
   const params = new URLSearchParams({ offset: String(offset), limit: String(limit), include_deleted: "true" });
-  // Run this conditional step only when `q` is true.
   if (q) params.set("q", q);
-  // Run this conditional step only when `state` is true.
   if (state) params.set("state", state);
-  // Run this conditional step only when `visibility` is true.
   if (visibility) params.set("visibility", visibility);
   return useQuery({
     queryKey: ["/admin/channels", { q, state, visibility, offset, limit }],
@@ -62,12 +54,9 @@ export function useAdminChannels(
   });
 }
 
-// Provides admin events behavior; React components use it to access or update application state.
 export function useAdminEvents(q = "", category = "", offset = 0, limit = 25, enabled = true) {
   const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
-  // Run this conditional step only when `q` is true.
   if (q) params.set("q", q);
-  // Run this conditional step only when `category` is true.
   if (category) params.set("category", category);
   return useQuery({
     queryKey: ["/admin/events", { q, category, offset, limit }],
@@ -80,7 +69,6 @@ export function useAdminEvents(q = "", category = "", offset = 0, limit = 25, en
   });
 }
 
-// Provides set admin user status behavior; React components use it to access or update application state.
 export function useSetAdminUserStatus() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -97,7 +85,6 @@ export function useSetAdminUserStatus() {
   });
 }
 
-// Provides revoke admin user sessions behavior; React components use it to access or update application state.
 export function useRevokeAdminUserSessions() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -110,7 +97,6 @@ export function useRevokeAdminUserSessions() {
   });
 }
 
-// Provides set admin channel state behavior; React components use it to access or update application state.
 export function useSetAdminChannelState() {
   const queryClient = useQueryClient();
   return useMutation({

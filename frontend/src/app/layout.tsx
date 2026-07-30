@@ -6,7 +6,6 @@ export const metadata: Metadata = {
   description: "Multilingual role-based chat frontend",
 };
 
-// Renders the root layout; Next.js invokes it while routing and rendering the application.
 export default function RootLayout({
   children,
 }: Readonly<{

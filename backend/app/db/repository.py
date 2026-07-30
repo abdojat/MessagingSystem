@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import ChannelMembership, MembershipRole
 
 
-# Retrieves membership role; the application startup and service layers use it for database access.
 async def get_membership_role(db: AsyncSession, channel_id: UUID, user_id: UUID) -> MembershipRole | None:
     result = await db.execute(
         select(ChannelMembership.role).where(

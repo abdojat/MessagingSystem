@@ -8,7 +8,6 @@ from app.db.models import Event
 from app.services.event_integrity_service import EventIntegrityService
 
 
-# Logs event; API route handlers call it to enforce application business rules.
 async def log_event(
     db: AsyncSession,
     event_type: str,

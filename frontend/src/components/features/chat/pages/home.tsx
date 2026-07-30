@@ -12,7 +12,6 @@ import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 
 const featureIcons = [MessageCircle, ShieldCheck, Zap] as const;
 
-// Renders the home component; the route adapter uses it for the matching application page.
 export default function Home() {
   const localePath = useLocalePath();
   const t = useTranslations("home");

@@ -21,32 +21,24 @@ from app.services.superadmin_bootstrap_service import SuperadminBootstrapService
 from app.realtime.ws_manager import WSManager
 
 
-# Stores fake amqp channel state for the verification flow; pytest runs it as a regression check.
 class _FakeAmqpChannel:
-    # Closes; pytest runs it as a regression check.
     async def close(self) -> None:
         return None
 
 
-# Stores fake amqp connection state for the verification flow; pytest runs it as a regression check.
 class _FakeAmqpConnection:
-    # Creates a mocked broker channel; pytest runs it as a regression check.
     async def channel(self) -> _FakeAmqpChannel:
         return _FakeAmqpChannel()
 
 
-# Stores fake web socket state for the verification flow; pytest runs it as a regression check.
 class _FakeWebSocket:
-    # Initializes a fake web socket; pytest runs it as a regression check.
     def __init__(self):
         self.closed: tuple[int, str] | None = None
 
-    # Closes; pytest runs it as a regression check.
     async def close(self, code: int, reason: str) -> None:
         self.closed = (code, reason)
 
 
-# Verifies superadmin console responses are not cacheable; pytest runs it as a regression check.
 def test_superadmin_console_responses_are_not_cacheable():
     response = Response()
 
@@ -56,7 +48,6 @@ def test_superadmin_console_responses_are_not_cacheable():
     assert response.headers["pragma"] == "no-cache"
 
 
-# Verifies deactivation closes current backend websockets; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_deactivation_closes_current_backend_websockets():
     user_id = uuid4()
@@ -70,7 +61,6 @@ async def test_deactivation_closes_current_backend_websockets():
     assert socket.closed == (1008, "account deactivated")
 
 
-# Verifies superadmin bootstrap is explicit and idempotent; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_superadmin_bootstrap_is_explicit_and_idempotent(db_session):
     user, created = await SuperadminBootstrapService.ensure(
@@ -95,14 +85,12 @@ async def test_superadmin_bootstrap_is_explicit_and_idempotent(db_session):
     assert len(events) == 1
 
 
-# Verifies bootstrap refuses to promote existing normal user; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_bootstrap_refuses_to_promote_existing_normal_user(db_session):
     await AuthService.register(
         db_session,
         RegisterRequest(username="existing_user", email="existing@example.com", password="password123"),
     )
-    # Keep `pytest.raises(RuntimeError, match...` active while this scoped operation is performed.
     with pytest.raises(RuntimeError, match="refusing to auto-promote"):
         await SuperadminBootstrapService.ensure(
             db_session,
@@ -112,7 +100,6 @@ async def test_bootstrap_refuses_to_promote_existing_normal_user(db_session):
         )
 
 
-# Verifies superadmin can deactivate user and immediately revoke access; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_superadmin_can_deactivate_user_and_immediately_revoke_access(db_session):
     admin, _ = await SuperadminBootstrapService.ensure(
@@ -139,7 +126,6 @@ async def test_superadmin_can_deactivate_user_and_immediately_revoke_access(db_s
     assert revoked == 1
     assert user.is_active is False
     assert session.revoked_at is not None
-    # Keep `pytest.raises(AppError)` active while this scoped operation is performed.
     with pytest.raises(AppError) as login_error:
         await AuthService.login(
             db_session,
@@ -149,20 +135,17 @@ async def test_superadmin_can_deactivate_user_and_immediately_revoke_access(db_s
             14,
         )
     assert login_error.value.code == "ACCOUNT_DISABLED"
-    # Keep `pytest.raises(AppError)` active while this scoped operation is performed.
     with pytest.raises(AppError) as token_error:
         await AuthService.get_user_from_access_token(db_session, create_access_token(user.id))
     assert token_error.value.code == "ACCOUNT_DISABLED"
 
 
-# Verifies normal user is denied superadmin dependency and attempt is logged; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_normal_user_is_denied_superadmin_dependency_and_attempt_is_logged(db_session):
     user = await AuthService.register(
         db_session,
         RegisterRequest(username="ordinary_user", email=None, password="password123"),
     )
-    # Keep `pytest.raises(HTTPException)` active while this scoped operation is performed.
     with pytest.raises(HTTPException) as error:
         await get_current_superadmin(db_session, user)
     assert error.value.status_code == 403
@@ -172,10 +155,8 @@ async def test_normal_user_is_denied_superadmin_dependency_and_attempt_is_logged
     assert event.actor_user_id == user.id
 
 
-# Verifies global event list includes system and cross channel events; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_global_event_list_includes_system_and_cross_channel_events(db_session, monkeypatch):
-    # Provides a no-op test double; pytest runs it as a regression check.
     async def _noop(*args, **kwargs):
         return None
 
@@ -298,7 +279,6 @@ async def test_global_event_list_includes_system_and_cross_channel_events(db_ses
     assert matching_channels[0].id == channel.id
 
 
-# Verifies admin event projection excludes raw and nested payload data; pytest runs it as a regression check.
 def test_admin_event_projection_excludes_raw_and_nested_payload_data():
     details = AdminService._safe_event_details(
         "message.published",
@@ -321,10 +301,8 @@ def test_admin_event_projection_excludes_raw_and_nested_payload_data():
     }
 
 
-# Verifies superadmin can suspend and restore channel without membership; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_superadmin_can_suspend_and_restore_channel_without_membership(db_session, monkeypatch):
-    # Provides a no-op test double; pytest runs it as a regression check.
     async def _noop(*args, **kwargs):
         return None
 
