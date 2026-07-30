@@ -24,6 +24,7 @@ const AuthenticatedImage = React.forwardRef<HTMLImageElement, AuthenticatedImage
 
     React.useEffect(() => {
       const fetchSrc = resolvedSrc;
+      // Return early when `!fetchSrc || !needsAuth || !accessToken` because the remaining work is not applicable.
       if (!fetchSrc || !needsAuth || !accessToken) {
         return;
       }
@@ -32,26 +33,33 @@ const AuthenticatedImage = React.forwardRef<HTMLImageElement, AuthenticatedImage
       const controller = new AbortController();
       let localObjectUrl: string | undefined;
 
+      // Loads protected image; parent React views use it to render or control the interface.
       async function loadProtectedImage() {
+        // Attempt this operation and recover from expected failures in the catch block below.
         try {
           const response = await fetch(fetchUrl, {
             headers: { Authorization: `Bearer ${accessToken}` },
             signal: controller.signal,
           });
+          // Reject this path when `!response.ok` to prevent invalid state from progressing.
           if (!response.ok) {
             throw new Error(`media request failed: ${response.status}`);
           }
           const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+          // Reject this path when `contentType && !contentType.startsWith("image/")` to prevent invalid state from progressing.
           if (contentType && !contentType.startsWith("image/")) {
             throw new Error("media response is not an image");
           }
           const blob = await response.blob();
+          // Reject this path when `blob.type && !blob.type.toLowerCase().startsWith("image/")` to prevent invalid state from progressing.
           if (blob.type && !blob.type.toLowerCase().startsWith("image/")) {
             throw new Error("media blob is not an image");
           }
           localObjectUrl = URL.createObjectURL(blob);
           setObjectUrl(localObjectUrl);
+        // Recover from the attempted operation by applying this error-handling path.
         } catch {
+          // Run this conditional step only when `!controller.signal.aborted` is true.
           if (!controller.signal.aborted) {
             setFailed(true);
           }
@@ -62,6 +70,7 @@ const AuthenticatedImage = React.forwardRef<HTMLImageElement, AuthenticatedImage
 
       return () => {
         controller.abort();
+        // Run this conditional step only when `localObjectUrl` is true.
         if (localObjectUrl) {
           URL.revokeObjectURL(localObjectUrl);
         }
@@ -70,6 +79,7 @@ const AuthenticatedImage = React.forwardRef<HTMLImageElement, AuthenticatedImage
 
     React.useEffect(() => {
       return () => {
+        // Run this conditional step only when `objectUrl` is true.
         if (objectUrl) {
           URL.revokeObjectURL(objectUrl);
         }
@@ -77,6 +87,7 @@ const AuthenticatedImage = React.forwardRef<HTMLImageElement, AuthenticatedImage
     }, [objectUrl]);
 
     const imageSrc = needsAuth ? objectUrl : resolvedSrc;
+    // Return early when `!imageSrc || failed` because the remaining work is not applicable.
     if (!imageSrc || failed) {
       return null;
     }

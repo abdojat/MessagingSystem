@@ -89,34 +89,46 @@ const DETAIL_KEYS = [
   "channel_id",
 ] as const;
 
+// Converts; parent React views use it to render or control the interface.
 function humanize(value: string) {
   return value
     .replace(/[._-]+/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+// Implements the compact reference operation; parent React views use it to render or control the interface.
 function compactReference(value: string) {
   return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
 }
 
+// Implements the family operation; parent React views use it to render or control the interface.
 function family(eventType: string) {
   const prefix = eventType.split(".", 1)[0];
+  // Return early when `prefix === "security"` because the remaining work is not applicable.
   if (prefix === "security") return { Icon: ShieldAlert, tone: "text-destructive" };
+  // Return early when `prefix === "channel"` because the remaining work is not applicable.
   if (prefix === "channel") return { Icon: Hash, tone: "text-sky-600 dark:text-sky-400" };
+  // Return early when `prefix === "message"` because the remaining work is not applicable.
   if (prefix === "message") return { Icon: MessageSquare, tone: "text-violet-600 dark:text-violet-400" };
+  // Return early when `["membership", "member", "invite"].includes(prefix)` because the remaining work is not applicable.
   if (["membership", "member", "invite"].includes(prefix)) return { Icon: Users, tone: "text-emerald-600 dark:text-emerald-400" };
+  // Return early when `prefix === "upload"` because the remaining work is not applicable.
   if (prefix === "upload") return { Icon: FileUp, tone: "text-amber-600 dark:text-amber-400" };
+  // Return early when `prefix === "superadmin"` because the remaining work is not applicable.
   if (prefix === "superadmin") return { Icon: UserRoundCog, tone: "text-primary" };
+  // Return early when `prefix === "broker"` because the remaining work is not applicable.
   if (prefix === "broker") return { Icon: Activity, tone: "text-orange-600 dark:text-orange-400" };
   return { Icon: ShieldCheck, tone: "text-muted-foreground" };
 }
 
+// Renders the admin event type component; parent React views use it to render or control the interface.
 export function AdminEventType({ eventType }: { eventType: string }) {
   const t = useTranslations("superadmin.eventDisplay");
   const titleKey = EVENT_TITLES[eventType];
   return <>{titleKey ? t(`titles.${titleKey}`) : humanize(eventType)}</>;
 }
 
+// Renders the admin event display component; parent React views use it to render or control the interface.
 export function AdminEventDisplay({ event }: { event: AdminEventItem }) {
   const t = useTranslations("superadmin.eventDisplay");
   const titleKey = EVENT_TITLES[event.event_type];
@@ -126,11 +138,15 @@ export function AdminEventDisplay({ event }: { event: AdminEventItem }) {
     return value === undefined || value === null || value === "" ? [] : [[key, value] as const];
   }).slice(0, 6);
 
+  // Formats value; parent React views use it to render or control the interface.
   function formatValue(key: string, value: string | number | boolean) {
+    // Return early when `typeof value === "boolean"` because the remaining work is not applicable.
     if (typeof value === "boolean") return value ? t("yes") : t("no");
+    // Return early when `key.endsWith("size_bytes") && typeof value === "number"` because the remaining work is not applicable.
     if (key.endsWith("size_bytes") && typeof value === "number") {
       return t("bytes", { count: new Intl.NumberFormat().format(value) });
     }
+    // Return early when `key.endsWith("_id") && typeof value === "string"` because the remaining work is not applicable.
     if (key.endsWith("_id") && typeof value === "string") return compactReference(value);
     return key === "permissions" ? humanize(String(value)) : String(value);
   }

@@ -3,6 +3,7 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# Defines the settings project abstraction; the worker runtime uses it for asynchronous broker delivery.
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
 
+# Retrieves settings; the worker runtime uses it for asynchronous broker delivery.
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

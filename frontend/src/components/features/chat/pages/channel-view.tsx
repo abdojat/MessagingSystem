@@ -24,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { apiClient } from "@/services/api/client";
 import { getApiBaseUrl } from "@/services/api/runtime";
 
+// Renders the channel view skeleton component; the route adapter uses it for the matching application page.
 function ChannelViewSkeleton() {
   return (
     <div className="flex-1 flex flex-col h-full bg-background relative z-0">
@@ -98,16 +99,22 @@ const MEDIA_EXTENSION_TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
+// Retrieves message media kind; the page component uses it to prepare or render the interface.
 function getMessageMediaKind(contentType?: string | null): MediaKind | null {
   const normalized = contentType?.toLowerCase() || "";
+  // Return early when `normalized.startsWith("image/")` because the remaining work is not applicable.
   if (normalized.startsWith("image/")) return "image";
+  // Return early when `normalized.startsWith("video/")` because the remaining work is not applicable.
   if (normalized.startsWith("video/")) return "video";
+  // Return early when `normalized.startsWith("audio/")` because the remaining work is not applicable.
   if (normalized.startsWith("audio/")) return "audio";
   return null;
 }
 
+// Infers media content type; the page component uses it to prepare or render the interface.
 function inferMediaContentType(file: File): string | null {
   const declaredType = file.type?.toLowerCase();
+  // Return early when `getMessageMediaKind(declaredType)` because the remaining work is not applicable.
   if (getMessageMediaKind(declaredType)) {
     return declaredType;
   }
@@ -116,18 +123,23 @@ function inferMediaContentType(file: File): string | null {
   return getMessageMediaKind(inferredType) ? inferredType : null;
 }
 
+// Creates pending attachment id; the page component uses it to prepare or render the interface.
 function createPendingAttachmentId(): string {
+  // Return early when `typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"` because the remaining work is not applicable.
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+// Formats bytes; the page component uses it to prepare or render the interface.
 function formatBytes(value?: number | null): string {
+  // Return early when `!value || value < 1` because the remaining work is not applicable.
   if (!value || value < 1) return "";
   const units = ["B", "KB", "MB", "GB"];
   let size = value;
   let unitIndex = 0;
+  // Repeat this operation while `size >= 1024 && unitIndex < units.length - 1` remains true.
   while (size >= 1024 && unitIndex < units.length - 1) {
     size /= 1024;
     unitIndex += 1;
@@ -135,30 +147,38 @@ function formatBytes(value?: number | null): string {
   return `${size >= 10 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
 }
 
+// Retrieves attachment url; the page component uses it to prepare or render the interface.
 function getAttachmentUrl(attachment: AttachmentItem): string | undefined {
   return resolveApiMediaUrl(attachment.url || attachment.public_url);
 }
 
+// Retrieves error message; the page component uses it to prepare or render the interface.
 function getErrorMessage(error: unknown, fallback: string) {
+  // Return early when `error instanceof Error && error.message` because the remaining work is not applicable.
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 }
 
+// Resolves upload target url; the page component uses it to prepare or render the interface.
 function resolveUploadTargetUrl(uploadUrl: string): string {
   const apiBaseUrl = getApiBaseUrl();
+  // Return early when `/^https?:\/\//i.test(uploadUrl)` because the remaining work is not applicable.
   if (/^https?:\/\//i.test(uploadUrl)) {
     return uploadUrl;
   }
+  // Return early when `/^https?:\/\//i.test(apiBaseUrl)` because the remaining work is not applicable.
   if (/^https?:\/\//i.test(apiBaseUrl)) {
     return `${new URL(apiBaseUrl).origin}${uploadUrl.startsWith("/") ? uploadUrl : `/${uploadUrl}`}`;
   }
   return uploadUrl;
 }
 
+// Builds a safely quoted CSS URL value; the page component uses it to prepare or render the interface.
 function cssUrl(value: string): string {
   return `url("${value.replace(/"/g, "%22")}")`;
 }
 
+// Provides authenticated background image behavior; React components use it to access or update application state.
 function useAuthenticatedBackgroundImage(src?: string | null, accessToken?: string | null): string | undefined {
   const resolvedSrc = resolveApiMediaUrl(src);
   const needsAuth = isProtectedApiMediaUrl(resolvedSrc);
@@ -171,6 +191,7 @@ function useAuthenticatedBackgroundImage(src?: string | null, accessToken?: stri
   }, [resolvedSrc, needsAuth, accessToken]);
 
   useEffect(() => {
+    // Return early when `!resolvedSrc || !needsAuth || !accessToken` because the remaining work is not applicable.
     if (!resolvedSrc || !needsAuth || !accessToken) {
       return;
     }
@@ -179,26 +200,33 @@ function useAuthenticatedBackgroundImage(src?: string | null, accessToken?: stri
     const controller = new AbortController();
     let localObjectUrl: string | undefined;
 
+    // Loads protected image; the page component uses it to prepare or render the interface.
     async function loadProtectedImage() {
+      // Attempt this operation and recover from expected failures in the catch block below.
       try {
         const response = await fetch(fetchSrc, {
           headers: { Authorization: `Bearer ${accessToken}` },
           signal: controller.signal,
         });
+        // Reject this path when `!response.ok` to prevent invalid state from progressing.
         if (!response.ok) {
           throw new Error(`wallpaper request failed: ${response.status}`);
         }
         const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+        // Reject this path when `contentType && !contentType.startsWith("image/")` to prevent invalid state from progressing.
         if (contentType && !contentType.startsWith("image/")) {
           throw new Error("wallpaper response is not an image");
         }
         const blob = await response.blob();
+        // Reject this path when `blob.type && !blob.type.toLowerCase().startsWith("image/")` to prevent invalid state from progressing.
         if (blob.type && !blob.type.toLowerCase().startsWith("image/")) {
           throw new Error("wallpaper blob is not an image");
         }
         localObjectUrl = URL.createObjectURL(blob);
         setObjectUrl(localObjectUrl);
+      // Recover from the attempted operation by applying this error-handling path.
       } catch {
+        // Run this conditional step only when `!controller.signal.aborted` is true.
         if (!controller.signal.aborted) {
           setFailed(true);
         }
@@ -209,6 +237,7 @@ function useAuthenticatedBackgroundImage(src?: string | null, accessToken?: stri
 
     return () => {
       controller.abort();
+      // Run this conditional step only when `localObjectUrl` is true.
       if (localObjectUrl) {
         URL.revokeObjectURL(localObjectUrl);
       }
@@ -217,12 +246,14 @@ function useAuthenticatedBackgroundImage(src?: string | null, accessToken?: stri
 
   useEffect(() => {
     return () => {
+      // Run this conditional step only when `objectUrl` is true.
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
       }
     };
   }, [objectUrl]);
 
+  // Return early when `!resolvedSrc || failed` because the remaining work is not applicable.
   if (!resolvedSrc || failed) {
     return undefined;
   }
@@ -230,36 +261,50 @@ function useAuthenticatedBackgroundImage(src?: string | null, accessToken?: stri
   return needsAuth ? objectUrl : resolvedSrc;
 }
 
+// Renders the attachment icon component; the route adapter uses it for the matching application page.
 function AttachmentIcon({ kind }: { kind: MediaKind | null }) {
+  // Return early when `kind === "image"` because the remaining work is not applicable.
   if (kind === "image") return <ImageIcon className="h-4 w-4" />;
+  // Return early when `kind === "video"` because the remaining work is not applicable.
   if (kind === "video") return <Video className="h-4 w-4" />;
+  // Return early when `kind === "audio"` because the remaining work is not applicable.
   if (kind === "audio") return <Music2 className="h-4 w-4" />;
   return <Paperclip className="h-4 w-4" />;
 }
 
+// Retrieves message snippet; the page component uses it to prepare or render the interface.
 function getMessageSnippet(message: MessageResponse | undefined, t: ReturnType<typeof useTranslations>): string {
+  // Return early when `!message` because the remaining work is not applicable.
   if (!message) return t("messages.snippet.notLoaded");
+  // Return early when `message.deleted_at` because the remaining work is not applicable.
   if (message.deleted_at) return t("messages.snippet.deleted");
+  // Run this conditional step only when `message.content_type === "text"` is true.
   if (message.content_type === "text") {
     const text = (message.content_text || "").trim();
+    // Return early when `!text && message.attachments && message.attachments.length > 0` because the remaining work is not applicable.
     if (!text && message.attachments && message.attachments.length > 0) {
       return t("messages.snippet.attachments", { count: message.attachments.length });
     }
+    // Return early when `!text` because the remaining work is not applicable.
     if (!text) return t("messages.snippet.empty");
     return text.length > 90 ? `${text.slice(0, 90)}...` : text;
   }
+  // Return early when `message.attachments && message.attachments.length > 0` because the remaining work is not applicable.
   if (message.attachments && message.attachments.length > 0) {
     return t("messages.snippet.attachments", { count: message.attachments.length });
   }
   return t("messages.snippet.structured");
 }
 
+// Copies text to the browser clipboard; the page component uses it to prepare or render the interface.
 async function copyToClipboard(value: string) {
+  // Run this conditional step only when `typeof navigator !== "undefined" && navigator.clipboard?.writeText` is true.
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
     return;
   }
 
+  // Reject this path when `typeof document === "undefined"` to prevent invalid state from progressing.
   if (typeof document === "undefined") {
     throw new Error("Clipboard is not available in this environment.");
   }
@@ -274,11 +319,13 @@ async function copyToClipboard(value: string) {
   const copied = document.execCommand("copy");
   document.body.removeChild(textarea);
 
+  // Reject this path when `!copied` to prevent invalid state from progressing.
   if (!copied) {
     throw new Error("Copy action was blocked by the browser.");
   }
 }
 
+// Renders the authenticated playback media component; the route adapter uses it for the matching application page.
 function AuthenticatedPlaybackMedia({
   src,
   kind,
@@ -301,6 +348,7 @@ function AuthenticatedPlaybackMedia({
   }, [accessToken, kind, needsAuth, src]);
 
   useEffect(() => {
+    // Return early when `!src || !needsAuth || !accessToken` because the remaining work is not applicable.
     if (!src || !needsAuth || !accessToken) {
       return;
     }
@@ -309,27 +357,34 @@ function AuthenticatedPlaybackMedia({
     const fetchSrc = src;
     let localObjectUrl: string | undefined;
 
+    // Loads protected media; the page component uses it to prepare or render the interface.
     async function loadProtectedMedia() {
+      // Attempt this operation and recover from expected failures in the catch block below.
       try {
         const response = await fetch(fetchSrc, {
           headers: { Authorization: `Bearer ${accessToken}` },
           signal: controller.signal,
         });
+        // Reject this path when `!response.ok` to prevent invalid state from progressing.
         if (!response.ok) {
           throw new Error(`media request failed: ${response.status}`);
         }
         const expectedPrefix = `${kind}/`;
         const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+        // Reject this path when `contentType && !contentType.startsWith(expectedPrefix)` to prevent invalid state from progressing.
         if (contentType && !contentType.startsWith(expectedPrefix)) {
           throw new Error(`media response is not ${kind}`);
         }
         const blob = await response.blob();
+        // Reject this path when `blob.type && !blob.type.toLowerCase().startsWith(expectedPrefix)` to prevent invalid state from progressing.
         if (blob.type && !blob.type.toLowerCase().startsWith(expectedPrefix)) {
           throw new Error(`media blob is not ${kind}`);
         }
         localObjectUrl = URL.createObjectURL(blob);
         setObjectUrl(localObjectUrl);
+      // Recover from the attempted operation by applying this error-handling path.
       } catch {
+        // Run this conditional step only when `!controller.signal.aborted` is true.
         if (!controller.signal.aborted) {
           setFailed(true);
         }
@@ -340,6 +395,7 @@ function AuthenticatedPlaybackMedia({
 
     return () => {
       controller.abort();
+      // Run this conditional step only when `localObjectUrl` is true.
       if (localObjectUrl) {
         URL.revokeObjectURL(localObjectUrl);
       }
@@ -347,6 +403,7 @@ function AuthenticatedPlaybackMedia({
   }, [accessToken, needsAuth, src]);
 
   const mediaSrc = needsAuth ? objectUrl : src;
+  // Return early when `failed` because the remaining work is not applicable.
   if (failed) {
     return (
       <div className={cn("flex h-20 items-center justify-center text-xs text-muted-foreground", className)}>
@@ -354,6 +411,7 @@ function AuthenticatedPlaybackMedia({
       </div>
     );
   }
+  // Return early when `!mediaSrc` because the remaining work is not applicable.
   if (!mediaSrc) {
     return (
       <div className={cn("flex h-20 items-center justify-center", className)}>
@@ -362,6 +420,7 @@ function AuthenticatedPlaybackMedia({
     );
   }
 
+  // Return early when `kind === "video"` because the remaining work is not applicable.
   if (kind === "video") {
     return <video src={mediaSrc} controls preload="metadata" className={className} />;
   }
@@ -369,9 +428,11 @@ function AuthenticatedPlaybackMedia({
   return <audio src={mediaSrc} controls preload="metadata" className={className} />;
 }
 
+// Renders the message attachments component; the route adapter uses it for the matching application page.
 function MessageAttachments({ attachments, isMe, className }: { attachments: AttachmentItem[]; isMe: boolean; className?: string }) {
   const commonT = useTranslations("common");
   const visibleAttachments = attachments.filter((attachment) => getAttachmentUrl(attachment));
+  // Return early when `visibleAttachments.length === 0` because the remaining work is not applicable.
   if (visibleAttachments.length === 0) return null;
 
   return (
@@ -410,6 +471,7 @@ function MessageAttachments({ attachments, isMe, className }: { attachments: Att
   );
 }
 
+// Renders the channel view; the route adapter uses it for the matching application page.
 export default function ChannelView() {
   const params = useParams<{ channelId?: string | string[] }>();
   const channelId = Array.isArray(params?.channelId) ? params.channelId[0] : params?.channelId;
@@ -461,6 +523,7 @@ export default function ChannelView() {
     enabled: isMember && Boolean(channel?.permissions.can_manage_members),
   });
 
+  // Formats time; the page component uses it to prepare or render the interface.
   const formatTime = (value: string) =>
     new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(new Date(value));
 
@@ -485,12 +548,14 @@ export default function ChannelView() {
   }, []);
 
   useEffect(() => {
+    // Return early when `!channelId || !isMember || messages.length === 0` because the remaining work is not applicable.
     if (!channelId || !isMember || messages.length === 0) return;
 
     const latestMessage = messages[messages.length - 1];
     const latestSeqId = latestMessage?.seq_id;
     const currentSeenSeqId = channel?.my_last_seen_seq_id ?? 0;
 
+    // Return early when `!latestSeqId || latestSeqId <= currentSeenSeqId || lastMarkedSeenSeqR...` because the remaining work is not applicable.
     if (!latestSeqId || latestSeqId <= currentSeenSeqId || lastMarkedSeenSeqRef.current === latestSeqId) {
       return;
     }
@@ -498,6 +563,7 @@ export default function ChannelView() {
     const container = scrollContainerRef.current;
     const isNearBottom = !container || container.scrollHeight - container.scrollTop - container.clientHeight < 80;
 
+    // Return early when `!isNearBottom` because the remaining work is not applicable.
     if (!isNearBottom) return;
 
     lastMarkedSeenSeqRef.current = latestSeqId;
@@ -505,6 +571,7 @@ export default function ChannelView() {
       { channelId, lastSeenSeqId: latestSeqId },
       {
         onError: () => {
+          // Run this conditional step only when `lastMarkedSeenSeqRef.current === latestSeqId` is true.
           if (lastMarkedSeenSeqRef.current === latestSeqId) {
             lastMarkedSeenSeqRef.current = null;
           }
@@ -513,7 +580,9 @@ export default function ChannelView() {
     );
   }, [channel?.my_last_seen_seq_id, channelId, isMember, markSeen, messages]);
 
+  // Return early when `isChannelLoading` because the remaining work is not applicable.
   if (isChannelLoading) return <ChannelViewSkeleton />;
+  // Return early when `isChannelError && !channel` because the remaining work is not applicable.
   if (isChannelError && !channel) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6">
@@ -524,12 +593,15 @@ export default function ChannelView() {
       </div>
     );
   }
+  // Return early when `!channel` because the remaining work is not applicable.
   if (!channel) return <div className="flex-1 flex items-center justify-center text-muted-foreground">{t("errors.notFound")}</div>;
 
   const channelAvatarUrl = resolveApiMediaUrl(channel.avatar_url);
   const userAvatarUrl = resolveApiMediaUrl(user?.avatar_url);
 
+  // Uploads pending media; the page component uses it to prepare or render the interface.
   const uploadPendingMedia = async (item: PendingMediaAttachment): Promise<{ file_id: string }> => {
+    // Reject this path when `!accessToken` to prevent invalid state from progressing.
     if (!accessToken) {
       throw new Error("missing access token");
     }
@@ -544,6 +616,7 @@ export default function ChannelView() {
     });
 
     const uploadAccessToken = useAuthStore.getState().accessToken;
+    // Reject this path when `!uploadAccessToken` to prevent invalid state from progressing.
     if (!uploadAccessToken) {
       throw new Error("missing access token");
     }
@@ -557,6 +630,7 @@ export default function ChannelView() {
       headers: uploadHeaders,
       body: item.file,
     });
+    // Reject this path when `!response.ok` to prevent invalid state from progressing.
     if (!response.ok) {
       throw new Error(`upload failed: ${response.status}`);
     }
@@ -564,6 +638,7 @@ export default function ChannelView() {
     return { file_id: created.file_id };
   };
 
+  // Implements the save user wallpaper url operation; the page component uses it to prepare or render the interface.
   const saveUserWallpaperUrl = async (wallpaperUrl: string | null): Promise<MeResponse> => {
     const payload: UpdateMeRequest = { wallpaper_url: wallpaperUrl };
     const updatedUser = await apiClient<MeResponse>("/me", {
@@ -574,7 +649,9 @@ export default function ChannelView() {
     return updatedUser;
   };
 
+  // Uploads wallpaper file; the page component uses it to prepare or render the interface.
   const uploadWallpaperFile = async (file: File, contentType: string): Promise<string> => {
+    // Reject this path when `!accessToken` to prevent invalid state from progressing.
     if (!accessToken) {
       throw new Error(t("toasts.wallpaperSignInRequired"));
     }
@@ -589,6 +666,7 @@ export default function ChannelView() {
     });
 
     const uploadAccessToken = useAuthStore.getState().accessToken;
+    // Reject this path when `!uploadAccessToken` to prevent invalid state from progressing.
     if (!uploadAccessToken) {
       throw new Error(t("toasts.wallpaperSignInRequired"));
     }
@@ -602,24 +680,29 @@ export default function ChannelView() {
       headers: uploadHeaders,
       body: file,
     });
+    // Reject this path when `!response.ok` to prevent invalid state from progressing.
     if (!response.ok) {
       throw new Error(`upload failed: ${response.status}`);
     }
 
     const uploaded = (await response.json()) as UploadContentResponse;
     const nextWallpaperUrl = (uploaded.public_url || created.public_url || "").trim();
+    // Reject this path when `!nextWallpaperUrl` to prevent invalid state from progressing.
     if (!nextWallpaperUrl) {
       throw new Error(t("toasts.wallpaperMissingUrl"));
     }
     return nextWallpaperUrl;
   };
 
+  // Handles wallpaper selected; the page component uses it to prepare or render the interface.
   const handleWallpaperSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
     event.currentTarget.value = "";
+    // Return early when `!file` because the remaining work is not applicable.
     if (!file) return;
 
     const contentType = inferMediaContentType(file);
+    // Run this conditional step only when `!contentType || getMessageMediaKind(contentType) !== "image" || conte...` is true.
     if (!contentType || getMessageMediaKind(contentType) !== "image" || contentType === "image/svg+xml") {
       toast({
         title: t("toasts.wallpaperUnsupportedTitle"),
@@ -628,6 +711,7 @@ export default function ChannelView() {
       });
       return;
     }
+    // Run this conditional step only when `file.size > MAX_WALLPAPER_FILE_SIZE_BYTES` is true.
     if (file.size > MAX_WALLPAPER_FILE_SIZE_BYTES) {
       toast({
         title: t("toasts.wallpaperTooLargeTitle"),
@@ -638,6 +722,7 @@ export default function ChannelView() {
     }
 
     setIsUpdatingWallpaper(true);
+    // Attempt this operation and recover from expected failures in the catch block below.
     try {
       const wallpaperUrl = await uploadWallpaperFile(file, contentType);
       await saveUserWallpaperUrl(wallpaperUrl);
@@ -645,45 +730,56 @@ export default function ChannelView() {
         title: t("toasts.wallpaperUploadedTitle"),
         description: t("toasts.wallpaperUploadedDescription"),
       });
+    // Recover from the attempted operation by applying this error-handling path.
     } catch (error) {
       toast({
         title: t("toasts.wallpaperUploadFailedTitle"),
         description: getErrorMessage(error, t("toasts.wallpaperUploadFailedDescription")),
         variant: "destructive",
       });
+    // Always finalize local state after the attempted operation finishes.
     } finally {
       setIsUpdatingWallpaper(false);
     }
   };
 
+  // Clears custom wallpaper; the page component uses it to prepare or render the interface.
   const clearCustomWallpaper = async (showToast = true) => {
+    // Return early when `!user?.wallpaper_url || isUpdatingWallpaper` because the remaining work is not applicable.
     if (!user?.wallpaper_url || isUpdatingWallpaper) return;
     setIsUpdatingWallpaper(true);
+    // Attempt this operation and recover from expected failures in the catch block below.
     try {
       await saveUserWallpaperUrl(null);
+      // Run this conditional step only when `showToast` is true.
       if (showToast) {
         toast({
           title: t("toasts.wallpaperClearedTitle"),
           description: t("toasts.wallpaperClearedDescription"),
         });
       }
+    // Recover from the attempted operation by applying this error-handling path.
     } catch (error) {
       toast({
         title: t("toasts.wallpaperClearFailedTitle"),
         description: getErrorMessage(error, t("toasts.wallpaperClearFailedDescription")),
         variant: "destructive",
       });
+    // Always finalize local state after the attempted operation finishes.
     } finally {
       setIsUpdatingWallpaper(false);
     }
   };
 
+  // Handles media selected; the page component uses it to prepare or render the interface.
   const handleMediaSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     event.currentTarget.value = "";
+    // Return early when `files.length === 0` because the remaining work is not applicable.
     if (files.length === 0) return;
 
     const availableSlots = Math.max(0, MAX_MEDIA_ATTACHMENTS - pendingMedia.length);
+    // Run this conditional step only when `availableSlots === 0` is true.
     if (availableSlots === 0) {
       toast({
         title: t("toasts.mediaLimitTitle"),
@@ -696,13 +792,16 @@ export default function ChannelView() {
     let rejectedTypeCount = 0;
     let rejectedSizeCount = 0;
     const accepted: PendingMediaAttachment[] = [];
+    // Process each item from `files.slice(0, availableSlots)` so this step covers the collection.
     for (const file of files.slice(0, availableSlots)) {
       const contentType = inferMediaContentType(file);
       const kind = getMessageMediaKind(contentType);
+      // Run this conditional step only when `!contentType || !kind` is true.
       if (!contentType || !kind) {
         rejectedTypeCount += 1;
         continue;
       }
+      // Run this conditional step only when `file.size > MAX_MEDIA_FILE_SIZE_BYTES` is true.
       if (file.size > MAX_MEDIA_FILE_SIZE_BYTES) {
         rejectedSizeCount += 1;
         continue;
@@ -715,6 +814,7 @@ export default function ChannelView() {
       });
     }
 
+    // Run this conditional step only when `files.length > availableSlots` is true.
     if (files.length > availableSlots) {
       toast({
         title: t("toasts.mediaLimitTitle"),
@@ -722,6 +822,7 @@ export default function ChannelView() {
         variant: "destructive",
       });
     }
+    // Run this conditional step only when `rejectedTypeCount > 0` is true.
     if (rejectedTypeCount > 0) {
       toast({
         title: t("toasts.mediaUnsupportedTitle"),
@@ -729,6 +830,7 @@ export default function ChannelView() {
         variant: "destructive",
       });
     }
+    // Run this conditional step only when `rejectedSizeCount > 0` is true.
     if (rejectedSizeCount > 0) {
       toast({
         title: t("toasts.mediaTooLargeTitle"),
@@ -736,24 +838,29 @@ export default function ChannelView() {
         variant: "destructive",
       });
     }
+    // Run this conditional step only when `accepted.length > 0` is true.
     if (accepted.length > 0) {
       setPendingMedia((current) => [...current, ...accepted]);
     }
   };
 
+  // Removes pending media; the page component uses it to prepare or render the interface.
   const removePendingMedia = (id: string) => {
     setPendingMedia((current) => current.filter((item) => item.id !== id));
   };
 
+  // Handles send; the page component uses it to prepare or render the interface.
   const handleSend = async (e?: React.FormEvent | React.MouseEvent<HTMLButtonElement>) => {
     e?.preventDefault();
     const currentReplyTarget = replyingTo ? messages.find((item) => item.id === replyingTo.id) ?? replyingTo : null;
     const canReplyToTarget = currentReplyTarget && !currentReplyTarget.deleted_at;
     const canSend = canCompose || (canReplyAsMember && !!canReplyToTarget);
     const trimmedContent = content.trim();
+    // Return early when `!canSend || (!trimmedContent && pendingMedia.length === 0) || !channe...` because the remaining work is not applicable.
     if (!canSend || (!trimmedContent && pendingMedia.length === 0) || !channelId || sendMessage.isPending || isUploadingMedia) return;
 
     setIsUploadingMedia(true);
+    // Attempt this operation and recover from expected failures in the catch block below.
     try {
       const attachments = pendingMedia.length > 0 ? await Promise.all(pendingMedia.map(uploadPendingMedia)) : undefined;
       await sendMessage.mutateAsync({
@@ -766,18 +873,22 @@ export default function ChannelView() {
       setContent("");
       setPendingMedia([]);
       setReplyingTo(null);
+    // Recover from the attempted operation by applying this error-handling path.
     } catch {
       toast({
         title: t("toasts.mediaPublishFailedTitle"),
         description: t("toasts.mediaPublishFailedDescription"),
         variant: "destructive",
       });
+    // Always finalize local state after the attempted operation finishes.
     } finally {
       setIsUploadingMedia(false);
     }
   };
 
+  // Handles key down; the page component uses it to prepare or render the interface.
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Run this conditional step only when `e.key === 'Enter' && !e.shiftKey` is true.
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void handleSend();
@@ -798,50 +909,70 @@ export default function ChannelView() {
       resolveApiMediaUrl(member.avatar_url),
     ])
   );
+  // Process each item from `messages` so this step covers the collection.
   for (const message of messages) {
     const parentId = message.reply_to_message_id;
+    // Skip the current item when `!parentId` and continue processing the rest.
     if (!parentId) continue;
     const children = replyChildrenById.get(parentId);
+    // Choose the appropriate path based on whether `children` is true.
     if (children) {
       children.push(message);
+    // Handle the fallback path when the preceding condition is false.
     } else {
       replyChildrenById.set(parentId, [message]);
     }
   }
 
+  // Resolves sender name; the page component uses it to prepare or render the interface.
   const resolveSenderName = (senderUserId: string | undefined, message?: MessageResponse) => {
+    // Return early when `!senderUserId` because the remaining work is not applicable.
     if (!senderUserId) return t("messages.member");
+    // Return early when `senderUserId === user?.id` because the remaining work is not applicable.
     if (senderUserId === user?.id) return user?.display_name?.trim() || user?.username || t("messages.you");
     const messageDisplayName = message?.sender_display_name?.trim();
+    // Return early when `messageDisplayName` because the remaining work is not applicable.
     if (messageDisplayName) return messageDisplayName;
     const memberName = memberNameById.get(senderUserId);
+    // Return early when `memberName` because the remaining work is not applicable.
     if (memberName) return memberName;
     const messageUsername = message?.sender_username?.trim();
+    // Return early when `messageUsername` because the remaining work is not applicable.
     if (messageUsername) return messageUsername;
     return t("messages.memberWithId", { id: senderUserId.slice(0, 8) });
   };
 
+  // Resolves sender label; the page component uses it to prepare or render the interface.
   const resolveSenderLabel = (message: MessageResponse | undefined) => {
+    // Return early when `!message` because the remaining work is not applicable.
     if (!message) return t("messages.message");
     return resolveSenderName(message.sender_user_id, message);
   };
 
+  // Resolves sender avatar url; the page component uses it to prepare or render the interface.
   const resolveSenderAvatarUrl = (senderUserId: string | undefined, message?: MessageResponse) => {
+    // Return early when `!senderUserId` because the remaining work is not applicable.
     if (!senderUserId) return undefined;
+    // Return early when `senderUserId === user?.id` because the remaining work is not applicable.
     if (senderUserId === user?.id) return userAvatarUrl;
     const messageAvatarUrl = resolveApiMediaUrl(message?.sender_avatar_url);
+    // Return early when `messageAvatarUrl` because the remaining work is not applicable.
     if (messageAvatarUrl) return messageAvatarUrl;
     return memberAvatarById.get(senderUserId);
   };
 
+  // Retrieves user profile path; the page component uses it to prepare or render the interface.
   const getUserProfilePath = (senderUserId: string | undefined) => {
+    // Return early when `!senderUserId` because the remaining work is not applicable.
     if (!senderUserId) return null;
     return senderUserId === user?.id ? localePath("/app/profile") : localePath(`/app/users/${senderUserId}`);
   };
 
+  // Renders sender name link; the page component uses it to prepare or render the interface.
   const renderSenderNameLink = (message: MessageResponse, className?: string) => {
     const label = resolveSenderName(message.sender_user_id, message);
     const href = getUserProfilePath(message.sender_user_id);
+    // Return early when `!href` because the remaining work is not applicable.
     if (!href) return <span className={className}>{label}</span>;
     return (
       <Link
@@ -856,6 +987,7 @@ export default function ChannelView() {
     );
   };
 
+  // Renders sender avatar link; the page component uses it to prepare or render the interface.
   const renderSenderAvatarLink = (message: MessageResponse, className: string, fallbackClassName?: string) => {
     const label = resolveSenderName(message.sender_user_id, message);
     const avatar = (
@@ -865,6 +997,7 @@ export default function ChannelView() {
       </Avatar>
     );
     const href = getUserProfilePath(message.sender_user_id);
+    // Return early when `!href` because the remaining work is not applicable.
     if (!href) return avatar;
     return (
       <Link
@@ -877,17 +1010,21 @@ export default function ChannelView() {
     );
   };
 
+  // Retrieves descendant reply count; the page component uses it to prepare or render the interface.
   const getDescendantReplyCount = (messageId: string): number => {
     let count = 0;
     const visited = new Set<string>();
     const stack = [...(replyChildrenById.get(messageId) ?? [])];
 
+    // Repeat this operation while `stack.length > 0` remains true.
     while (stack.length > 0) {
       const current = stack.pop();
+      // Skip the current item when `!current || visited.has(current.id)` and continue processing the rest.
       if (!current || visited.has(current.id)) continue;
       visited.add(current.id);
       count += 1;
       const children = replyChildrenById.get(current.id);
+      // Run this conditional step only when `children && children.length > 0` is true.
       if (children && children.length > 0) {
         stack.push(...children);
       }
@@ -895,19 +1032,25 @@ export default function ChannelView() {
     return count;
   };
 
+  // Implements the jump to message operation; the page component uses it to prepare or render the interface.
   const jumpToMessage = (messageId: string | null | undefined) => {
+    // Return early when `!messageId` because the remaining work is not applicable.
     if (!messageId) return;
     setCollapsedReplyRoots((current) => {
+      // Return early when `current.size === 0` because the remaining work is not applicable.
       if (current.size === 0) return current;
       const next = new Set(current);
       let changed = false;
       let cursorId: string | null = messageId;
       const visited = new Set<string>();
+      // Repeat this operation while `cursorId && !visited.has(cursorId)` remains true.
       while (cursorId && !visited.has(cursorId)) {
         visited.add(cursorId);
         const message = messageById.get(cursorId);
         const parentId = message?.reply_to_message_id ?? null;
+        // Stop iterating when `!parentId` because the completion condition is met.
         if (!parentId) break;
+        // Run this conditional step only when `next.delete(parentId)` is true.
         if (next.delete(parentId)) {
           changed = true;
         }
@@ -915,19 +1058,24 @@ export default function ChannelView() {
       }
       return changed ? next : current;
     });
+    // Scrolls to target; the page component uses it to prepare or render the interface.
     const scrollToTarget = () => {
       const node = messageRefs.current[messageId];
+      // Run this conditional step only when `node` is true.
       if (node) node.scrollIntoView({ behavior: "smooth", block: "center" });
     };
     scrollToTarget();
     requestAnimationFrame(scrollToTarget);
   };
 
+  // Toggles collapsed replies; the page component uses it to prepare or render the interface.
   const toggleCollapsedReplies = (messageId: string) => {
     setCollapsedReplyRoots((current) => {
       const next = new Set(current);
+      // Choose the appropriate path based on whether `next.has(messageId)` is true.
       if (next.has(messageId)) {
         next.delete(messageId);
+      // Handle the fallback path when the preceding condition is false.
       } else {
         next.add(messageId);
       }
@@ -935,11 +1083,14 @@ export default function ChannelView() {
     });
   };
 
+  // Focuses composer; the page component uses it to prepare or render the interface.
   const focusComposer = () => {
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
+  // Toggles message reaction; the page component uses it to prepare or render the interface.
   const toggleMessageReaction = (emoji: string, message: MessageResponse) => {
+    // Run this conditional step only when `!canUseComposer` is true.
     if (!canUseComposer) {
       toast({
         title: t("toasts.reactBlockedTitle"),
@@ -948,13 +1099,16 @@ export default function ChannelView() {
       });
       return;
     }
+    // Return early when `!channelId || message.deleted_at` because the remaining work is not applicable.
     if (!channelId || message.deleted_at) return;
     const hasMyReaction = (message.reactions_summary?.my_reaction ?? []).includes(emoji);
     toggleReaction.mutate({ channelId, messageId: message.id, emoji, remove: hasMyReaction });
   };
 
+  // Implements the copy message text operation; the page component uses it to prepare or render the interface.
   const copyMessageText = async (message: MessageResponse) => {
     const text = (message.content_text || "").trim();
+    // Run this conditional step only when `message.deleted_at || message.content_type !== "text" || !text` is true.
     if (message.deleted_at || message.content_type !== "text" || !text) {
       toast({
         title: t("toasts.nothingToCopyTitle"),
@@ -964,12 +1118,14 @@ export default function ChannelView() {
       return;
     }
 
+    // Attempt this operation and recover from expected failures in the catch block below.
     try {
       await copyToClipboard(text);
       toast({
         title: t("toasts.copiedTitle"),
         description: t("toasts.copiedDescription"),
       });
+    // Recover from the attempted operation by applying this error-handling path.
     } catch (_error) {
       const description = t("toasts.clipboardBlocked");
       toast({
@@ -997,23 +1153,29 @@ export default function ChannelView() {
       }
     : null;
   const activeWallpaperStyle = customWallpaperStyle ?? activeWallpaper.style;
+  // Updates chat wallpaper; the page component uses it to prepare or render the interface.
   const updateChatWallpaper = (wallpaperId: typeof activeWallpaper.id) => {
+    // Choose the appropriate path based on whether `user?.id` is true.
     if (user?.id) {
       setChatWallpaperForUser(user.id, wallpaperId);
+    // Handle the fallback path when the preceding condition is false.
     } else {
       setChatWallpaperId(wallpaperId);
     }
+    // Run this conditional step only when `user?.wallpaper_url` is true.
     if (user?.wallpaper_url) {
       void clearCustomWallpaper(false);
     }
   };
 
+  // Renders a message and its nested replies; the page component uses it to prepare or render the interface.
   function renderMessageThread(
     msg: MessageResponse,
     previousSibling?: MessageResponse,
     depth = 0,
     ancestorIds = new Set<string>()
   ): ReactNode {
+    // Return early when `ancestorIds.has(msg.id)` because the remaining work is not applicable.
     if (ancestorIds.has(msg.id)) return null;
 
     const isMe = msg.sender_user_id === user?.id;

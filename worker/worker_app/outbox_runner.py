@@ -22,29 +22,38 @@ HASH_ALGORITHM = "sha256"
 INTEGRITY_VERSION = 1
 
 
+# Canonicalizes value; the worker runtime uses it for asynchronous broker delivery.
 def _canonical_value(value: Any) -> Any:
+    # Run this conditional step only when `isinstance(value, datetime)` is true.
     if isinstance(value, datetime):
         normalized = _as_utc_datetime(value)
         return normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
+    # Return early when `isinstance(value, dict)` because the remaining work is not applicable.
     if isinstance(value, dict):
         return {str(key): _canonical_value(value[key]) for key in sorted(value.keys(), key=str)}
+    # Return early when `isinstance(value, (list, tuple))` because the remaining work is not applicable.
     if isinstance(value, (list, tuple)):
         return [_canonical_value(item) for item in value]
     return value
 
 
+# Implements the as utc datetime operation; the worker runtime uses it for asynchronous broker delivery.
 def _as_utc_datetime(value: datetime) -> datetime:
+    # Return early when `value.tzinfo is None` because the remaining work is not applicable.
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
 
 
+# Implements the event integrity scope operation; the worker runtime uses it for asynchronous broker delivery.
 def _event_integrity_scope(channel_id: Any) -> str:
+    # Return early when `channel_id is None` because the remaining work is not applicable.
     if channel_id is None:
         return "system"
     return f"channel:{channel_id}"
 
 
+# Computes event hash; the worker runtime uses it for asynchronous broker delivery.
 def _compute_event_hash(
     *,
     event_id: str,
@@ -71,6 +80,7 @@ def _compute_event_hash(
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
+# Sanitizes error; the worker runtime uses it for asynchronous broker delivery.
 def sanitize_error(exc: BaseException | str) -> str:
     message = str(exc)
     message = re.sub(r"(amqps?://)([^:/@\s]+):([^@\s]+)@", r"\1***:***@", message)
@@ -79,6 +89,7 @@ def sanitize_error(exc: BaseException | str) -> str:
     return message[:MAX_ERROR_LENGTH]
 
 
+# Calculates retry delay; the worker runtime uses it for asynchronous broker delivery.
 def calculate_retry_delay(attempt_count: int, settings: Settings) -> int:
     initial = max(1, int(settings.outbox_initial_retry_delay_seconds))
     multiplier = max(1.0, float(settings.outbox_retry_backoff_multiplier))
@@ -87,23 +98,30 @@ def calculate_retry_delay(attempt_count: int, settings: Settings) -> int:
     return int(min(cap, delay))
 
 
+# Runs outbox publisher; the worker runtime uses it for asynchronous broker delivery.
 async def run_outbox_publisher(amqp: aio_pika.RobustConnection) -> None:
     settings = get_settings()
     channel = await amqp.channel(publisher_confirms=True)
     exchange = await channel.declare_exchange(EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC, durable=True)
     dead_letter_exchange = await channel.declare_exchange(DEAD_LETTER_EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC, durable=True)
 
+    # Keep polling the persistent outbox until the worker process is stopped.
     while True:
+        # Attempt this operation and handle expected failures in the exception branches below.
         try:
+            # Keep `SessionLocal()` active while this scoped operation is performed.
             async with SessionLocal() as db:
                 processed = await process_outbox_batch(db, exchange, dead_letter_exchange, settings)
+                # Run this conditional step only when `processed == 0` is true.
                 if processed == 0:
                     await asyncio.sleep(settings.outbox_poll_interval)
+        # Handle `Exception` here so this workflow can recover or report the failure consistently.
         except Exception:
             logger.exception("outbox loop failed")
             await asyncio.sleep(settings.outbox_poll_interval)
 
 
+# Processes outbox batch; the worker runtime uses it for asynchronous broker delivery.
 async def process_outbox_batch(
     db: AsyncSession,
     exchange: aio_pika.abc.AbstractExchange,
@@ -127,16 +145,20 @@ async def process_outbox_batch(
         {"limit": limit},
     )
     records = rows.mappings().all()
+    # Run this conditional step only when `not records` is true.
     if not records:
         await db.rollback()
         return 0
 
+    # Process each `rec` from `records` to apply this step to the full collection.
     for rec in records:
         await _mark_publishing(db, rec["id"])
         body = _payload_to_body(rec["payload"])
+        # Attempt this operation and handle expected failures in the exception branches below.
         try:
             await _publish_to_exchange(exchange, rec["routing_key"], body)
             await _mark_published(db, rec["id"])
+        # Handle `Exception` here so this workflow can recover or report the failure consistently.
         except Exception as exc:
             await _handle_publish_failure(db, dead_letter_exchange, rec, body, exc, settings)
 
@@ -144,12 +166,15 @@ async def process_outbox_batch(
     return len(records)
 
 
+# Implements the payload to body operation; the worker runtime uses it for asynchronous broker delivery.
 def _payload_to_body(payload: Any) -> bytes:
+    # Return early when `isinstance(payload, str)` because the remaining work is not applicable.
     if isinstance(payload, str):
         return payload.encode("utf-8")
     return json.dumps(payload, default=str).encode("utf-8")
 
 
+# Publishes to exchange; the worker runtime uses it for asynchronous broker delivery.
 async def _publish_to_exchange(exchange: aio_pika.abc.AbstractExchange, routing_key: str, body: bytes) -> None:
     await exchange.publish(
         aio_pika.Message(
@@ -161,6 +186,7 @@ async def _publish_to_exchange(exchange: aio_pika.abc.AbstractExchange, routing_
     )
 
 
+# Publishes to dead letter exchange; the worker runtime uses it for asynchronous broker delivery.
 async def _publish_to_dead_letter_exchange(
     dead_letter_exchange: aio_pika.abc.AbstractExchange,
     rec: dict[str, Any],
@@ -184,6 +210,7 @@ async def _publish_to_dead_letter_exchange(
     )
 
 
+# Marks publishing; the worker runtime uses it for asynchronous broker delivery.
 async def _mark_publishing(db: AsyncSession, outbox_id: Any) -> None:
     await db.execute(
         text(
@@ -198,6 +225,7 @@ async def _mark_publishing(db: AsyncSession, outbox_id: Any) -> None:
     )
 
 
+# Marks published; the worker runtime uses it for asynchronous broker delivery.
 async def _mark_published(db: AsyncSession, outbox_id: Any) -> None:
     await db.execute(
         text(
@@ -217,6 +245,7 @@ async def _mark_published(db: AsyncSession, outbox_id: Any) -> None:
     )
 
 
+# Handles publish failure; the worker runtime uses it for asynchronous broker delivery.
 async def _handle_publish_failure(
     db: AsyncSession,
     dead_letter_exchange: aio_pika.abc.AbstractExchange,
@@ -230,6 +259,7 @@ async def _handle_publish_failure(
     attempt_count = previous_attempts + 1
     max_attempts = max(1, int(rec["max_attempts"] or settings.outbox_max_attempts))
 
+    # Run this conditional step only when `attempt_count >= max_attempts` is true.
     if attempt_count >= max_attempts:
         await _mark_dead_lettered(db, rec["id"], error_text, attempt_count)
         await _insert_delivery_event(
@@ -244,8 +274,10 @@ async def _handle_publish_failure(
                 "last_error": error_text,
             },
         )
+        # Attempt this operation and handle expected failures in the exception branches below.
         try:
             await _publish_to_dead_letter_exchange(dead_letter_exchange, rec, body, error_text, attempt_count)
+        # Handle `Exception` here so this workflow can recover or report the failure consistently.
         except Exception as dlq_exc:
             logger.warning(
                 "failed to mirror dead-lettered outbox item %s to RabbitMQ DLQ: %s",
@@ -271,6 +303,7 @@ async def _handle_publish_failure(
     )
 
 
+# Marks retry scheduled; the worker runtime uses it for asynchronous broker delivery.
 async def _mark_retry_scheduled(db: AsyncSession, outbox_id: Any, error_text: str, attempt_count: int, delay: int) -> None:
     await db.execute(
         text(
@@ -288,6 +321,7 @@ async def _mark_retry_scheduled(db: AsyncSession, outbox_id: Any, error_text: st
     )
 
 
+# Marks dead lettered; the worker runtime uses it for asynchronous broker delivery.
 async def _mark_dead_lettered(db: AsyncSession, outbox_id: Any, error_text: str, attempt_count: int) -> None:
     await db.execute(
         text(
@@ -306,6 +340,7 @@ async def _mark_dead_lettered(db: AsyncSession, outbox_id: Any, error_text: str,
     )
 
 
+# Inserts delivery event; the worker runtime uses it for asynchronous broker delivery.
 async def _insert_delivery_event(db: AsyncSession, event_type: str, channel_id: Any, payload: dict[str, Any]) -> None:
     event_id = str(uuid4())
     created_at = datetime.now(timezone.utc)
@@ -327,8 +362,10 @@ async def _insert_delivery_event(db: AsyncSession, event_type: str, channel_id: 
         )
     ).mappings().first()
     previous_hash = latest_integrity_event["event_hash"] if latest_integrity_event is not None else None
+    # Run this conditional step only when `latest_integrity_event is not None` is true.
     if latest_integrity_event is not None:
         previous_created_at = latest_integrity_event["created_at"]
+        # Run this conditional step only when `_as_utc_datetime(created_at) <= _as_utc_datetime(previous_created_at)` is true.
         if _as_utc_datetime(created_at) <= _as_utc_datetime(previous_created_at):
             created_at = _as_utc_datetime(previous_created_at) + timedelta(microseconds=1)
     event_hash = _compute_event_hash(

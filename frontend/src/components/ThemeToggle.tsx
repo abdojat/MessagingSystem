@@ -19,6 +19,7 @@ const THEME_ANIMATION_MS = 550;
 const DARK_THEME_OVERLAY =
   "radial-gradient(circle at 20% 20%, hsl(234 89% 74% / 0.22), transparent 30%), radial-gradient(circle at 82% 14%, hsl(186 92% 44% / 0.14), transparent 26%), linear-gradient(165deg, hsl(232 23% 7%), hsl(228 18% 5%))";
 
+// Renders the theme toggle component; parent React views use it to render or control the interface.
 export function ThemeToggle({ className }: ThemeToggleProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const t = useTranslations("common.theme");
@@ -32,6 +33,7 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
 
   useEffect(() => {
     return () => {
+      // Run this conditional step only when `timeoutRef.current !== null` is true.
       if (timeoutRef.current !== null) {
         window.clearTimeout(timeoutRef.current);
       }
@@ -40,13 +42,16 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
 
   const isDark = mounted ? resolvedTheme !== "light" : true;
 
+  // Applies theme class; parent React views use it to render or control the interface.
   function applyThemeClass(theme: "light" | "dark") {
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
     root.style.colorScheme = theme;
   }
 
+  // Handles toggle; parent React views use it to render or control the interface.
   async function handleToggle(event: React.MouseEvent<HTMLButtonElement>) {
+    // Return early when `!mounted || overlay` because the remaining work is not applicable.
     if (!mounted || overlay) {
       return;
     }
@@ -62,6 +67,7 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
       Math.max(y, window.innerHeight - y),
     );
 
+    // Run this conditional step only when `nextTheme === "dark"` is true.
     if (nextTheme === "dark") {
       setOverlay({ x, y, radius: 0 });
 

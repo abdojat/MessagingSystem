@@ -24,6 +24,7 @@ const actionTypes = {
 
 let count = 0
 
+// Generates id; React components use it to access or update application state.
 function genId() {
   count = (count + 1) % Number.MAX_SAFE_INTEGER
   return count.toString()
@@ -55,7 +56,9 @@ interface State {
 
 const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
+// Adds to remove queue; React components use it to access or update application state.
 const addToRemoveQueue = (toastId: string) => {
+  // Return early when `toastTimeouts.has(toastId)` because the remaining work is not applicable.
   if (toastTimeouts.has(toastId)) {
     return
   }
@@ -71,7 +74,9 @@ const addToRemoveQueue = (toastId: string) => {
   toastTimeouts.set(toastId, timeout)
 }
 
+// Implements the reducer operation; React components use it to access or update application state.
 export const reducer = (state: State, action: Action): State => {
+  // Select the matching behavior for `action.type`.
   switch (action.type) {
     case "ADD_TOAST":
       return {
@@ -94,6 +99,7 @@ export const reducer = (state: State, action: Action): State => {
       // but I'll keep it here for simplicity
       if (toastId) {
         addToRemoveQueue(toastId)
+      // Handle the fallback path when the preceding condition is false.
       } else {
         state.toasts.forEach((toast) => {
           addToRemoveQueue(toast.id)
@@ -113,6 +119,7 @@ export const reducer = (state: State, action: Action): State => {
       }
     }
     case "REMOVE_TOAST":
+      // Return early when `action.toastId === undefined` because the remaining work is not applicable.
       if (action.toastId === undefined) {
         return {
           ...state,
@@ -130,6 +137,7 @@ const listeners: Array<(state: State) => void> = []
 
 let memoryState: State = { toasts: [] }
 
+// Dispatches; React components use it to access or update application state.
 function dispatch(action: Action) {
   memoryState = reducer(memoryState, action)
   listeners.forEach((listener) => {
@@ -139,14 +147,17 @@ function dispatch(action: Action) {
 
 type Toast = Omit<ToasterToast, "id">
 
+// Implements the toast operation; React components use it to access or update application state.
 function toast({ ...props }: Toast) {
   const id = genId()
 
+  // Updates; React components use it to access or update application state.
   const update = (props: ToasterToast) =>
     dispatch({
       type: "UPDATE_TOAST",
       toast: { ...props, id },
     })
+  // Dismisses; React components use it to access or update application state.
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
 
   dispatch({
@@ -156,6 +167,7 @@ function toast({ ...props }: Toast) {
       id,
       open: true,
       onOpenChange: (open) => {
+        // Run this conditional step only when `!open` is true.
         if (!open) dismiss()
       },
     },
@@ -168,6 +180,7 @@ function toast({ ...props }: Toast) {
   }
 }
 
+// Provides toast behavior; React components use it to access or update application state.
 function useToast() {
   const [state, setState] = React.useState<State>(memoryState)
 
@@ -175,6 +188,7 @@ function useToast() {
     listeners.push(setState)
     return () => {
       const index = listeners.indexOf(setState)
+      // Run this conditional step only when `index > -1` is true.
       if (index > -1) {
         listeners.splice(index, 1)
       }

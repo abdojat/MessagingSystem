@@ -25,6 +25,7 @@ interface UseChannelMembersOptions {
   enabled?: boolean;
 }
 
+// Provides channels behavior; React components use it to access or update application state.
 export function useChannels(options: UseChannelsOptions = {}) {
   const scope = options.scope ?? 'my';
   const q = options.q?.trim() ?? '';
@@ -35,6 +36,7 @@ export function useChannels(options: UseChannelsOptions = {}) {
     queryFn: () => {
       const params = new URLSearchParams();
       params.set('scope', scope);
+      // Run this conditional step only when `q` is true.
       if (q) {
         params.set('q', q);
       }
@@ -45,6 +47,7 @@ export function useChannels(options: UseChannelsOptions = {}) {
   });
 }
 
+// Provides channel behavior; React components use it to access or update application state.
 export function useChannel(channelId: string) {
   const queryClient = useQueryClient();
 
@@ -56,9 +59,12 @@ export function useChannel(channelId: string) {
         predicate: (query) => isChannelListQueryKey(query.queryKey),
       });
 
+      // Process each item from `channelQueries` so this step covers the collection.
       for (const [, channels] of channelQueries) {
+        // Skip the current item when `!Array.isArray(channels)` and continue processing the rest.
         if (!Array.isArray(channels)) continue;
         const match = channels?.find((channel) => channel.id === channelId);
+        // Return early when `match` because the remaining work is not applicable.
         if (match) {
           return match;
         }
@@ -70,6 +76,7 @@ export function useChannel(channelId: string) {
   });
 }
 
+// Provides create channel behavior; React components use it to access or update application state.
 export function useCreateChannel() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -78,6 +85,7 @@ export function useCreateChannel() {
   });
 }
 
+// Provides join channel behavior; React components use it to access or update application state.
 export function useJoinChannel() {
   const queryClient = useQueryClient();
   const { emit } = useWS();
@@ -87,6 +95,7 @@ export function useJoinChannel() {
       queryClient.invalidateQueries({ queryKey: ['/channels'] });
       queryClient.invalidateQueries({ queryKey: ['/channels', channelId] });
       queryClient.invalidateQueries({ queryKey: ['/channels', channelId, 'messages'] });
+      // Run this conditional step only when `outcome.status === 'joined' || outcome.status === 'already_member'` is true.
       if (outcome.status === 'joined' || outcome.status === 'already_member') {
         emit('subscribe', { channel_ids: [channelId], from_seq_id: 0 });
       }
@@ -94,6 +103,7 @@ export function useJoinChannel() {
   });
 }
 
+// Provides leave channel behavior; React components use it to access or update application state.
 export function useLeaveChannel() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -106,6 +116,7 @@ export function useLeaveChannel() {
   });
 }
 
+// Provides update channel behavior; React components use it to access or update application state.
 export function useUpdateChannel() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -121,6 +132,7 @@ export function useUpdateChannel() {
   });
 }
 
+// Provides channel members behavior; React components use it to access or update application state.
 export function useChannelMembers(channelId: string, options: UseChannelMembersOptions = {}) {
   const role = options.role;
   const q = options.q?.trim() ?? '';
@@ -130,7 +142,9 @@ export function useChannelMembers(channelId: string, options: UseChannelMembersO
     queryKey: ['/channels', channelId, 'members', { role: role ?? null, q }],
     queryFn: () => {
       const params = new URLSearchParams();
+      // Run this conditional step only when `role` is true.
       if (role) params.set('role', role);
+      // Run this conditional step only when `q` is true.
       if (q) params.set('q', q);
       return apiClient<ChannelMembershipListResponse>(`/channels/${channelId}/members?${params.toString()}`);
     },
@@ -138,6 +152,7 @@ export function useChannelMembers(channelId: string, options: UseChannelMembersO
   });
 }
 
+// Provides member mutation behavior; React components use it to access or update application state.
 function useMemberMutation(endpointBuilder: (channelId: string, userId: string) => string, method: 'POST' | 'DELETE' = 'POST') {
   const queryClient = useQueryClient();
   return useMutation({
@@ -151,22 +166,27 @@ function useMemberMutation(endpointBuilder: (channelId: string, userId: string) 
   });
 }
 
+// Provides approve member behavior; React components use it to access or update application state.
 export function useApproveMember() {
   return useMemberMutation((channelId, userId) => `/channels/${channelId}/members/${userId}/approve`);
 }
 
+// Provides promote member behavior; React components use it to access or update application state.
 export function usePromoteMember() {
   return useMemberMutation((channelId, userId) => `/channels/${channelId}/members/${userId}/promote`);
 }
 
+// Provides demote member behavior; React components use it to access or update application state.
 export function useDemoteMember() {
   return useMemberMutation((channelId, userId) => `/channels/${channelId}/members/${userId}/demote`);
 }
 
+// Provides remove member behavior; React components use it to access or update application state.
 export function useRemoveMember() {
   return useMemberMutation((channelId, userId) => `/channels/${channelId}/members/${userId}`, 'DELETE');
 }
 
+// Provides update admin permissions behavior; React components use it to access or update application state.
 export function useUpdateAdminPermissions() {
   const queryClient = useQueryClient();
   return useMutation({

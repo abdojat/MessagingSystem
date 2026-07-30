@@ -16,6 +16,7 @@ branch_labels = None
 depends_on = None
 
 
+# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.add_column("users", sa.Column("display_name", sa.String(length=128), nullable=True))
     op.add_column("users", sa.Column("avatar_url", sa.Text(), nullable=True))
@@ -95,6 +96,7 @@ def upgrade() -> None:
     op.create_index("ix_outbox_published_at", "outbox", ["published_at"], unique=False)
 
 
+# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.drop_index("ix_outbox_published_at", table_name="outbox")
     op.drop_column("outbox", "published_at")

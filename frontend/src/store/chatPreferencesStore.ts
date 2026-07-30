@@ -65,6 +65,7 @@ export const CHAT_WALLPAPERS: ChatWallpaperOption[] = [
   },
 ];
 
+// Retrieves chat wallpaper by id; hooks and components use it to read or update shared client state.
 export function getChatWallpaperById(id: string | null | undefined): ChatWallpaperOption {
   return CHAT_WALLPAPERS.find((wallpaper) => wallpaper.id === id) ?? CHAT_WALLPAPERS[0];
 }

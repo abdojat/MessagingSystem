@@ -2,6 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+// Renders the not found component; the route adapter uses it for the matching application page.
 export default function NotFound() {
   const t = useTranslations("notFound");
 

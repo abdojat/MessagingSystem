@@ -42,20 +42,25 @@ type PendingAction =
   | { kind: "deactivate" | "reactivate" | "revokeSessions"; id: string; label: string }
   | { kind: "suspend" | "restore"; id: string; label: string };
 
+// Implements the error message operation; the page component uses it to prepare or render the interface.
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+// Renders the date cell component; the route adapter uses it for the matching application page.
 function DateCell({ value }: { value: string }) {
   const locale = useLocale();
   return <>{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))}</>;
 }
 
+// Renders the empty row component; the route adapter uses it for the matching application page.
 function EmptyRow({ columns, children }: { columns: number; children: React.ReactNode }) {
   return <TableRow><TableCell colSpan={columns} className="h-28 text-center text-muted-foreground">{children}</TableCell></TableRow>;
 }
 
+// Renders the event channel component; the route adapter uses it for the matching application page.
 function EventChannel({ name, slug, fallback, href }: { name?: string | null; slug?: string | null; fallback: string; href?: string }) {
+  // Return early when `!name && !slug` because the remaining work is not applicable.
   if (!name && !slug) return <span className="text-muted-foreground">{fallback}</span>;
   const content = (
     <div className="min-w-36">
@@ -63,10 +68,12 @@ function EventChannel({ name, slug, fallback, href }: { name?: string | null; sl
       {slug ? <div className="text-xs text-muted-foreground">#{slug}</div> : null}
     </div>
   );
+  // Return early when `!href` because the remaining work is not applicable.
   if (!href) return content;
   return <Link className="block text-primary underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none" href={href}>{content}</Link>;
 }
 
+// Renders the superadmin page; the route adapter uses it for the matching application page.
 export default function SuperadminPage() {
   const t = useTranslations("superadmin");
   const user = useAuthStore((state) => state.user);
@@ -117,7 +124,9 @@ export default function SuperadminPage() {
   const revokeSessions = useRevokeAdminUserSessions();
   const setChannelState = useSetAdminChannelState();
 
+  // Return early when `isInitializing` because the remaining work is not applicable.
   if (isInitializing) return <div className="p-8"><Skeleton className="h-40 w-full" /></div>;
+  // Return early when `!user?.is_superadmin` because the remaining work is not applicable.
   if (!user?.is_superadmin) return <div className="p-8 text-sm text-muted-foreground">{t("forbidden")}</div>;
 
   const stats = overview.data
@@ -131,23 +140,30 @@ export default function SuperadminPage() {
       ] as const
     : [];
 
+  // Notifies failure; the page component uses it to prepare or render the interface.
   function notifyFailure(error: unknown) {
     toast({ title: t("actions.failed"), description: errorMessage(error, t("actions.tryAgain")), variant: "destructive" });
   }
 
+  // Completes action; the page component uses it to prepare or render the interface.
   function completeAction() {
     toast({ title: t("actions.completed") });
   }
 
+  // Implements the confirm pending action operation; the page component uses it to prepare or render the interface.
   function confirmPendingAction() {
+    // Return early when `!pendingAction` because the remaining work is not applicable.
     if (!pendingAction) return;
     const action = pendingAction;
     setPendingAction(null);
     const options = { onSuccess: completeAction, onError: notifyFailure };
+    // Choose the appropriate path based on whether `action.kind === "deactivate" || action.kind === "reactivate"` is true.
     if (action.kind === "deactivate" || action.kind === "reactivate") {
       setUserStatusMutation.mutate({ userId: action.id, isActive: action.kind === "reactivate" }, options);
+    // Otherwise, run the session-revocation mutation for that admin action.
     } else if (action.kind === "revokeSessions") {
       revokeSessions.mutate(action.id, options);
+    // Handle the fallback path when the preceding condition is false.
     } else {
       setChannelState.mutate({ channelId: action.id, restore: action.kind === "restore" }, options);
     }

@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 
+// Renders the register component; the route adapter uses it for the matching application page.
 export default function Register() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -20,6 +21,7 @@ export default function Register() {
   const t = useTranslations("auth.register");
   const commonT = useTranslations("common");
 
+  // Handles submit; the page component uses it to prepare or render the interface.
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     register.mutate({ username, email, password }, {

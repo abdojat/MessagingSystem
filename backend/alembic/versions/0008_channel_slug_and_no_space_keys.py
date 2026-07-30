@@ -15,10 +15,12 @@ branch_labels = None
 depends_on = None
 
 
+# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 
+    # Run this conditional step only when `inspector.has_table('channels')` is true.
     if inspector.has_table("channels"):
         op.execute("ALTER TABLE channels ADD COLUMN IF NOT EXISTS channel_slug VARCHAR(64);")
         op.execute(
@@ -37,11 +39,13 @@ def upgrade() -> None:
         op.execute("ALTER TABLE channels DROP CONSTRAINT IF EXISTS ck_channels_slug_no_spaces;")
         op.execute("ALTER TABLE channels ADD CONSTRAINT ck_channels_slug_no_spaces CHECK (position(' ' in channel_slug) = 0);")
 
+    # Run this conditional step only when `inspector.has_table('users')` is true.
     if inspector.has_table("users"):
         op.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_username_no_spaces;")
         op.execute("ALTER TABLE users ADD CONSTRAINT ck_users_username_no_spaces CHECK (position(' ' in username) = 0);")
 
 
+# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_username_no_spaces;")
     op.execute("ALTER TABLE channels DROP CONSTRAINT IF EXISTS ck_channels_slug_no_spaces;")

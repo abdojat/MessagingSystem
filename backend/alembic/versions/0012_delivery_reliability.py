@@ -14,6 +14,7 @@ branch_labels = None
 depends_on = None
 
 
+# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     # PostgreSQL enum values must be committed before they are used in UPDATEs.
     with op.get_context().autocommit_block():
@@ -74,6 +75,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_outbox_dead_lettered_at ON outbox (dead_lettered_at);")
 
 
+# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     # Keep this downgrade data-safe. PostgreSQL cannot remove enum values
     # without recreating the type, and doing so would risk existing outbox rows.

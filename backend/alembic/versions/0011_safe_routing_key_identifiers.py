@@ -14,6 +14,7 @@ branch_labels = None
 depends_on = None
 
 
+# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_username_no_spaces;")
     op.execute(
@@ -27,6 +28,7 @@ def upgrade() -> None:
     )
 
 
+# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.execute("ALTER TABLE channels DROP CONSTRAINT IF EXISTS ck_channels_slug_safe_identifier;")
     op.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_username_safe_identifier;")

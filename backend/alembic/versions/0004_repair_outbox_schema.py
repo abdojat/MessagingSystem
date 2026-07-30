@@ -15,6 +15,7 @@ branch_labels = None
 depends_on = None
 
 
+# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
@@ -64,6 +65,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS ix_outbox_published_at ON outbox (published_at);")
 
 
+# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     # Intentionally no-op: this migration repairs drift and should not remove data.
     pass

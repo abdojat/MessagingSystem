@@ -15,6 +15,7 @@ interface AdminTablePaginationProps {
   onPageSizeChange: (size: number) => void;
 }
 
+// Renders the admin table pagination component; parent React views use it to render or control the interface.
 export function AdminTablePagination({
   offset,
   pageSize,
@@ -29,6 +30,7 @@ export function AdminTablePagination({
   const last = Math.min(offset + pageSize, total);
 
   useEffect(() => {
+    // Return early when `offset < total || offset === 0` because the remaining work is not applicable.
     if (offset < total || offset === 0) return;
     const lastValidOffset = total === 0 ? 0 : Math.floor((total - 1) / pageSize) * pageSize;
     onOffsetChange(lastValidOffset);

@@ -14,33 +14,44 @@ HASH_ALGORITHM = "sha256"
 INTEGRITY_VERSION = 1
 
 
+# Implements the integrity scope for event operation; API route handlers call it to enforce application business rules.
 def integrity_scope_for_event(channel_id: UUID | None) -> str:
+    # Return early when `channel_id is None` because the remaining work is not applicable.
     if channel_id is None:
         return "system"
     return f"channel:{channel_id}"
 
 
+# Canonicalizes value; API route handlers call it to enforce application business rules.
 def _canonical_value(value: Any) -> Any:
+    # Run this conditional step only when `isinstance(value, datetime)` is true.
     if isinstance(value, datetime):
         normalized = _as_utc_datetime(value)
         return normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
+    # Return early when `isinstance(value, UUID)` because the remaining work is not applicable.
     if isinstance(value, UUID):
         return str(value)
+    # Return early when `isinstance(value, enum.Enum)` because the remaining work is not applicable.
     if isinstance(value, enum.Enum):
         return value.value
+    # Return early when `isinstance(value, dict)` because the remaining work is not applicable.
     if isinstance(value, dict):
         return {str(key): _canonical_value(value[key]) for key in sorted(value.keys(), key=str)}
+    # Return early when `isinstance(value, (list, tuple))` because the remaining work is not applicable.
     if isinstance(value, (list, tuple)):
         return [_canonical_value(item) for item in value]
     return value
 
 
+# Implements the as utc datetime operation; API route handlers call it to enforce application business rules.
 def _as_utc_datetime(value: datetime) -> datetime:
+    # Return early when `value.tzinfo is None` because the remaining work is not applicable.
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
 
 
+# Canonicalizes event payload; API route handlers call it to enforce application business rules.
 def canonical_event_payload(event: Event) -> dict[str, Any]:
     return {
         "id": str(event.id),
@@ -55,31 +66,39 @@ def canonical_event_payload(event: Event) -> dict[str, Any]:
     }
 
 
+# Canonicalizes event json; API route handlers call it to enforce application business rules.
 def canonical_event_json(event: Event) -> str:
     return json.dumps(canonical_event_payload(event), sort_keys=True, separators=(",", ":"), default=str)
 
 
+# Computes event hash; API route handlers call it to enforce application business rules.
 def compute_event_hash(event: Event) -> str:
     return hashlib.sha256(canonical_event_json(event).encode("utf-8")).hexdigest()
 
 
+# Groups the event integrity business operations; API route handlers call it to enforce application business rules.
 class EventIntegrityService:
+    # Implements the scope for event operation; API route handlers call it to enforce application business rules.
     @staticmethod
     def scope_for_event(channel_id: UUID | None) -> str:
         return integrity_scope_for_event(channel_id)
 
+    # Implements the lock scope operation; API route handlers call it to enforce application business rules.
     @staticmethod
     async def lock_scope(db: AsyncSession, scope: str) -> None:
         bind = db.get_bind()
+        # Return early when `bind is None or bind.dialect.name != 'postgresql'` because the remaining work is not applicable.
         if bind is None or bind.dialect.name != "postgresql":
             return
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:scope))"), {"scope": scope})
 
+    # Implements the attach integrity operation; API route handlers call it to enforce application business rules.
     @staticmethod
     async def attach_integrity(db: AsyncSession, event: Event, scope: str | None = None) -> Event:
         resolved_scope = scope or integrity_scope_for_event(event.channel_id)
         latest = await EventIntegrityService._latest_integrity_event(db, resolved_scope)
         previous_hash = latest.event_hash if latest is not None else None
+        # Run this conditional step only when `latest is not None and _as_utc_datetime(event.created_at) <= _as_utc_...` is true.
         if latest is not None and _as_utc_datetime(event.created_at) <= _as_utc_datetime(latest.created_at):
             event.created_at = _as_utc_datetime(latest.created_at) + timedelta(microseconds=1)
             await db.flush()
@@ -90,6 +109,7 @@ class EventIntegrityService:
         event.event_hash = compute_event_hash(event)
         return event
 
+    # Implements the latest integrity event operation; API route handlers call it to enforce application business rules.
     @staticmethod
     async def _latest_integrity_event(db: AsyncSession, scope: str) -> Event | None:
         row = await db.execute(
@@ -100,6 +120,7 @@ class EventIntegrityService:
         )
         return row.scalar_one_or_none()
 
+    # Verifies channel scope; API route handlers call it to enforce application business rules.
     @staticmethod
     async def verify_channel_scope(db: AsyncSession, channel_id: UUID) -> dict[str, Any]:
         scope = integrity_scope_for_event(channel_id)
@@ -115,6 +136,7 @@ class EventIntegrityService:
         )
         return EventIntegrityService.verify_events(scope, list(rows.scalars().all()))
 
+    # Verifies events; API route handlers call it to enforce application business rules.
     @staticmethod
     def verify_events(scope: str, events: list[Event]) -> dict[str, Any]:
         checked_events = 0
@@ -123,9 +145,11 @@ class EventIntegrityService:
         first_event_id = str(events[0].id) if events else None
         last_event_id = str(events[-1].id) if events else None
 
+        # Process each `event` from `events` to apply this step to the full collection.
         for event in events:
             checked_events += 1
 
+            # Return early when `event.event_hash is None or event.integrity_scope is None or event.ha...` because the remaining work is not applicable.
             if (
                 event.event_hash is None
                 or event.integrity_scope is None
@@ -142,6 +166,7 @@ class EventIntegrityService:
                     first_event_id,
                     last_event_id,
                 )
+            # Return early when `event.integrity_scope != scope` because the remaining work is not applicable.
             if event.integrity_scope != scope:
                 return EventIntegrityService._invalid_result(
                     scope,
@@ -155,6 +180,7 @@ class EventIntegrityService:
                     expected_hash=scope,
                     actual_hash=event.integrity_scope,
                 )
+            # Return early when `event.hash_algorithm != HASH_ALGORITHM` because the remaining work is not applicable.
             if event.hash_algorithm != HASH_ALGORITHM:
                 return EventIntegrityService._invalid_result(
                     scope,
@@ -168,6 +194,7 @@ class EventIntegrityService:
                     expected_hash=HASH_ALGORITHM,
                     actual_hash=event.hash_algorithm,
                 )
+            # Return early when `event.integrity_version != INTEGRITY_VERSION` because the remaining work is not applicable.
             if event.integrity_version != INTEGRITY_VERSION:
                 return EventIntegrityService._invalid_result(
                     scope,
@@ -181,6 +208,7 @@ class EventIntegrityService:
                     expected_hash=str(INTEGRITY_VERSION),
                     actual_hash=str(event.integrity_version),
                 )
+            # Return early when `event.previous_hash != previous_hash` because the remaining work is not applicable.
             if event.previous_hash != previous_hash:
                 return EventIntegrityService._invalid_result(
                     scope,
@@ -196,6 +224,7 @@ class EventIntegrityService:
                 )
 
             expected_hash = compute_event_hash(event)
+            # Return early when `event.event_hash != expected_hash` because the remaining work is not applicable.
             if event.event_hash != expected_hash:
                 return EventIntegrityService._invalid_result(
                     scope,
@@ -229,6 +258,7 @@ class EventIntegrityService:
             "integrity_version": INTEGRITY_VERSION,
         }
 
+    # Implements the invalid result operation; API route handlers call it to enforce application business rules.
     @staticmethod
     def _invalid_result(
         scope: str,

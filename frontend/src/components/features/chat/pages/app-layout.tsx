@@ -10,6 +10,7 @@ import { useWS } from "@/hooks/use-websocket";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 
+// Renders the app home empty state component; the route adapter uses it for the matching application page.
 export function AppHomeEmptyState() {
   const t = useTranslations("appShell.empty");
 
@@ -26,6 +27,7 @@ export function AppHomeEmptyState() {
   );
 }
 
+// Renders the app layout skeleton component; the route adapter uses it for the matching application page.
 function AppLayoutSkeleton() {
   return (
     <div className="flex h-screen w-full bg-background overflow-hidden relative">
@@ -83,6 +85,7 @@ interface AppLayoutProps {
   children: ReactNode;
 }
 
+// Renders the app layout; the route adapter uses it for the matching application page.
 export default function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter();
   const localePath = useLocalePath();
@@ -92,12 +95,15 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const t = useTranslations("appShell.connection");
 
   useEffect(() => {
+    // Run this conditional step only when `!isInitializing && !isAuthenticated` is true.
     if (!isInitializing && !isAuthenticated) {
       router.replace(localePath("/login"));
     }
   }, [isAuthenticated, isInitializing, localePath, router]);
 
+  // Return early when `isInitializing` because the remaining work is not applicable.
   if (isInitializing) return <AppLayoutSkeleton />;
+  // Return early when `!isAuthenticated` because the remaining work is not applicable.
   if (!isAuthenticated) return null;
 
   return (

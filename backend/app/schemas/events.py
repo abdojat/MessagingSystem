@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
+# Defines the event response API data contract; Pydantic uses it while validating or serializing API data.
 class EventResponse(BaseModel):
     id: UUID
     channel_id: UUID | None
@@ -19,12 +20,14 @@ class EventResponse(BaseModel):
     integrity_scope: str | None = None
 
 
+# Defines the event list response API data contract; Pydantic uses it while validating or serializing API data.
 class EventListResponse(BaseModel):
     items: list[EventResponse]
     next_cursor: str | None
     has_more: bool
 
 
+# Defines the event integrity response API data contract; Pydantic uses it while validating or serializing API data.
 class EventIntegrityResponse(BaseModel):
     scope: str
     valid: bool

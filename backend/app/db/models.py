@@ -23,21 +23,25 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from app.core.identifiers import SAFE_IDENTIFIER_PATTERN
 
 
+# Maps base records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class Base(DeclarativeBase):
     pass
 
 
+# Maps channel visibility records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class ChannelVisibility(str, enum.Enum):
     public = "public"
     private = "private"
 
 
+# Maps channel join mode records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class ChannelJoinMode(str, enum.Enum):
     open = "open"
     invite_only = "invite_only"
     approval_required = "approval_required"
 
 
+# Maps membership role records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class MembershipRole(str, enum.Enum):
     owner = "owner"
     admin = "admin"
@@ -45,11 +49,13 @@ class MembershipRole(str, enum.Enum):
     pending = "pending"
 
 
+# Maps content type records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class ContentType(str, enum.Enum):
     text = "text"
     json = "json"
 
 
+# Maps outbox status records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class OutboxStatus(str, enum.Enum):
     pending = "pending"
     publishing = "publishing"
@@ -59,6 +65,7 @@ class OutboxStatus(str, enum.Enum):
     dead_lettered = "dead_lettered"
 
 
+# Maps user records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class User(Base):
     __tablename__ = "users"
 
@@ -84,6 +91,7 @@ class User(Base):
     )
 
 
+# Maps user session records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class UserSession(Base):
     __tablename__ = "user_sessions"
 
@@ -98,6 +106,7 @@ class UserSession(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+# Maps channel records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class Channel(Base):
     __tablename__ = "channels"
 
@@ -121,6 +130,7 @@ class Channel(Base):
     )
 
 
+# Maps channel counter records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class ChannelCounter(Base):
     __tablename__ = "channel_counters"
 
@@ -130,6 +140,7 @@ class ChannelCounter(Base):
     next_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 
 
+# Maps channel membership records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class ChannelMembership(Base):
     __tablename__ = "channel_memberships"
 
@@ -155,6 +166,7 @@ class ChannelMembership(Base):
     )
 
 
+# Maps channel invite records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class ChannelInvite(Base):
     __tablename__ = "channel_invites"
 
@@ -173,6 +185,7 @@ class ChannelInvite(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+# Maps message records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class Message(Base):
     __tablename__ = "messages"
 
@@ -210,6 +223,7 @@ class Message(Base):
     )
 
 
+# Maps message reaction records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class MessageReaction(Base):
     __tablename__ = "message_reactions"
 
@@ -226,6 +240,7 @@ class MessageReaction(Base):
     )
 
 
+# Maps pinned message records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class PinnedMessage(Base):
     __tablename__ = "pinned_messages"
 
@@ -239,6 +254,7 @@ class PinnedMessage(Base):
     __table_args__ = (Index("ix_pinned_messages_channel_created", "channel_id", "created_at"),)
 
 
+# Maps upload records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class Upload(Base):
     __tablename__ = "uploads"
 
@@ -255,6 +271,7 @@ class Upload(Base):
     __table_args__ = (Index("ix_uploads_created_at", "created_at"),)
 
 
+# Maps user channel state records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class UserChannelState(Base):
     __tablename__ = "user_channel_state"
 
@@ -270,6 +287,7 @@ class UserChannelState(Base):
     unread_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
+# Maps event records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class Event(Base):
     __tablename__ = "events"
 
@@ -293,6 +311,7 @@ class Event(Base):
     )
 
 
+# Maps outbox records to the database; SQLAlchemy and the service layer use it for persistent application state.
 class Outbox(Base):
     __tablename__ = "outbox"
 

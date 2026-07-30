@@ -21,27 +21,36 @@ from worker_app.core.config import Settings as WorkerSettings
 from worker_app.outbox_runner import process_outbox_batch
 
 
+# Stores fake amqp channel state for the verification flow; pytest runs it as a regression check.
 class _FakeAmqpChannel:
+    # Closes; pytest runs it as a regression check.
     async def close(self) -> None:
         return None
 
 
+# Stores fake amqp connection state for the verification flow; pytest runs it as a regression check.
 class _FakeAmqpConnection:
+    # Creates a mocked broker channel; pytest runs it as a regression check.
     async def channel(self) -> _FakeAmqpChannel:
         return _FakeAmqpChannel()
 
 
+# Stores fake exchange state for the verification flow; pytest runs it as a regression check.
 class _FakeExchange:
+    # Initializes a fake exchange; pytest runs it as a regression check.
     def __init__(self, error: Exception | None = None):
         self.error = error
         self.published: list[tuple[str, object]] = []
 
+    # Publishes; pytest runs it as a regression check.
     async def publish(self, message: object, routing_key: str) -> None:
+        # Reject the operation when `self.error is not None` to keep invalid state from progressing.
         if self.error is not None:
             raise self.error
         self.published.append((routing_key, message))
 
 
+# Builds deterministic worker settings for retry tests; pytest runs it as a regression check.
 def _worker_settings() -> WorkerSettings:
     return WorkerSettings(
         outbox_max_attempts=5,
@@ -51,7 +60,9 @@ def _worker_settings() -> WorkerSettings:
     )
 
 
+# Creates channel; pytest runs it as a regression check.
 async def _create_channel(db_session, monkeypatch, owner_username: str = "deliver_owner"):
+    # Provides a no-op broker binding for isolated tests; pytest runs it as a regression check.
     async def _noop_bind(*args, **kwargs):
         return None
 
@@ -69,6 +80,7 @@ async def _create_channel(db_session, monkeypatch, owner_username: str = "delive
     return owner, channel
 
 
+# Adds outbox; pytest runs it as a regression check.
 async def _add_outbox(db_session, channel, *, status=OutboxStatus.pending, attempts=0, max_attempts=5) -> Outbox:
     row = Outbox(
         aggregate_type="message",
@@ -88,6 +100,7 @@ async def _add_outbox(db_session, channel, *, status=OutboxStatus.pending, attem
     return row
 
 
+# Verifies outbox publish success marks published; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_outbox_publish_success_marks_published(db_session, monkeypatch):
     _, channel = await _create_channel(db_session, monkeypatch, "deliver_success")
@@ -106,6 +119,7 @@ async def test_outbox_publish_success_marks_published(db_session, monkeypatch):
     assert dead_letter_exchange.published == []
 
 
+# Verifies outbox failure schedules retry with sanitized error; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_outbox_failure_schedules_retry_with_sanitized_error(db_session, monkeypatch):
     _, channel = await _create_channel(db_session, monkeypatch, "deliver_retry")
@@ -129,6 +143,7 @@ async def test_outbox_failure_schedules_retry_with_sanitized_error(db_session, m
     assert events[0].integrity_scope == f"channel:{channel.id}"
 
 
+# Verifies outbox failure after max attempts dead letters; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_outbox_failure_after_max_attempts_dead_letters(db_session, monkeypatch):
     _, channel = await _create_channel(db_session, monkeypatch, "deliver_dead")
@@ -150,6 +165,7 @@ async def test_outbox_failure_after_max_attempts_dead_letters(db_session, monkey
     assert events[0].integrity_scope == f"channel:{channel.id}"
 
 
+# Verifies admin delivery stats are scoped to channel managers; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_admin_delivery_stats_are_scoped_to_channel_managers(db_session, monkeypatch):
     owner, channel = await _create_channel(db_session, monkeypatch, "deliver_stats")
@@ -166,14 +182,17 @@ async def test_admin_delivery_stats_are_scoped_to_channel_managers(db_session, m
     assert stats.pending == 1
     assert stats.retry_scheduled == 1
     assert stats.dead_lettered == 1
+    # Keep `pytest.raises(AppError)` active while this scoped operation is performed.
     with pytest.raises(AppError) as service_error:
         await DeliveryService.get_stats(db_session, outsider.id)
     assert service_error.value.status_code == 403
+    # Keep `pytest.raises(HTTPException)` active while this scoped operation is performed.
     with pytest.raises(HTTPException) as route_error:
         await delivery_stats(db_session, outsider)
     assert route_error.value.status_code == 403
 
 
+# Verifies manual retry resets dead lettered outbox and logs event; pytest runs it as a regression check.
 @pytest.mark.asyncio
 async def test_manual_retry_resets_dead_lettered_outbox_and_logs_event(db_session, monkeypatch):
     owner, channel = await _create_channel(db_session, monkeypatch, "deliver_manual")

@@ -7,7 +7,9 @@ from app.db.models import User
 from app.services.event_service import log_event
 
 
+# Groups the superadmin bootstrap business operations; API route handlers call it to enforce application business rules.
 class SuperadminBootstrapService:
+    # Ensures; API route handlers call it to enforce application business rules.
     @staticmethod
     async def ensure(
         db: AsyncSession,
@@ -17,22 +19,27 @@ class SuperadminBootstrapService:
         email: str | None = None,
     ) -> tuple[User, bool]:
         normalized_username = normalize_username(validate_username(username))
+        # Reject the operation when `len(password) < 12` to keep invalid state from progressing.
         if len(password) < 12:
             raise RuntimeError("SUPERADMIN_PASSWORD must contain at least 12 characters")
         normalized_email = email.strip().lower() if email and email.strip() else None
 
         existing = (await db.execute(select(User).where(User.username == normalized_username))).scalar_one_or_none()
+        # Run this conditional step only when `existing` is true.
         if existing:
+            # Reject the operation when `not existing.is_superadmin` to keep invalid state from progressing.
             if not existing.is_superadmin:
                 raise RuntimeError(
                     "refusing to auto-promote an existing normal user; choose a new SUPERADMIN_USERNAME"
                 )
             return existing, False
 
+        # Run this conditional step only when `normalized_email` is true.
         if normalized_email:
             email_owner = (
                 await db.execute(select(User.id).where(func.lower(User.email) == normalized_email))
             ).scalar_one_or_none()
+            # Reject the operation when `email_owner is not None` to keep invalid state from progressing.
             if email_owner is not None:
                 raise RuntimeError("SUPERADMIN_EMAIL already belongs to another account")
 

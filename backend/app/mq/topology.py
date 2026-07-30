@@ -6,6 +6,7 @@ DEAD_LETTER_QUEUE_NAME = "q.dead.messages"
 DEAD_LETTER_BINDING_KEY = "dead.#"
 
 
+# Ensures topology; the API and worker use it to manage RabbitMQ routing.
 async def ensure_topology(connection: aio_pika.RobustConnection) -> None:
     channel = await connection.channel()
     await channel.declare_exchange(EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC, durable=True)

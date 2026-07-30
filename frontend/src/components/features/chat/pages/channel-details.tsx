@@ -67,8 +67,11 @@ type UploadContentResponse = {
   public_url: string;
 };
 
+// Retrieves role badge variant; the page component uses it to prepare or render the interface.
 function getRoleBadgeVariant(role: ChannelMembershipItem["role"]): "default" | "secondary" | "outline" {
+  // Return early when `role === "owner"` because the remaining work is not applicable.
   if (role === "owner") return "default";
+  // Return early when `role === "admin"` because the remaining work is not applicable.
   if (role === "admin") return "secondary";
   return "outline";
 }
@@ -81,6 +84,7 @@ const defaultAdminPermissions: AdminPermissions = {
   can_edit_channel: false,
 };
 
+// Normalizes admin permissions; the page component uses it to prepare or render the interface.
 function normalizeAdminPermissions(permissions?: AdminPermissions | null): AdminPermissions {
   return {
     ...defaultAdminPermissions,
@@ -88,11 +92,14 @@ function normalizeAdminPermissions(permissions?: AdminPermissions | null): Admin
   };
 }
 
+// Retrieves error message; the page component uses it to prepare or render the interface.
 function getErrorMessage(error: unknown, fallback: string) {
+  // Return early when `error instanceof Error && error.message` because the remaining work is not applicable.
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 }
 
+// Renders the channel details skeleton component; the route adapter uses it for the matching application page.
 function ChannelDetailsSkeleton() {
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
@@ -141,6 +148,7 @@ function ChannelDetailsSkeleton() {
   );
 }
 
+// Renders the channel details page; the route adapter uses it for the matching application page.
 export default function ChannelDetailsPage() {
   const params = useParams<{ channelId?: string | string[] }>();
   const channelId = Array.isArray(params?.channelId) ? params.channelId[0] : params?.channelId;
@@ -174,6 +182,7 @@ export default function ChannelDetailsPage() {
 
   const uploadAvatar = useMutation({
     mutationFn: async (file: File): Promise<string> => {
+      // Reject this path when `!accessToken` to prevent invalid state from progressing.
       if (!accessToken) {
         throw new Error(t("errors.signInBeforeUpload"));
       }
@@ -188,6 +197,7 @@ export default function ChannelDetailsPage() {
       });
 
       const uploadAccessToken = useAuthStore.getState().accessToken;
+      // Reject this path when `!uploadAccessToken` to prevent invalid state from progressing.
       if (!uploadAccessToken) {
         throw new Error(t("errors.signInBeforeUpload"));
       }
@@ -201,6 +211,7 @@ export default function ChannelDetailsPage() {
 
       const uploadHeaders = new Headers(created.headers || {});
       uploadHeaders.set("Authorization", `Bearer ${uploadAccessToken}`);
+      // Run this conditional step only when `!uploadHeaders.has("Content-Type")` is true.
       if (!uploadHeaders.has("Content-Type")) {
         uploadHeaders.set("Content-Type", file.type || "application/octet-stream");
       }
@@ -211,15 +222,20 @@ export default function ChannelDetailsPage() {
         body: file,
       });
 
+      // Run this conditional step only when `!putResponse.ok` is true.
       if (!putResponse.ok) {
         let message = t("errors.avatarUpload");
+        // Attempt this operation and recover from expected failures in the catch block below.
         try {
           const error = (await putResponse.json()) as { detail?: { message?: string } | string };
+          // Choose the appropriate path based on whether `typeof error.detail === "string"` is true.
           if (typeof error.detail === "string") {
             message = error.detail;
+          // Otherwise, use the backend detail message when no field error is available.
           } else if (error.detail?.message) {
             message = error.detail.message;
           }
+        // Recover from the attempted operation by applying this error-handling path.
         } catch {
           // Keep default message.
         }
@@ -228,6 +244,7 @@ export default function ChannelDetailsPage() {
 
       const uploaded = (await putResponse.json()) as UploadContentResponse;
       const nextAvatarUrl = (uploaded.public_url || created.public_url || "").trim();
+      // Reject this path when `!nextAvatarUrl` to prevent invalid state from progressing.
       if (!nextAvatarUrl) {
         throw new Error(t("errors.avatarMissingUrl"));
       }
@@ -236,11 +253,13 @@ export default function ChannelDetailsPage() {
   });
 
   const avatarPreviewUrl = useMemo(() => {
+    // Return early when `!avatarFile` because the remaining work is not applicable.
     if (!avatarFile) return null;
     return URL.createObjectURL(avatarFile);
   }, [avatarFile]);
 
   useEffect(() => {
+    // Return early when `!avatarFile || !avatarPreviewUrl` because the remaining work is not applicable.
     if (!avatarFile || !avatarPreviewUrl) return;
     return () => URL.revokeObjectURL(avatarPreviewUrl);
   }, [avatarFile, avatarPreviewUrl]);
@@ -249,12 +268,14 @@ export default function ChannelDetailsPage() {
   const membersQuery = useChannelMembers(channel?.id || "", { enabled: canManageMembers });
 
   useEffect(() => {
+    // Run this conditional step only when `!isInitializing && !isAuthenticated` is true.
     if (!isInitializing && !isAuthenticated) {
       router.replace(localePath("/login"));
     }
   }, [isAuthenticated, isInitializing, localePath, router]);
 
   useEffect(() => {
+    // Return early when `!channel` because the remaining work is not applicable.
     if (!channel) return;
     setEditForm({
       name: channel.name ?? "",
@@ -266,9 +287,11 @@ export default function ChannelDetailsPage() {
   }, [channel]);
 
   useEffect(() => {
+    // Implements the admin members operation; the page component uses it to prepare or render the interface.
     const adminMembers = (membersQuery.data?.items ?? []).filter((member) => member.role === "admin");
     setAdminPermissionDrafts((current) => {
       const next: Record<string, AdminPermissions> = {};
+      // Process each item from `adminMembers` so this step covers the collection.
       for (const adminMember of adminMembers) {
         next[adminMember.user_id] = current[adminMember.user_id] ?? normalizeAdminPermissions(adminMember.admin_permissions);
       }
@@ -276,16 +299,20 @@ export default function ChannelDetailsPage() {
     });
   }, [membersQuery.data?.items]);
 
+  // Return early when `isInitializing` because the remaining work is not applicable.
   if (isInitializing) {
     return <ChannelDetailsSkeleton />;
   }
 
+  // Return early when `!isAuthenticated` because the remaining work is not applicable.
   if (!isAuthenticated) return null;
 
+  // Return early when `isLoading` because the remaining work is not applicable.
   if (isLoading) {
     return <ChannelDetailsSkeleton />;
   }
 
+  // Return early when `isError || !channel` because the remaining work is not applicable.
   if (isError || !channel) {
     return (
       <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground">
@@ -316,27 +343,41 @@ export default function ChannelDetailsPage() {
   const channelAvatarUrl = avatarPreviewUrl || resolveApiMediaUrl(channel.avatar_url);
   const canEditChannel = channel.permissions.can_edit_channel;
 
+  // Implements the managed members operation; the page component uses it to prepare or render the interface.
   const managedMembers = (membersQuery.data?.items ?? []).filter((item) => item.role !== "pending");
+  // Implements the pending members operation; the page component uses it to prepare or render the interface.
   const pendingMembers = (membersQuery.data?.items ?? []).filter((item) => item.role === "pending");
 
+  // Formats date time; the page component uses it to prepare or render the interface.
   const formatDateTime = (value?: string | null) => formatDateTimeLocalized(value, locale, commonT("notAvailable"));
+  // Implements the visibility label operation; the page component uses it to prepare or render the interface.
   const visibilityLabel = (value: "public" | "private") => commonT(`visibility.${value}`);
+  // Joins mode label; the page component uses it to prepare or render the interface.
   const joinModeLabel = (value: "open" | "approval_required" | "invite_only") => {
+    // Return early when `value === "approval_required"` because the remaining work is not applicable.
     if (value === "approval_required") return commonT("joinMode.approvalRequired");
+    // Return early when `value === "invite_only"` because the remaining work is not applicable.
     if (value === "invite_only") return commonT("joinMode.inviteOnly");
     return commonT("joinMode.open");
   };
+  // Implements the role label operation; the page component uses it to prepare or render the interface.
   const roleLabel = (role?: string | null) => {
+    // Return early when `role === "owner"` because the remaining work is not applicable.
     if (role === "owner") return commonT("roles.owner");
+    // Return early when `role === "admin"` because the remaining work is not applicable.
     if (role === "admin") return commonT("roles.admin");
+    // Return early when `role === "member"` because the remaining work is not applicable.
     if (role === "member") return commonT("roles.member");
+    // Return early when `role === "pending"` because the remaining work is not applicable.
     if (role === "pending") return commonT("roles.pending");
     return commonT("roles.none");
   };
 
+  // Retrieves member profile path; the page component uses it to prepare or render the interface.
   const getMemberProfilePath = (memberUserId: string) =>
     memberUserId === currentUser?.id ? localePath("/app/profile") : localePath(`/app/users/${memberUserId}`);
 
+  // Renders member identity; the page component uses it to prepare or render the interface.
   const renderMemberIdentity = (member: ChannelMembershipItem) => {
     const displayName = member.display_name?.trim() || member.username;
     return (
@@ -364,6 +405,7 @@ export default function ChannelDetailsPage() {
     editForm.visibility !== channel.visibility ||
     editForm.joinMode !== channel.join_mode;
 
+  // Runs member action; the page component uses it to prepare or render the interface.
   function runMemberAction(
     key: string,
     action: () => void,
@@ -372,24 +414,34 @@ export default function ChannelDetailsPage() {
     action();
   }
 
+  // Handles edit submit; the page component uses it to prepare or render the interface.
   function handleEditSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Return early when `!canEditChannel` because the remaining work is not applicable.
     if (!canEditChannel) return;
+    // Return early when `!channel` because the remaining work is not applicable.
     if (!channel) return;
 
+    // Implements the submit update operation; the page component uses it to prepare or render the interface.
     const submitUpdate = async () => {
       const payload: ChannelPatchRequest = {};
       const trimmedName = editForm.name.trim();
       const trimmedDescription = editForm.description.trim();
 
+      // Run this conditional step only when `trimmedName && trimmedName !== (channel.name ?? "")` is true.
       if (trimmedName && trimmedName !== (channel.name ?? "")) payload.name = trimmedName;
+      // Run this conditional step only when `trimmedDescription !== (channel.description ?? "")` is true.
       if (trimmedDescription !== (channel.description ?? "")) payload.description = trimmedDescription || null;
+      // Run this conditional step only when `avatarFile` is true.
       if (avatarFile) {
         payload.avatar_url = await uploadAvatar.mutateAsync(avatarFile);
       }
+      // Run this conditional step only when `editForm.visibility !== channel.visibility` is true.
       if (editForm.visibility !== channel.visibility) payload.visibility = editForm.visibility;
+      // Run this conditional step only when `editForm.joinMode !== channel.join_mode` is true.
       if (editForm.joinMode !== channel.join_mode) payload.join_mode = editForm.joinMode;
 
+      // Run this conditional step only when `Object.keys(payload).length === 0` is true.
       if (Object.keys(payload).length === 0) {
         toast({
           title: t("toasts.noChangesTitle"),

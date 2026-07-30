@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 
+// Renders the login component; the route adapter uses it for the matching application page.
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -19,6 +20,7 @@ export default function Login() {
   const t = useTranslations("auth.login");
   const commonT = useTranslations("common");
 
+  // Handles submit; the page component uses it to prepare or render the interface.
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     login.mutate({ username_or_email: username, password }, {

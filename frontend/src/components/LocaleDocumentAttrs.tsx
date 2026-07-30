@@ -7,6 +7,7 @@ type LocaleDocumentAttrsProps = {
   dir: "ltr" | "rtl";
 };
 
+// Renders the locale document attrs component; parent React views use it to render or control the interface.
 export function LocaleDocumentAttrs({ locale, dir }: LocaleDocumentAttrsProps) {
   useEffect(() => {
     document.documentElement.lang = locale;

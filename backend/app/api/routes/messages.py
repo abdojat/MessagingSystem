@@ -30,6 +30,7 @@ from app.services.event_service import log_event
 router = APIRouter(tags=["messages"])
 
 
+# Converts message response; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 def _to_message_response(
     message,
     *,
@@ -40,6 +41,7 @@ def _to_message_response(
     is_deleted = message.deleted_at is not None
     content_text = None
     content_json = None
+    # Run this conditional step only when `not is_deleted` is true.
     if not is_deleted:
         content_text, content_json = MessageService._decrypt_message_content(message)
     return MessageResponse(
@@ -66,6 +68,7 @@ def _to_message_response(
     )
 
 
+# Converts message response with reactions; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 async def _to_message_response_with_reactions(
     db: DBDep,
     user_id: UUID,
@@ -73,13 +76,17 @@ async def _to_message_response_with_reactions(
     sender_cache: dict[UUID, User | None] | None = None,
 ) -> MessageResponse:
     sender: User | None
+    # Choose the appropriate path based on whether `sender_cache is not None and message.sender_user_id in sender_cache` is true.
     if sender_cache is not None and message.sender_user_id in sender_cache:
         sender = sender_cache[message.sender_user_id]
+    # Handle the alternate path after the preceding branch or loop does not produce a result.
     else:
         sender = await db.get(User, message.sender_user_id)
+        # Run this conditional step only when `sender_cache is not None` is true.
         if sender_cache is not None:
             sender_cache[message.sender_user_id] = sender
 
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         response = _to_message_response(
             message,
@@ -87,6 +94,7 @@ async def _to_message_response_with_reactions(
             sender_display_name=sender.display_name if sender else None,
             sender_avatar_url=sender.avatar_url if sender else None,
         )
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError:
         await log_event(
             db,
@@ -101,6 +109,7 @@ async def _to_message_response_with_reactions(
     return response
 
 
+# Publishes message; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/messages", response_model=MessageResponse, status_code=201)
 async def publish_message(
     channel_id: UUID,
@@ -115,6 +124,7 @@ async def publish_message(
         limit=40,
         window_seconds=1,
     )
+    # Reject the operation when `burst_retry is not None` to keep invalid state from progressing.
     if burst_retry is not None:
         raise HTTPException(
             status_code=429,
@@ -127,19 +137,23 @@ async def publish_message(
         limit=200,
         window_seconds=10,
     )
+    # Reject the operation when `sustained_retry is not None` to keep invalid state from progressing.
     if sustained_retry is not None:
         raise HTTPException(
             status_code=429,
             detail={"code": "RATE_LIMITED", "message": "rate limit exceeded", "details": {"retry_after_seconds": sustained_retry}},
             headers={"Retry-After": str(sustained_retry)},
         )
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         message = await MessageService.publish_message(db, channel_id, user.id, req)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return await _to_message_response_with_reactions(db, user.id, message)
 
 
+# Lists messages; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get(
     "/channels/{channel_id}/messages",
     response_model=MessageListResponse,
@@ -170,12 +184,16 @@ async def list_messages(
     limit: int = Query(default=50, ge=1, le=200),
     order: str = Query(default="desc", pattern="^(asc|desc)$"),
 ) -> MessageListResponse:
+    # Run this conditional step only when `not isinstance(before_seq_id, int)` is true.
     if not isinstance(before_seq_id, int):
         before_seq_id = None
+    # Run this conditional step only when `not isinstance(after_seq_id, int)` is true.
     if not isinstance(after_seq_id, int):
         after_seq_id = None
+    # Run this conditional step only when `not isinstance(order, str)` is true.
     if not isinstance(order, str):
         order = "desc"
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         messages, next_before, next_after, has_more = await MessageService.list_messages(
             db,
@@ -186,6 +204,7 @@ async def list_messages(
             limit,
             order,
         )
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     sender_cache: dict[UUID, User | None] = {}
@@ -198,6 +217,7 @@ async def list_messages(
     )
 
 
+# Lists messages around; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/channels/{channel_id}/messages/around", response_model=MessageAroundResponse)
 async def list_messages_around(
     channel_id: UUID,
@@ -208,16 +228,21 @@ async def list_messages_around(
     limit_before: int = Query(default=30, ge=0, le=100),
     limit_after: int = Query(default=30, ge=0, le=100),
 ) -> MessageAroundResponse:
+    # Run this conditional step only when `not isinstance(limit_before, int)` is true.
     if not isinstance(limit_before, int):
         limit_before = 30
+    # Run this conditional step only when `not isinstance(limit_after, int)` is true.
     if not isinstance(limit_after, int):
         limit_after = 30
+    # Run this conditional step only when `limit is not None` is true.
     if limit is not None:
         side = max(1, limit // 2)
         limit_before = side
         limit_after = side
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         items = await MessageService.messages_around(db, channel_id, user.id, seq_id, limit_before, limit_after)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     sender_cache: dict[UUID, User | None] = {}
@@ -227,15 +252,19 @@ async def list_messages_around(
     )
 
 
+# Retrieves message; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/channels/{channel_id}/messages/{message_id}", response_model=MessageResponse)
 async def get_message(channel_id: UUID, message_id: UUID, db: DBDep, user: CurrentUserDep) -> MessageResponse:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         message = await MessageService.get_message(db, channel_id, user.id, message_id)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return await _to_message_response_with_reactions(db, user.id, message)
 
 
+# Edits an existing message; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.patch("/channels/{channel_id}/messages/{message_id}", response_model=MessageResponse)
 async def edit_message(
     channel_id: UUID,
@@ -244,13 +273,16 @@ async def edit_message(
     db: DBDep,
     user: CurrentUserDep,
 ) -> MessageResponse:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         message = await MessageService.edit_message(db, channel_id, user.id, message_id, req)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return await _to_message_response_with_reactions(db, user.id, message)
 
 
+# Deletes message; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.delete("/channels/{channel_id}/messages/{message_id}", response_model=MessageResponse)
 async def delete_message(
     channel_id: UUID,
@@ -258,17 +290,22 @@ async def delete_message(
     db: DBDep,
     user: CurrentUserDep,
 ) -> MessageResponse:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         message = await MessageService.delete_message(db, channel_id, user.id, message_id)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return await _to_message_response_with_reactions(db, user.id, message)
 
 
+# Records the user's latest seen channel sequence; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/seen", response_model=SeenResponse)
 async def seen(channel_id: UUID, req: SeenRequest, db: DBDep, user: CurrentUserDep) -> SeenResponse:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         state = await MessageService.mark_seen(db, channel_id, user.id, req)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return SeenResponse(
@@ -281,6 +318,7 @@ async def seen(channel_id: UUID, req: SeenRequest, db: DBDep, user: CurrentUserD
     )
 
 
+# Adds reaction; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/messages/{message_id}/reactions", response_model=ReactionSummaryResponse)
 async def add_reaction(
     channel_id: UUID,
@@ -289,13 +327,16 @@ async def add_reaction(
     db: DBDep,
     user: CurrentUserDep,
 ) -> ReactionSummaryResponse:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         summary = await MessageService.add_reaction(db, channel_id, message_id, user.id, req.emoji)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return ReactionSummaryResponse.model_validate(summary)
 
 
+# Removes reaction; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.delete("/channels/{channel_id}/messages/{message_id}/reactions/{emoji}", response_model=ReactionSummaryResponse)
 async def remove_reaction(
     channel_id: UUID,
@@ -304,29 +345,38 @@ async def remove_reaction(
     db: DBDep,
     user: CurrentUserDep,
 ) -> ReactionSummaryResponse:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         summary = await MessageService.remove_reaction(db, channel_id, message_id, user.id, emoji)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return ReactionSummaryResponse.model_validate(summary)
 
 
+# Pins a message for channel members; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/channels/{channel_id}/pins/{message_id}", status_code=204)
 async def pin_message(channel_id: UUID, message_id: UUID, db: DBDep, user: CurrentUserDep) -> None:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         await MessageService.pin_message(db, channel_id, message_id, user.id)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
 
 
+# Removes a message from the channel pins; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.delete("/channels/{channel_id}/pins/{message_id}", status_code=204)
 async def unpin_message(channel_id: UUID, message_id: UUID, db: DBDep, user: CurrentUserDep) -> None:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         await MessageService.unpin_message(db, channel_id, message_id, user.id)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
 
 
+# Lists pins; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/channels/{channel_id}/pins", response_model=PinListResponse)
 async def list_pins(
     channel_id: UUID,
@@ -334,8 +384,10 @@ async def list_pins(
     user: CurrentUserDep,
     limit: int = Query(default=50, ge=1, le=100),
 ) -> PinListResponse:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         messages = await MessageService.list_pins(db, channel_id, user.id, limit)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     sender_cache: dict[UUID, User | None] = {}
@@ -343,10 +395,13 @@ async def list_pins(
     return PinListResponse(items=items)
 
 
+# Creates upload; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post("/uploads", response_model=UploadCreateResponse, status_code=201)
 async def create_upload(req: UploadCreateRequest, db: DBDep, user: CurrentUserDep) -> UploadCreateResponse:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         upload = await MessageService.create_upload(db, user.id, req)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return UploadCreateResponse(
@@ -358,21 +413,27 @@ async def create_upload(req: UploadCreateRequest, db: DBDep, user: CurrentUserDe
     )
 
 
+# Stores bytes for an authorized upload record; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.put("/uploads/{file_id}/content")
 async def put_upload_content(file_id: UUID, request: Request, db: DBDep, user: CurrentUserDep) -> dict:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         body = await request.body()
         upload = await MessageService.store_upload_content(db, user.id, file_id, body)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return {"file_id": str(upload.id), "public_url": upload.public_url}
 
 
+# Retrieves upload content; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.get("/uploads/{file_id}/content")
 async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> Response:
     upload = await db.get(Upload, file_id)
+    # Reject the operation when `not upload` to keep invalid state from progressing.
     if not upload:
         raise to_http_exception(AppError("upload not found", 404, code="NOT_FOUND"))
+    # Run this conditional step only when `not await MessageService.can_access_upload(db, user.id, file_id)` is true.
     if not await MessageService.can_access_upload(db, user.id, file_id):
         await log_event(
             db,
@@ -384,6 +445,7 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
         raise to_http_exception(AppError("forbidden", 403, code="FORBIDDEN"))
     settings = get_settings()
     path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
+    # Reject the operation when `not path.exists()` to keep invalid state from progressing.
     if not path.exists():
         raise to_http_exception(AppError("upload content not found", 404, code="NOT_FOUND"))
     await MessageService._safe_log_event(
@@ -400,6 +462,7 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
     return Response(content=path.read_bytes(), media_type=upload.content_type)
 
 
+# Returns missed channel data for client backfill; FastAPI calls it to serve the corresponding HTTP or WebSocket flow.
 @router.post(
     "/sync",
     response_model=SyncResponse,
@@ -418,8 +481,10 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
     },
 )
 async def sync(req: SyncRequest, db: DBDep, user: CurrentUserDep) -> SyncResponse:
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         payload = await MessageService.sync(db, user.id, req)
+    # Handle `AppError` here so this workflow can recover or report the failure consistently.
     except AppError as exc:
         raise to_http_exception(exc) from exc
     sender_cache: dict[UUID, User | None] = {}

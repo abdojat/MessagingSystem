@@ -14,6 +14,7 @@ branch_labels = None
 depends_on = None
 
 
+# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.execute(
         "CREATE INDEX IF NOT EXISTS ix_channels_created_id_desc ON channels (created_at DESC, id DESC);"
@@ -29,6 +30,7 @@ def upgrade() -> None:
     )
 
 
+# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_channel_memberships_channel_role_user;")
     op.execute("DROP INDEX IF EXISTS ix_channel_invites_channel_created_id;")

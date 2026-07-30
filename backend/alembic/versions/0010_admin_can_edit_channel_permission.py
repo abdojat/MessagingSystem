@@ -14,6 +14,7 @@ branch_labels = None
 depends_on = None
 
 
+# Applies this schema revision; Alembic calls it while moving the database schema between revisions.
 def upgrade() -> None:
     op.execute(
         """
@@ -28,6 +29,7 @@ def upgrade() -> None:
     )
 
 
+# Reverts this schema revision; Alembic calls it while moving the database schema between revisions.
 def downgrade() -> None:
     op.execute(
         """

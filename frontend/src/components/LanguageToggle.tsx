@@ -11,10 +11,12 @@ type LanguageToggleProps = {
   className?: string;
 };
 
+// Replaces locale in path; parent React views use it to render or control the interface.
 function replaceLocaleInPath(pathname: string, nextLocale: string) {
   const segments = pathname.split("/");
   const currentLocale = segments[1];
 
+  // Run this conditional step only when `locales.includes(currentLocale as (typeof locales)[number])` is true.
   if (locales.includes(currentLocale as (typeof locales)[number])) {
     segments[1] = nextLocale;
     return segments.join("/") || `/${nextLocale}`;
@@ -23,6 +25,7 @@ function replaceLocaleInPath(pathname: string, nextLocale: string) {
   return `/${nextLocale}${pathname === "/" ? "" : pathname}`;
 }
 
+// Renders the language toggle component; parent React views use it to render or control the interface.
 export function LanguageToggle({ className }: LanguageToggleProps) {
   const locale = useLocale();
   const pathname = usePathname();

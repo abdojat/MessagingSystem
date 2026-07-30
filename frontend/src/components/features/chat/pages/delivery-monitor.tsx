@@ -43,22 +43,32 @@ const emptyStats: DeliveryStatsResponse = {
   dead_lettered: 0,
 };
 
+// Retrieves error message; the page component uses it to prepare or render the interface.
 function getErrorMessage(error: unknown, fallback: string) {
+  // Return early when `error instanceof Error && error.message` because the remaining work is not applicable.
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 }
 
+// Renders the status badge component; the route adapter uses it for the matching application page.
 function StatusBadge({ status }: { status: string }) {
   const t = useTranslations("delivery.status");
+  // Return early when `status === "dead_lettered"` because the remaining work is not applicable.
   if (status === "dead_lettered") return <Badge variant="destructive">{t("deadLettered")}</Badge>;
+  // Return early when `status === "retry_scheduled"` because the remaining work is not applicable.
   if (status === "retry_scheduled") return <Badge variant="secondary">{t("retryScheduled")}</Badge>;
+  // Return early when `status === "failed"` because the remaining work is not applicable.
   if (status === "failed") return <Badge variant="destructive">{t("failed")}</Badge>;
+  // Return early when `status === "published"` because the remaining work is not applicable.
   if (status === "published") return <Badge>{t("published")}</Badge>;
+  // Return early when `status === "pending"` because the remaining work is not applicable.
   if (status === "pending") return <Badge variant="outline">{t("pending")}</Badge>;
+  // Return early when `status === "publishing"` because the remaining work is not applicable.
   if (status === "publishing") return <Badge variant="outline">{t("publishing")}</Badge>;
   return <Badge variant="outline">{status.replace("_", " ")}</Badge>;
 }
 
+// Renders the stat card component; the route adapter uses it for the matching application page.
 function StatCard({
   label,
   value,
@@ -83,6 +93,7 @@ function StatCard({
   );
 }
 
+// Renders the delivery table component; the route adapter uses it for the matching application page.
 function DeliveryTable({
   title,
   items,
@@ -174,6 +185,7 @@ function DeliveryTable({
   );
 }
 
+// Renders the delivery monitor page; the route adapter uses it for the matching application page.
 export default function DeliveryMonitorPage() {
   const t = useTranslations("delivery");
   const commonT = useTranslations("common");
@@ -190,6 +202,7 @@ export default function DeliveryMonitorPage() {
   const error = statsQuery.error || failedQuery.error || deadLetteredQuery.error;
   const retryableCount = failedItems.length + deadLetteredItems.length;
 
+  // Handles retry; the page component uses it to prepare or render the interface.
   function handleRetry(outboxId: string) {
     retryDelivery.mutate(outboxId, {
       onSuccess: (result) => {
@@ -208,6 +221,7 @@ export default function DeliveryMonitorPage() {
     });
   }
 
+  // Handles retry all; the page component uses it to prepare or render the interface.
   function handleRetryAll() {
     retryAllDeliveries.mutate(undefined, {
       onSuccess: (result) => {

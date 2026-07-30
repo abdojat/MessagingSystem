@@ -25,54 +25,71 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 
 
+# Implements the backend dir operation; the command-line verification workflow uses it.
 def _backend_dir() -> Path:
+    # Process each `candidate` from `(ROOT / 'backend', Path('/app'), Path.cwd())` to apply this step to the full collection.
     for candidate in (ROOT / "backend", Path("/app"), Path.cwd()):
+        # Return early when `(candidate / 'app' / 'db' / 'models.py').exists()` because the remaining work is not applicable.
         if (candidate / "app" / "db" / "models.py").exists():
             return candidate
     return ROOT / "backend"
 
 
 BACKEND_DIR = _backend_dir()
+# Run this conditional step only when `str(BACKEND_DIR) not in sys.path` is true.
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 
+# Reads dotenv value; the command-line verification workflow uses it.
 def _read_dotenv_value(name: str) -> str | None:
     env_path = ROOT / ".env"
+    # Return early when `not env_path.exists()` because the remaining work is not applicable.
     if not env_path.exists():
         return None
+    # Process each `line` from `env_path.read_text(encoding='utf-8').splitlines()` to apply this step to the full collection.
     for line in env_path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
+        # Skip the current item when `not stripped or stripped.startswith('#') or '=' not in stripped` and continue processing the rest.
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key, value = stripped.split("=", 1)
+        # Return early when `key.strip() == name` because the remaining work is not applicable.
         if key.strip() == name:
             return value.strip().strip('"').strip("'")
     return None
 
 
+# Implements the running inside container operation; the command-line verification workflow uses it.
 def _running_inside_container() -> bool:
     return Path("/.dockerenv").exists()
 
 
+# Implements the host adjusted database url operation; the command-line verification workflow uses it.
 def _host_adjusted_database_url(database_url: str) -> str:
+    # Return early when `_running_inside_container()` because the remaining work is not applicable.
     if _running_inside_container():
         return database_url
     return database_url.replace("@postgres:", "@127.0.0.1:").replace("@postgres/", "@127.0.0.1/")
 
 
+# Prepares database url; the command-line verification workflow uses it.
 def _prepare_database_url() -> None:
     database_url = os.environ.get("DATABASE_URL") or _read_dotenv_value("DATABASE_URL")
+    # Run this conditional step only when `not database_url` is true.
     if not database_url:
         database_url = "postgresql+asyncpg://postgres:postgres@postgres:5432/channels"
     os.environ["DATABASE_URL"] = _host_adjusted_database_url(database_url)
 
 
+# Masks url; the command-line verification workflow uses it.
 def _mask_url(value: str) -> str:
+    # Return early when `'://' not in value or '@' not in value` because the remaining work is not applicable.
     if "://" not in value or "@" not in value:
         return value
     scheme, rest = value.split("://", 1)
     credentials, host = rest.split("@", 1)
+    # Run this conditional step only when `':' in credentials` is true.
     if ":" in credentials:
         user, _ = credentials.split(":", 1)
         return f"{scheme}://{user}:***@{host}"
@@ -86,6 +103,7 @@ from app.db.models import Outbox, OutboxStatus  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 
 
+# Stores user session state for the verification flow; the command-line verification workflow uses it.
 @dataclass
 class UserSession:
     user_id: str
@@ -93,18 +111,22 @@ class UserSession:
     access_token: str
 
 
+# Prints a verification step heading; the command-line verification workflow uses it.
 def _step(title: str) -> None:
     print(f"[STEP] {title}")
 
 
+# Prints a successful verification result; the command-line verification workflow uses it.
 def _pass(message: str) -> None:
     print(f"[PASS] {message}")
 
 
+# Prints an informational verification message; the command-line verification workflow uses it.
 def _info(message: str) -> None:
     print(f"[INFO] {message}")
 
 
+# Sends a verification HTTP request; the command-line verification workflow uses it.
 async def _req(
     client: httpx.AsyncClient,
     method: str,
@@ -113,16 +135,20 @@ async def _req(
     payload: dict | None = None,
 ) -> dict:
     headers = {"Content-Type": "application/json"}
+    # Run this conditional step only when `token` is true.
     if token:
         headers["Authorization"] = f"Bearer {token}"
     response = await client.request(method, path, headers=headers, json=payload)
+    # Reject the operation when `response.status_code >= 400` to keep invalid state from progressing.
     if response.status_code >= 400:
         raise RuntimeError(f"{method} {path} failed ({response.status_code}): {response.text}")
+    # Return early when `response.status_code == 204` because the remaining work is not applicable.
     if response.status_code == 204:
         return {}
     return response.json()
 
 
+# Checks status; the command-line verification workflow uses it.
 async def _expect_status(
     client: httpx.AsyncClient,
     method: str,
@@ -132,15 +158,18 @@ async def _expect_status(
     expected_status: int,
 ) -> None:
     headers = {"Content-Type": "application/json"}
+    # Run this conditional step only when `token` is true.
     if token:
         headers["Authorization"] = f"Bearer {token}"
     response = await client.request(method, path, headers=headers)
+    # Reject the operation when `response.status_code != expected_status` to keep invalid state from progressing.
     if response.status_code != expected_status:
         raise RuntimeError(
             f"{method} {path} expected {expected_status}, got {response.status_code}: {response.text}"
         )
 
 
+# Registers and login; the command-line verification workflow uses it.
 async def register_and_login(client: httpx.AsyncClient, label: str) -> UserSession:
     suffix = secrets.token_hex(4)
     username = f"delivery_{label}_{suffix}"
@@ -156,21 +185,27 @@ async def register_and_login(client: httpx.AsyncClient, label: str) -> UserSessi
     return UserSession(user_id=registered["id"], username=username, access_token=login["access_token"])
 
 
+# Waits for for api; the command-line verification workflow uses it.
 def wait_for_api(client: httpx.Client, timeout_seconds: int = 60) -> None:
     deadline = time.time() + timeout_seconds
     last_error: Exception | None = None
+    # Repeat this step while `time.time() < deadline` remains true.
     while time.time() < deadline:
+        # Attempt this operation and handle expected failures in the exception branches below.
         try:
             response = client.get("/health")
+            # Return early when `response.status_code == 200` because the remaining work is not applicable.
             if response.status_code == 200:
                 return
             last_error = RuntimeError(f"/health returned {response.status_code}")
+        # Handle `Exception` here so this workflow can recover or report the failure consistently.
         except Exception as exc:  # pragma: no cover - best effort readiness wait
             last_error = exc
         time.sleep(1)
     raise RuntimeError(f"API not ready after {timeout_seconds}s: {last_error}")
 
 
+# Waits for for published count; the command-line verification workflow uses it.
 async def _wait_for_published_count(
     client: httpx.AsyncClient,
     token: str,
@@ -180,15 +215,19 @@ async def _wait_for_published_count(
 ) -> dict:
     deadline = time.time() + timeout_seconds
     latest: dict | None = None
+    # Repeat this step while `time.time() < deadline` remains true.
     while time.time() < deadline:
         latest = await _req(client, "GET", "/admin/delivery/stats", token=token)
+        # Return early when `int(latest.get('published') or 0) >= minimum` because the remaining work is not applicable.
         if int(latest.get("published") or 0) >= minimum:
             return latest
         await asyncio.sleep(1)
     raise RuntimeError(f"Timed out waiting for published delivery count >= {minimum}; latest={latest}")
 
 
+# Inserts controlled dead letter; the command-line verification workflow uses it.
 async def _insert_controlled_dead_letter(channel_id: str, channel_slug: str) -> str:
+    # Keep `SessionLocal()` active while this scoped operation is performed.
     async with SessionLocal() as db:
         row = Outbox(
             aggregate_type="delivery_probe",
@@ -213,6 +252,7 @@ async def _insert_controlled_dead_letter(channel_id: str, channel_slug: str) -> 
         return str(row.id)
 
 
+# Runs the asynchronous verification workflow; the command-line verification workflow uses it.
 async def main_async() -> int:
     parser = argparse.ArgumentParser(description="Verify delivery reliability proof path")
     parser.add_argument("--base-url", default="http://localhost:8000/v1", help="API base URL")
@@ -223,11 +263,13 @@ async def main_async() -> int:
     _info("For the canonical Docker run, use:")
     _info('docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"')
 
+    # Keep `httpx.Client(base_url=args.base_u...` active while this scoped operation is performed.
     with httpx.Client(base_url=args.base_url, timeout=20.0) as health_client:
         _step("0) Waiting for API health")
         wait_for_api(health_client)
         _pass("API health check passed")
 
+    # Keep `httpx.AsyncClient(base_url=args.b...` active while this scoped operation is performed.
     async with httpx.AsyncClient(base_url=args.base_url, timeout=20.0) as client:
         _step("1) Register/login channel owner and outsider")
         owner = await register_and_login(client, "owner")
@@ -273,6 +315,7 @@ async def main_async() -> int:
         _step("4) Controlled dead-letter row is visible in Delivery Monitor API")
         controlled_outbox_id = await _insert_controlled_dead_letter(channel_id, channel_slug)
         dead_lettered = await _req(client, "GET", "/admin/delivery/dead-lettered?limit=100", token=owner.access_token)
+        # Reject the operation when `not any((item.get('id') == controlled_outbox_id for item in dead_lett...` to keep invalid state from progressing.
         if not any(item.get("id") == controlled_outbox_id for item in dead_lettered.get("items", [])):
             raise RuntimeError(f"Controlled dead-letter row {controlled_outbox_id} was not listed")
         _pass(f"Controlled dead-letter row listed: {controlled_outbox_id}")
@@ -285,9 +328,11 @@ async def main_async() -> int:
             token=owner.access_token,
             payload={},
         )
+        # Reject the operation when `retry.get('retried_count') != 1` to keep invalid state from progressing.
         if retry.get("retried_count") != 1:
             raise RuntimeError(f"Manual retry did not reset the controlled row: {retry}")
         retry_item = retry.get("items", [{}])[0]
+        # Reject the operation when `retry_item.get('status') != 'pending'` to keep invalid state from progressing.
         if retry_item.get("status") != "pending":
             raise RuntimeError(f"Manual retry item was not pending after reset: {retry_item}")
         _pass("Manual retry endpoint reset dead-lettered row to pending")
@@ -321,13 +366,17 @@ async def main_async() -> int:
         return 0
 
 
+# Runs the module's command-line workflow; the command-line verification workflow uses it.
 def main() -> int:
     return asyncio.run(main_async())
 
 
+# Run this conditional step only when `__name__ == '__main__'` is true.
 if __name__ == "__main__":
+    # Attempt this operation and handle expected failures in the exception branches below.
     try:
         raise SystemExit(main())
+    # Handle `Exception` here so this workflow can recover or report the failure consistently.
     except Exception as exc:
         print(f"[FAIL] Delivery reliability verification failed ({type(exc).__name__}): {exc}", file=sys.stderr)
         print("[INFO] Check DATABASE_URL credentials or run the canonical Docker command printed above.", file=sys.stderr)
