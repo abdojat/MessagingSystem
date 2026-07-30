@@ -69,6 +69,8 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
           const payload = data.payload;
           const activeChannelId = window.location.pathname.match(/\/app\/channels\/([^/]+)/)?.[1] ?? null;
 
+          // Applies one channel update to both its detail cache and every cached
+          // channel list so WebSocket events remain consistent across the UI.
           const updateChannelCaches = (
             channelId: string,
             updater: (channel: ChannelResponse) => ChannelResponse

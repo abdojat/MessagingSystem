@@ -51,7 +51,8 @@ ROLE_WEIGHT = {
 
 # Groups the channel business operations; API route handlers call it to enforce application business rules.
 class ChannelService:
-    # Creates a safe slug from; API route handlers call it to enforce application business rules.
+    # Converts a channel name into a broker-safe slug; channel creation uses it when
+    # the client does not provide an explicit routing identifier.
     @staticmethod
     def _slugify(raw: str) -> str:
         normalized = re.sub(r"[^a-z0-9]+", "-", raw.strip().lower()).strip("-")
