@@ -13,6 +13,8 @@ from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
 
 
 class AuthService:
+    """Coordinates account registration, login, token rotation, and session revocation."""
+
     @staticmethod
     async def register(db: AsyncSession, req: RegisterRequest) -> User:
         username = normalize_username(req.username)
@@ -65,9 +67,13 @@ class AuthService:
             expires_at=utcnow() + timedelta(days=refresh_ttl_days),
         )
         db.add(session)
+        # Flush first so the refresh token can carry a concrete session id that
+        # later supports single-device logout and refresh-token rotation.
         await db.flush()
 
         refresh = create_refresh_token(user.id, session.id)
+        # Only a hash of the refresh token is stored; the raw token is returned
+        # once to the client and cannot be recovered from the database.
         session.refresh_token_hash = sha256_hex(refresh)
         access = create_access_token(user.id)
         await db.commit()
@@ -87,6 +93,8 @@ class AuthService:
         session.expires_at = now + timedelta(days=refresh_ttl_days)
         session.user_agent = user_agent
         session.ip = ip
+        # Rotating the refresh token on every use narrows replay windows: an old
+        # refresh token stops matching the stored hash immediately after use.
         new_refresh = create_refresh_token(session.user_id, session.id)
         session.refresh_token_hash = sha256_hex(new_refresh)
         new_access = create_access_token(session.user_id)
@@ -103,6 +111,7 @@ class AuthService:
     @staticmethod
     async def get_user_from_access_token(db: AsyncSession, token: str) -> User:
         payload = decode_token(token)
+        # Access-only endpoints reject refresh tokens even though both are JWTs.
         if payload.get("type") != "access":
             raise AppError("invalid access token", 401, code="AUTH_INVALID")
         user_id = payload.get("sub")
@@ -167,6 +176,8 @@ class AuthService:
             raise AppError("invalid session", 401, code="AUTH_INVALID")
         if session.revoked_at is not None or session.expires_at < utcnow():
             raise AppError("session expired or revoked", 401, code="AUTH_EXPIRED")
+        # The JWT must match the latest token hash for this session, which is
+        # what makes refresh rotation and logout take effect server-side.
         if session.refresh_token_hash != sha256_hex(refresh_token):
             raise AppError("refresh token mismatch", 401, code="AUTH_INVALID")
         return session

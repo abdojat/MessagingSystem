@@ -18,6 +18,7 @@ class OnlineUserConsumerManager:
         self.tasks: dict[str, asyncio.Task] = {}
 
     async def run(self) -> None:
+        # Keep reconciling online-user consumers for the lifetime of the worker.
         while True:
             try:
                 online = await self.redis.smembers(online_users_key())

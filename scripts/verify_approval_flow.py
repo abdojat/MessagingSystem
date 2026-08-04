@@ -126,6 +126,7 @@ async def _send_ws(ws, msg_type: str, payload: dict, *, request_id: str | None =
 
 async def _wait_for_ws_sync(ws, *, request_id: str, timeout_seconds: int) -> dict:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
+    # Read socket responses until the matching sync result arrives or times out.
     while True:
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
@@ -142,6 +143,7 @@ async def _wait_for_ws_sync(ws, *, request_id: str, timeout_seconds: int) -> dic
 
 async def _wait_for_membership_update(ws, *, channel_id: str, user_id: str, timeout_seconds: int) -> dict:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
+    # Wait for the requested membership update while enforcing the test deadline.
     while True:
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
@@ -158,6 +160,7 @@ async def _wait_for_membership_update(ws, *, channel_id: str, user_id: str, time
 
 async def _wait_for_live_message(ws, *, channel_id: str, plaintext: str, timeout_seconds: int) -> dict:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
+    # Wait for the expected published message while enforcing the test deadline.
     while True:
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
@@ -257,6 +260,8 @@ async def main_async() -> int:
             hello_event = json.loads(hello_raw)
             if hello_event.get("type") != "hello":
                 raise RuntimeError(f"Unexpected WebSocket hello payload: {hello_raw}")
+            # Keep another live subscription open so the approval test verifies
+            # membership updates on an already-connected socket.
             existing_subscribe_id = await _send_ws(
                 ws,
                 "subscribe",

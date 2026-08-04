@@ -52,6 +52,7 @@ class ChannelPatchRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_non_empty(self) -> "ChannelPatchRequest":
+        # Empty PATCH requests would create audit noise without changing channel state.
         if len(self.model_fields_set) == 0:
             raise ValueError("provide at least one field to update")
         return self
@@ -143,6 +144,8 @@ class InviteRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_target_mode(self) -> "InviteRequest":
+        # An invite is either reusable/generic or targeted at one user/email;
+        # mixing those modes would make later acceptance checks ambiguous.
         has_user = self.invited_user_id is not None
         has_email = self.invited_email is not None
         if self.is_generic:
@@ -220,6 +223,7 @@ class AdminPermissionsUpdateRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_non_empty(self) -> "AdminPermissionsUpdateRequest":
+        # Permission updates should represent an intentional role change.
         if len(self.model_fields_set) == 0:
             raise ValueError("provide at least one permission field")
         return self

@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _parse_cors_origins(cls, value: Any) -> list[str]:
+        # Operators may provide CORS origins as JSON, comma-separated text, or a
+        # native list depending on whether they run Docker, tests, or local dev.
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         if isinstance(value, str):

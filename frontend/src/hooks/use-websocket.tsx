@@ -61,6 +61,8 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
           const payload = data.payload;
           const activeChannelId = window.location.pathname.match(/\/app\/channels\/([^/]+)/)?.[1] ?? null;
 
+          // Applies one channel update to both its detail cache and every cached
+          // channel list so WebSocket events remain consistent across the UI.
           const updateChannelCaches = (
             channelId: string,
             updater: (channel: ChannelResponse) => ChannelResponse
@@ -175,6 +177,8 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
             if (data.type === 'membership_update' && payload?.channel_id) {
               queryClient.invalidateQueries({ queryKey: ['/channels', payload.channel_id] });
               if (payload.user_id === user?.id) {
+                // Membership changes alter which broker-backed channels this
+                // socket is allowed to receive, so resubscribe immediately.
                 if (['owner', 'admin', 'member'].includes(payload.new_role)) {
                   ws.current?.send(JSON.stringify({
                     type: 'subscribe',
@@ -202,6 +206,8 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
         setStatus('disconnected');
         ws.current = null;
         if (!isUnmounted && shouldReconnect.current) {
+          // Exponential backoff keeps reconnects responsive at first without
+          // hammering the backend during a longer outage.
           const backoff = Math.min(1000 * Math.pow(2, reconnectAttempt.current), maxBackoff);
           reconnectAttempt.current += 1;
           reconnectTimer.current = window.setTimeout(connect, backoff);

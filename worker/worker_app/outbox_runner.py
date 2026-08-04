@@ -23,6 +23,8 @@ INTEGRITY_VERSION = 1
 
 
 def _canonical_value(value: Any) -> Any:
+    """Normalize values before hashing so event integrity is stable across runtimes."""
+
     if isinstance(value, datetime):
         normalized = _as_utc_datetime(value)
         return normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
@@ -72,6 +74,8 @@ def _compute_event_hash(
 
 
 def sanitize_error(exc: BaseException | str) -> str:
+    """Remove credentials from broker or token errors before storing them in events."""
+
     message = str(exc)
     message = re.sub(r"(amqps?://)([^:/@\s]+):([^@\s]+)@", r"\1***:***@", message)
     message = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1***", message)
@@ -80,6 +84,8 @@ def sanitize_error(exc: BaseException | str) -> str:
 
 
 def calculate_retry_delay(attempt_count: int, settings: Settings) -> int:
+    """Calculate capped exponential backoff for a failed outbox publish."""
+
     initial = max(1, int(settings.outbox_initial_retry_delay_seconds))
     multiplier = max(1.0, float(settings.outbox_retry_backoff_multiplier))
     cap = max(initial, int(settings.outbox_max_retry_delay_seconds))
@@ -93,6 +99,8 @@ async def run_outbox_publisher(amqp: aio_pika.RobustConnection) -> None:
     exchange = await channel.declare_exchange(EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC, durable=True)
     dead_letter_exchange = await channel.declare_exchange(DEAD_LETTER_EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC, durable=True)
 
+    # The worker polls PostgreSQL as the source of truth, then publishes only
+    # committed outbox rows to RabbitMQ.
     while True:
         try:
             async with SessionLocal() as db:
@@ -111,6 +119,8 @@ async def process_outbox_batch(
     settings: Settings,
     limit: int = 100,
 ) -> int:
+    # SKIP LOCKED lets multiple worker processes share the outbox without
+    # publishing the same row at the same time.
     rows = await db.execute(
         text(
             """
@@ -231,6 +241,8 @@ async def _handle_publish_failure(
     max_attempts = max(1, int(rec["max_attempts"] or settings.outbox_max_attempts))
 
     if attempt_count >= max_attempts:
+        # After the final retry, the database status is the authoritative record;
+        # the RabbitMQ dead-letter publish is a diagnostic mirror for operators.
         await _mark_dead_lettered(db, rec["id"], error_text, attempt_count)
         await _insert_delivery_event(
             db,
@@ -310,6 +322,8 @@ async def _insert_delivery_event(db: AsyncSession, event_type: str, channel_id: 
     event_id = str(uuid4())
     created_at = datetime.now(timezone.utc)
     integrity_scope = _event_integrity_scope(channel_id)
+    # One advisory lock per integrity scope keeps the hash chain linear while
+    # allowing unrelated channels to record broker events concurrently.
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:scope))"), {"scope": integrity_scope})
     latest_integrity_event = (
         await db.execute(
@@ -329,6 +343,8 @@ async def _insert_delivery_event(db: AsyncSession, event_type: str, channel_id: 
     previous_hash = latest_integrity_event["event_hash"] if latest_integrity_event is not None else None
     if latest_integrity_event is not None:
         previous_created_at = latest_integrity_event["created_at"]
+        # Preserve deterministic ordering when two events land within the same
+        # clock tick on a busy worker.
         if _as_utc_datetime(created_at) <= _as_utc_datetime(previous_created_at):
             created_at = _as_utc_datetime(previous_created_at) + timedelta(microseconds=1)
     event_hash = _compute_event_hash(

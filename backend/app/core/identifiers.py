@@ -5,6 +5,8 @@ from uuid import UUID
 
 from app.core.errors import AppError
 
+# These rules keep user-facing identifiers safe for RabbitMQ routing keys, Redis
+# channel names, and URL paths where wildcard characters would be dangerous.
 SAFE_IDENTIFIER_PATTERN = r"^[A-Za-z0-9_-]{3,50}$"
 SAFE_IDENTIFIER_RE = re.compile(SAFE_IDENTIFIER_PATTERN)
 SAFE_IDENTIFIER_MAX_LENGTH = 50
@@ -92,6 +94,8 @@ def normalize_profile_image_url(value: str | None, *, field_name: str = "image_u
 
     parsed = urlsplit(normalized)
     if parsed.scheme:
+        # External profile media is limited to normal web URLs; protected upload
+        # references are handled as paths below.
         if parsed.scheme.lower() not in {"http", "https"}:
             raise ValueError(f"{field_name} must use http, https, or a protected upload path")
         if not parsed.netloc:
@@ -101,6 +105,8 @@ def normalize_profile_image_url(value: str | None, *, field_name: str = "image_u
     if parsed.netloc or normalized.startswith("//"):
         raise ValueError(f"{field_name} must not be protocol-relative")
 
+    # Protected upload URLs are path-only so callers cannot smuggle tokens,
+    # query strings, or alternate hosts into stored profile media.
     if parsed.query or parsed.fragment:
         raise ValueError(f"protected upload {field_name} URLs cannot include query strings or fragments")
 

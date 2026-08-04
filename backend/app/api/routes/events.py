@@ -19,6 +19,8 @@ async def list_channel_events(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> EventListResponse:
+    # Channel events expose the full audit payload only to users who pass the
+    # channel-service membership check.
     if not isinstance(cursor, str):
         cursor = None
     try:
@@ -54,6 +56,8 @@ async def verify_channel_event_integrity(
     user: CurrentUserDep,
 ) -> EventIntegrityResponse:
     try:
+        # Integrity verification is limited to channel managers because it
+        # exposes audit-chain diagnostics rather than ordinary activity history.
         await ChannelService._assert_manage_membership_access(db, channel_id, user.id)
         result = await EventIntegrityService.verify_channel_scope(db, channel_id)
     except AppError as exc:

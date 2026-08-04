@@ -29,6 +29,8 @@ from app.services.outbox_service import enqueue_channel_event_outbox
 
 
 class AdminService:
+    # The dashboard intentionally groups noisy low-level event names into a few
+    # supervisor-friendly categories without changing the stored audit rows.
     EVENT_CATEGORY_PREFIXES = {
         "security": ("security.",),
         "channels": ("channel.",),
@@ -40,6 +42,8 @@ class AdminService:
         "system": ("system.", "user."),
     }
 
+    # Raw audit payloads may include implementation details, so list-events
+    # exposes only short, whitelisted fields that are safe for display.
     SAFE_EVENT_DETAIL_KEYS_BY_PREFIX = {
         "channel": {
             "channel_id", "channel_slug", "join_mode", "name", "requested_slug",
@@ -149,6 +153,9 @@ class AdminService:
                     resolved[event_id] = resolved_channel_id
 
         if upload_refs:
+            # Upload events often only know the upload id. Infer channel context
+            # through message attachments, but do not guess when the same upload
+            # appears in more than one channel.
             attachment_filters = [
                 cast(Message.attachments, String).contains(str(upload_id)) for upload_id in upload_refs
             ]
@@ -208,6 +215,8 @@ class AdminService:
         filters = []
         if q:
             term = q.strip().removeprefix("@")
+            # Admin search accepts @username shorthand and escapes wildcard
+            # characters so a search term cannot reshape the LIKE pattern.
             escaped = AdminService._escape_like(term)
             pattern = f"%{escaped}%"
             filters.append(
@@ -237,6 +246,8 @@ class AdminService:
         ordering = [User.created_at.desc(), User.id.desc()]
         if q and q.strip():
             term = q.strip().removeprefix("@")
+            # Rank exact and prefix matches first so the user being searched for
+            # appears predictably at the top of the admin table.
             escaped = AdminService._escape_like(term)
             prefix = f"{escaped}%"
             ordering = [
@@ -286,6 +297,8 @@ class AdminService:
         target.deactivated_by_user_id = None if is_active else actor.id
         revoked_count = 0
         if not is_active:
+            # Deactivation immediately revokes outstanding sessions so the
+            # account cannot keep using existing refresh tokens.
             result = await db.execute(
                 update(UserSession)
                 .where(UserSession.user_id == target.id, UserSession.revoked_at.is_(None))
@@ -339,6 +352,8 @@ class AdminService:
         offset: int,
         limit: int,
     ) -> tuple[list[AdminChannelItem], int]:
+        # Count members and messages with subqueries so filters and pagination
+        # still operate on one row per channel.
         member_counts = (
             select(ChannelMembership.channel_id, func.count(ChannelMembership.user_id).label("member_count"))
             .where(ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]))
@@ -360,6 +375,8 @@ class AdminService:
         if q:
             term = q.strip()
             identifier_term = term[1:] if term.startswith(("#", "@")) else term
+            # Searches accept the user-facing #channel/@owner shorthand while
+            # still escaping LIKE wildcards before the database sees the term.
             escaped = AdminService._escape_like(term)
             identifier_escaped = AdminService._escape_like(identifier_term)
             pattern = f"%{escaped}%"
@@ -391,6 +408,8 @@ class AdminService:
         if q and q.strip():
             term = q.strip()
             identifier_term = term[1:] if term.startswith(("#", "@")) else term
+            # Prefer exact identifier/name matches before broader substring
+            # results so the admin page feels predictable during demos.
             escaped = AdminService._escape_like(term)
             identifier_escaped = AdminService._escape_like(identifier_term)
             prefix = f"{escaped}%"
@@ -498,6 +517,8 @@ class AdminService:
             ]
         rows = (await db.execute(stmt.order_by(*ordering).offset(offset).limit(limit))).all()
         total = int((await db.execute(total_stmt)).scalar_one() or 0)
+        # Some legacy/system events store channel context only in payloads or
+        # related rows; enrich the response without mutating immutable audit data.
         resolved_channel_ids = await AdminService._resolve_event_channel_ids(db, [row[0] for row in rows])
         resolved_channel_context: dict[UUID, tuple[str, str]] = {}
         if resolved_channel_ids:
@@ -568,6 +589,8 @@ class AdminService:
         ).scalars().all()
         amqp_channel = await amqp.channel()
         try:
+            # Restoring a channel also restores broker bindings for active
+            # members so realtime delivery resumes without waiting for rejoin.
             for username in usernames:
                 await bind_user_channel(amqp_channel, username, channel.channel_slug)
         finally:

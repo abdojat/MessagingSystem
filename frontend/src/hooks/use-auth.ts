@@ -29,7 +29,6 @@ export function useInitializeAuth() {
 
       try {
         const baseUrl = getApiBaseUrl();
-        // Use refresh_token to get a new token pair
         const refreshRes = await fetch(`${baseUrl}/auth/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -42,7 +41,8 @@ export function useInitializeAuth() {
         }
 
         const tokens: TokenPair = await refreshRes.json();
-        // Set the access token in the store so the next /me call uses it
+        // Store the refreshed access token before /me so the API client can
+        // authenticate the profile request.
         useAuthStore.setState({ accessToken: tokens.access_token });
         localStorage.setItem('chat_refresh_token', tokens.refresh_token);
 
@@ -66,7 +66,6 @@ export function useLogin() {
         method: 'POST',
         body: JSON.stringify(data)
       });
-      // Temporarily set tokens to make the /me request
       useAuthStore.setState({ accessToken: tokens.access_token });
       const user = await apiClient<MeResponse>('/me');
       setAuth(user, tokens.access_token, tokens.refresh_token);
@@ -79,8 +78,6 @@ export function useRegister() {
   const { setAuth } = useAuthStore();
   return useMutation({
     mutationFn: async (data: RegisterRequest) => {
-      // API might return user directly, but we need tokens. 
-      // Assuming register logs in or we need to login after. Let's assume login after for safety.
       await apiClient('/auth/register', {
         method: 'POST',
         body: JSON.stringify(data)

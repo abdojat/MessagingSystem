@@ -56,6 +56,8 @@ async def get_current_superadmin(
 
     from app.services.event_service import log_event
 
+    # Denied superadmin attempts are audit-worthy even though no application
+    # state changes, because they indicate privilege-boundary probing.
     await log_event(
         db,
         "security.superadmin_access_denied",

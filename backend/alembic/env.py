@@ -17,6 +17,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+# Runs migrations offline; Alembic uses it to configure and execute database migrations.
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -31,6 +32,7 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+# Runs migrations online; Alembic uses it to configure and execute database migrations.
 def run_migrations_online() -> None:
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
@@ -40,11 +42,13 @@ def run_migrations_online() -> None:
 
     from asyncio import run
 
+    # Attaches the connection and executes Alembic migrations; Alembic uses it to configure and execute database migrations.
     def do_run_migrations(connection) -> None:
         context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
         with context.begin_transaction():
             context.run_migrations()
 
+    # Runs migrations inside the configured connection; Alembic uses it to configure and execute database migrations.
     async def do_migrations() -> None:
         async with connectable.connect() as connection:
             await connection.run_sync(do_run_migrations)

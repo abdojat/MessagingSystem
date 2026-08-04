@@ -21,6 +21,7 @@ def integrity_scope_for_event(channel_id: UUID | None) -> str:
 
 
 def _canonical_value(value: Any) -> Any:
+    """Normalize values before hashing so equivalent payloads hash identically."""
     if isinstance(value, datetime):
         normalized = _as_utc_datetime(value)
         return normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
@@ -42,6 +43,7 @@ def _as_utc_datetime(value: datetime) -> datetime:
 
 
 def canonical_event_payload(event: Event) -> dict[str, Any]:
+    """Build the exact event representation covered by the integrity hash."""
     return {
         "id": str(event.id),
         "channel_id": str(event.channel_id) if event.channel_id is not None else None,
@@ -73,10 +75,13 @@ class EventIntegrityService:
         bind = db.get_bind()
         if bind is None or bind.dialect.name != "postgresql":
             return
+        # One advisory lock per channel/system scope prevents two concurrent
+        # writers from both linking to the same previous hash.
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:scope))"), {"scope": scope})
 
     @staticmethod
     async def attach_integrity(db: AsyncSession, event: Event, scope: str | None = None) -> Event:
+        """Append hash-chain metadata to an event that is already in the session."""
         resolved_scope = scope or integrity_scope_for_event(event.channel_id)
         latest = await EventIntegrityService._latest_integrity_event(db, resolved_scope)
         previous_hash = latest.event_hash if latest is not None else None
@@ -123,6 +128,8 @@ class EventIntegrityService:
         first_event_id = str(events[0].id) if events else None
         last_event_id = str(events[-1].id) if events else None
 
+        # Verification recomputes the chain from the beginning and stops at the
+        # first broken event so the UI can point to a concrete audit record.
         for event in events:
             checked_events += 1
 

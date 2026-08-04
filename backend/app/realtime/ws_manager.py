@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 
 class WSManager:
+    """Bridges authenticated WebSocket clients to Redis fanout and REST backfill."""
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], redis: Redis, amqp: aio_pika.RobustConnection):
         self._session_factory = session_factory
         self._redis = redis
@@ -45,6 +47,8 @@ class WSManager:
         if not pre_accepted:
             await websocket.accept()
         await mark_user_online(self._redis, username)
+        # Refresh broker bindings on connect so users who were offline during a
+        # membership change still have the correct durable queues.
         await self._ensure_user_bindings(user_id, username)
         self._subscriptions[id(websocket)] = set(await self._member_channel_ids(user_id))
         self._connections.setdefault(user_id, {})[id(websocket)] = websocket
@@ -80,6 +84,8 @@ class WSManager:
 
         redis_task = asyncio.create_task(self._redis_forward_loop(websocket, username))
         inbound_task = asyncio.create_task(self._inbound_loop(websocket, user_id))
+        # The socket is alive while both loops are alive; if either side exits,
+        # cancel the other side and let the route perform disconnect cleanup.
         done, pending = await asyncio.wait({redis_task, inbound_task}, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
             task.cancel()
@@ -128,6 +134,8 @@ class WSManager:
         from_seq_id: int | None = None,
         request_id: UUID | None = None,
     ) -> None:
+        # WebSocket history is intentionally small; the REST sync endpoint remains
+        # the durable path for larger missed-message backfills.
         async with self._session_factory() as db:
             sync_items: list[dict[str, Any]] = []
             sender_cache: dict[UUID, User | None] = {}
@@ -164,6 +172,8 @@ class WSManager:
         content_text = None
         content_json = None
         if not is_deleted:
+            # WebSocket payloads are decrypted only after the connection has
+            # passed channel membership checks.
             if m.content_type.value == "text":
                 content_text = decrypt_message(m.content_text) if m.content_text is not None else None
             elif m.content_type.value == "json":
@@ -175,6 +185,8 @@ class WSManager:
         if sender_cache is not None and m.sender_user_id in sender_cache:
             sender = sender_cache[m.sender_user_id]
         else:
+            # Batch syncs reuse sender records so reconnect/backfill responses do
+            # not issue one user lookup per message from the same sender.
             sender = await db.get(User, m.sender_user_id)
             if sender_cache is not None:
                 sender_cache[m.sender_user_id] = sender
@@ -203,6 +215,7 @@ class WSManager:
         }
 
     async def _inbound_loop(self, websocket: WebSocket, user_id: UUID) -> None:
+        # Receive client commands continuously until the WebSocket disconnects.
         while True:
             raw = await websocket.receive_text()
             try:
@@ -214,6 +227,8 @@ class WSManager:
             msg_type = envelope.type
             payload = envelope.payload or {}
 
+            # Keep the realtime protocol explicit so unsupported client commands
+            # return a structured validation error instead of being ignored.
             if msg_type == "ping":
                 await websocket.send_json(build_envelope("pong", {}, request_id=envelope.request_id))
             elif msg_type == "auth":
@@ -272,6 +287,8 @@ class WSManager:
             return
         async with self._session_factory() as db:
             try:
+                # WebSocket seen events require a sequence marker; message-id
+                # resolution stays on the REST endpoint where richer validation fits.
                 state = await MessageService.mark_seen(
                     db,
                     req.channel_id,
@@ -304,6 +321,8 @@ class WSManager:
             return
         allowed = set(await self._member_channel_ids(user_id))
         wanted = {str(cid) for cid in req.channel_ids}
+        # A client may ask for any channel id, but realtime subscriptions are
+        # intersected with current membership before history is returned.
         granted = sorted(list(wanted & allowed))
         self._subscriptions[id(websocket)] = set(granted)
         await self._send_history(websocket, user_id, granted, from_seq_id=req.from_seq_id, request_id=request_id)
@@ -339,6 +358,8 @@ class WSManager:
             return
         limit = max(1, min(int(req.limit or 200), 500))
         allowed = set(await self._member_channel_ids(user_id))
+        # Resume uses per-channel cursors so a reconnect can replay only messages
+        # newer than the client's last seen sequence.
         async with self._session_factory() as db:
             items: list[dict[str, Any]] = []
             sender_cache: dict[UUID, User | None] = {}
@@ -383,6 +404,7 @@ class WSManager:
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(channel_name)
         try:
+            # Forward Redis events continuously while this user's socket remains active.
             while True:
                 try:
                     message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
@@ -406,6 +428,8 @@ class WSManager:
                 channel_id = str(event.get("channel_id") or "")
                 event_type = str(event.get("type") or "event")
                 subs = self._subscriptions.get(id(websocket), set())
+                # Membership updates are delivered even when the channel was just
+                # unsubscribed, because they tell the client why access changed.
                 if event_type != "membership_update" and channel_id and subs and channel_id not in subs:
                     continue
                 await websocket.send_json(build_envelope(event_type, event))
@@ -419,6 +443,8 @@ class WSManager:
         event_type = str(event.get("type") or "")
         if event_type not in {"message", "message_updated"}:
             return event
+        # RabbitMQ and Redis carry encrypted message content; plaintext is only
+        # restored inside the authenticated WebSocket boundary.
         if event.get("deleted_at") is not None:
             event["content_text"] = None
             event["content_json"] = None

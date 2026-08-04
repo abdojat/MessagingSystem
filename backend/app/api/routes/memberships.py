@@ -60,6 +60,8 @@ async def list_members(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> ChannelMembershipListResponse:
+    # Normalize optional filters before handing them to cursor pagination in the
+    # service layer, where membership authorization is enforced.
     if not isinstance(q, str):
         q = None
     if not isinstance(cursor, str):
@@ -89,6 +91,8 @@ async def list_members(
                 approved_at=m.approved_at,
                 updated_at=m.updated_at,
                 invited_by_user_id=m.invited_by_user_id,
+                # Fine-grained admin permissions matter only for admin rows; for
+                # owners/members the role itself defines the capability set.
                 admin_permissions=normalize_admin_permissions(m.admin_permissions) if m.role == MembershipRole.admin else None,
             )
             for m, u in rows
@@ -107,6 +111,8 @@ async def list_pending_requests(
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> ChannelMembershipListResponse:
+    # Pending requests reuse the member-list shape so the frontend can render
+    # approval queues and active member lists with one component.
     if not isinstance(q, str):
         q = None
     if not isinstance(cursor, str):
@@ -163,6 +169,8 @@ async def list_invites(
     limit: int = Query(default=50, ge=1, le=200),
     status: str | None = Query(default=None, pattern="^(active|revoked|accepted|expired)$"),
 ) -> InviteListResponse:
+    # Route-level normalization keeps older clients that send null/odd values
+    # from tripping deeper pagination and status-filter logic.
     if not isinstance(cursor, str):
         cursor = None
     if not isinstance(status, str):

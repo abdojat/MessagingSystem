@@ -39,6 +39,8 @@ export default function middleware(request: NextRequest) {
   const accessToken = request.cookies.get("chat_access_token")?.value;
   const role = request.cookies.get("chat_user_role")?.value ?? "member";
 
+  // Middleware performs lightweight route gating; backend authorization remains
+  // the source of truth for protected channel and admin actions.
   if (hasMatchingPrefix(routePath, AUTH_REQUIRED_PREFIXES) && !accessToken) {
     const loginUrl = new URL(`/${locale}/login`, request.url);
     loginUrl.searchParams.set("next", request.nextUrl.pathname);

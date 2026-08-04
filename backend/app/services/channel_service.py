@@ -50,6 +50,10 @@ ROLE_WEIGHT = {
 
 
 class ChannelService:
+    """Coordinates channel state, membership rules, broker bindings, and audit events."""
+
+    # Converts a channel name into a broker-safe slug; channel creation uses it when
+    # the client does not provide an explicit routing identifier.
     @staticmethod
     def _slugify(raw: str) -> str:
         normalized = re.sub(r"[^a-z0-9]+", "-", raw.strip().lower()).strip("-")
@@ -66,6 +70,7 @@ class ChannelService:
         base = base_slug[:SAFE_IDENTIFIER_MAX_LENGTH] or "channel"
         candidate = base
         suffix = 2
+        # Try incrementing suffixes until an unused channel slug is found.
         while True:
             exists_row = await db.execute(select(Channel.id).where(Channel.channel_slug == candidate).limit(1))
             if exists_row.scalar_one_or_none() is None:
@@ -139,6 +144,8 @@ class ChannelService:
 
     @staticmethod
     async def create_channel(db: AsyncSession, owner_user_id: UUID, req: ChannelCreateRequest, amqp: aio_pika.RobustConnection) -> Channel:
+        # Channel avatars may reference protected uploads, so ownership and media type
+        # are checked before the URL becomes visible to other channel readers.
         if req.avatar_url is not None:
             from app.services.message_service import MessageService
 
@@ -159,6 +166,8 @@ class ChannelService:
         db.add(channel)
         await db.flush()
 
+        # Channel creation is persisted with its counter, owner membership, and
+        # audit event before any RabbitMQ binding is attempted.
         db.add(ChannelCounter(channel_id=channel.id, next_seq=0))
         db.add(
             ChannelMembership(
@@ -191,6 +200,8 @@ class ChannelService:
         if owner is None:
             raise AppError("owner not found", 404, code="USER_NOT_FOUND")
 
+        # The owner needs an immediate binding so the newly created topic can be
+        # demonstrated through the broker without waiting for a reconnect.
         amqp_channel = await amqp.channel()
         try:
             await bind_user_channel(amqp_channel, owner.username, channel.channel_slug)
@@ -240,6 +251,8 @@ class ChannelService:
             pattern = f"%{q.strip()}%"
             stmt = stmt.where(Channel.name.ilike(pattern))
         if cursor:
+            # Channel list pagination follows the same ordering as the query:
+            # newest activity first, then channel creation time, then id.
             cursor_last_message_at, cursor_created_at, cursor_channel_id = ChannelService._decode_channel_cursor(cursor)
             if cursor_last_message_at is None:
                 stmt = stmt.where(last_message_sq.c.last_message_at.is_(None)).where(
@@ -387,6 +400,8 @@ class ChannelService:
         for channel_id in channel_ids:
             payloads[channel_id]["my_last_seen_seq_id"] = seen_map.get(channel_id)
 
+        # Replies are excluded from unread counts so threaded side conversations do
+        # not make the main channel list look noisier than the top-level stream.
         state_sq = (
             select(UserChannelState.channel_id, UserChannelState.last_seen_seq_id)
             .where(UserChannelState.user_id == user_id, UserChannelState.channel_id.in_(channel_ids))
@@ -516,6 +531,8 @@ class ChannelService:
         await db.refresh(channel)
 
         if old_channel_slug != channel.channel_slug:
+            # The database is already committed when broker bindings are updated;
+            # reconnect or join flows can repair bindings if RabbitMQ is transiently down.
             member_rows = await db.execute(
                 select(User.username)
                 .join(ChannelMembership, ChannelMembership.user_id == User.id)
@@ -567,6 +584,8 @@ class ChannelService:
 
         amqp_channel = await amqp.channel()
         try:
+            # The database tombstone is committed first, then broker bindings are
+            # removed so active subscribers stop receiving realtime messages.
             rows = await db.execute(
                 select(User.username)
                 .join(ChannelMembership, ChannelMembership.user_id == User.id)
@@ -593,6 +612,8 @@ class ChannelService:
         if membership:
             return ("already_member", membership, "user already has membership")
 
+        # Join mode decides whether the user becomes an active subscriber now or
+        # only creates a pending request for admins to approve later.
         if channel.join_mode == ChannelJoinMode.invite_only:
             if not req.invite_token:
                 return ("requires_invite", None, "invite token required for invite_only channels")
@@ -648,6 +669,8 @@ class ChannelService:
         await db.commit()
 
         if membership.role in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member}:
+            # Only active subscribers receive RabbitMQ bindings; pending requests
+            # stay visible in the database but do not receive channel traffic.
             username = await ChannelService._require_username(db, user_id)
             amqp_channel = await amqp.channel()
             try:
@@ -669,6 +692,8 @@ class ChannelService:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         token = make_invite_token()
+        # Store only a hash plus a short mask so leaked database rows cannot be
+        # used as invite links, while the UI can still show recognizable tokens.
         token_hash = sha256_hex(token)
         invite = ChannelInvite(
             channel_id=channel_id,
@@ -707,6 +732,8 @@ class ChannelService:
             raise AppError("forbidden", 403, code="FORBIDDEN")
         stmt = select(ChannelInvite).where(ChannelInvite.channel_id == channel_id)
         now = utcnow()
+        # Status filters are mutually exclusive so each tab in the management UI
+        # maps to one clear invite state.
         if status == "active":
             stmt = stmt.where(ChannelInvite.revoked_at.is_(None), ChannelInvite.accepted_at.is_(None), ChannelInvite.expires_at >= now)
         elif status == "revoked":
@@ -857,6 +884,8 @@ class ChannelService:
         await db.commit()
 
         amqp_channel = await amqp.channel()
+        # Accepting an invite makes the user a subscriber, so their durable queue
+        # must be bound to the channel routing key after the membership commit.
         try:
             await bind_user_channel(amqp_channel, user.username, channel.channel_slug)
         finally:
@@ -902,6 +931,8 @@ class ChannelService:
         target_username = await ChannelService._require_username(db, target_id)
         channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
+        # Approval is the point where a pending user begins receiving published
+        # messages through the broker.
         try:
             await bind_user_channel(amqp_channel, target_username, channel_slug)
         finally:
@@ -954,6 +985,7 @@ class ChannelService:
         target_username = await ChannelService._require_username(db, target_id)
         channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
+        # Directly added members become subscribers immediately.
         try:
             await bind_user_channel(amqp_channel, target_username, channel_slug)
         finally:
@@ -1031,6 +1063,8 @@ class ChannelService:
         if target.role != MembershipRole.admin:
             raise AppError("target user must be an admin", 400, code="VALIDATION_ERROR")
 
+        # Admin permissions are sparse at the API boundary, so normalize first
+        # and then apply only the fields the owner actually changed.
         current_permissions = normalize_admin_permissions(target.admin_permissions)
         if req.can_publish is not None:
             current_permissions["can_publish"] = req.can_publish
@@ -1096,6 +1130,8 @@ class ChannelService:
         target_username = await ChannelService._require_username(db, target_id)
         channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
+        # Removing membership must also remove the broker binding so future
+        # publishes no longer fan out to that user's queue.
         try:
             await unbind_user_channel(amqp_channel, target_username, channel_slug)
         finally:
@@ -1133,6 +1169,8 @@ class ChannelService:
         username = await ChannelService._require_username(db, user_id)
         channel_slug = await ChannelService._require_channel_slug(db, channel_id)
         amqp_channel = await amqp.channel()
+        # Leaving is a user-initiated unsubscribe, so the queue binding is cleaned
+        # up after the membership record is deleted.
         try:
             await unbind_user_channel(amqp_channel, username, channel_slug)
         finally:
@@ -1149,6 +1187,8 @@ class ChannelService:
         limit: int,
     ) -> tuple[list[tuple[ChannelMembership, User]], str | None, bool]:
         await ChannelService._assert_manage_membership_access(db, channel_id, actor_user_id)
+        # Member pages are ordered by operational importance first, then by a
+        # stable username/id cursor so pagination survives duplicate names.
         role_order = case(
             (ChannelMembership.role == MembershipRole.owner, 0),
             (ChannelMembership.role == MembershipRole.admin, 1),
@@ -1169,6 +1209,8 @@ class ChannelService:
             stmt = stmt.where(or_(User.username.ilike(pattern), User.display_name.ilike(pattern), User.email.ilike(pattern)))
         if cursor:
             cursor_role_weight, cursor_username, cursor_user_id = ChannelService._decode_member_cursor(cursor)
+            # Continue after the last role/name/id tuple returned on the prior
+            # page; this mirrors the ORDER BY exactly.
             stmt = stmt.where(
                 or_(
                     role_order > cursor_role_weight,
@@ -1272,12 +1314,16 @@ class ChannelService:
         invite = row.scalar_one_or_none()
         if not invite:
             raise AppError("invalid invite", 400, code="INVITE_INVALID")
+        # Validate the token lifecycle before checking target identity so stale
+        # or revoked invites fail consistently regardless of who presents them.
         if invite.revoked_at:
             raise AppError("invite revoked", 400, code="INVITE_REVOKED")
         if invite.accepted_at:
             raise AppError("invite already accepted", 409, code="INVITE_ALREADY_ACCEPTED")
         if invite.expires_at < utcnow():
             raise AppError("invite expired", 400, code="INVITE_EXPIRED")
+        # Targeted invites remain bound to the intended account or email; only
+        # generic invites skip these checks.
         if invite.invited_user_id and invite.invited_user_id != user_id:
             raise AppError("invite is not for this user", 403, code="FORBIDDEN")
         if invite.invited_email and invite.invited_email != user.email:
@@ -1292,6 +1338,8 @@ class ChannelService:
         role: MembershipRole | None,
         reason: str,
     ) -> None:
+        # Broadcast to current channel subscribers and also to the affected user,
+        # covering the case where they were just removed from the channel.
         target_payload = {
             "type": "membership_update",
             "channel_id": str(channel_id),
@@ -1375,6 +1423,8 @@ class ChannelService:
     ) -> dict:
         payload = ChannelService.build_channel_payload(channel, role, admin_permissions)
 
+        # Channel payloads carry demo-friendly aggregates next to the base row so
+        # the frontend can render lists without a follow-up request per channel.
         members_result = await db.execute(
             select(func.count(ChannelMembership.user_id)).where(
                 ChannelMembership.channel_id == channel.id,
@@ -1388,6 +1438,8 @@ class ChannelService:
             )
         )
         payload["member_count"] = int(members_result.scalar_one() or 0)
+        # Pending counts are management-only information for private/approval
+        # flows, so non-managers see zero rather than operational queue size.
         payload["pending_count"] = (
             int(pending_result.scalar_one() or 0)
             if ChannelService.build_permissions(role, admin_permissions)["can_manage_members"]
@@ -1447,6 +1499,8 @@ class ChannelService:
     async def get_channel_stats(db: AsyncSession, channel_id: UUID, user_id: UUID) -> dict:
         channel = await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, user_id)
+        # Public stats may be viewed by anyone who can discover the channel, but
+        # private channel stats require membership.
         if channel.visibility == ChannelVisibility.private and membership is None:
             raise AppError("forbidden", 403, code="FORBIDDEN")
         member_count_result = await db.execute(

@@ -221,7 +221,6 @@ export default function ChannelDetailsPage() {
             message = error.detail.message;
           }
         } catch {
-          // Keep default message.
         }
         throw new Error(message);
       }

@@ -271,6 +271,8 @@ async def main_async() -> int:
         _pass(f"Outbox publish completed for message {published.get('id')}")
 
         _step("4) Controlled dead-letter row is visible in Delivery Monitor API")
+        # Insert a controlled dead-letter row instead of forcing a real broker
+        # outage; the verifier proves the monitor and manual retry behavior.
         controlled_outbox_id = await _insert_controlled_dead_letter(channel_id, channel_slug)
         dead_lettered = await _req(client, "GET", "/admin/delivery/dead-lettered?limit=100", token=owner.access_token)
         if not any(item.get("id") == controlled_outbox_id for item in dead_lettered.get("items", [])):

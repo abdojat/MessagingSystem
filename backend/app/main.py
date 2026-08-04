@@ -30,6 +30,8 @@ async def lifespan(app: FastAPI):
 
     redis = Redis.from_url(settings.redis_url, decode_responses=False)
 
+    # Compose can start the API before RabbitMQ accepts connections, so startup
+    # waits briefly instead of failing the whole demo on service ordering.
     amqp = None
     for _ in range(30):
         try:
@@ -62,6 +64,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Keep both prefixed and legacy unprefixed routes available; newer docs use
+# /v1, while older demo scripts and supervisor bookmarks may still hit /auth.
 for route_module in (auth, users, channels, memberships, messages, events, delivery, admin, health):
     app.include_router(route_module.router, prefix=settings.api_v1_prefix)
 for route_module in (auth, users, channels, memberships, messages, events, delivery, admin, health):
@@ -117,6 +121,8 @@ async def websocket_endpoint_v1(websocket: WebSocket):
 
 
 async def _run_websocket(websocket: WebSocket) -> None:
+    # Query/header tokens support simple clients; first-frame auth below lets
+    # clients avoid putting bearer tokens in the WebSocket URL.
     token = websocket.query_params.get("token")
     if not token:
         auth_header = websocket.headers.get("authorization", "")
@@ -125,6 +131,8 @@ async def _run_websocket(websocket: WebSocket) -> None:
     if not token:
         await websocket.accept()
         try:
+            # The socket is accepted only long enough to receive an auth frame;
+            # unauthenticated sockets are closed with a protocol-level error.
             auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=5)
         except Exception:
             await websocket.send_json(build_error("missing auth", code="AUTH_INVALID"))

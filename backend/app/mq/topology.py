@@ -7,6 +7,8 @@ DEAD_LETTER_BINDING_KEY = "dead.#"
 
 
 async def ensure_topology(connection: aio_pika.RobustConnection) -> None:
+    """Declare shared RabbitMQ exchanges and the dead-letter queue at startup."""
+
     channel = await connection.channel()
     await channel.declare_exchange(EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC, durable=True)
     dlx = await channel.declare_exchange(DEAD_LETTER_EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC, durable=True)

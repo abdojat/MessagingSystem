@@ -1,1 +1,1 @@
-# Consumer runs in worker process for this architecture.
+"""RabbitMQ consumers live in the worker package for this architecture."""

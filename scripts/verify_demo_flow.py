@@ -105,6 +105,7 @@ def wait_for_api(client: httpx.Client, timeout_seconds: int = 60) -> None:
 
 async def _wait_for_live_message(ws, *, channel_id: str, plaintext: str, timeout_seconds: int) -> dict:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
+    # Read live events until the expected message arrives or the deadline expires.
     while True:
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
@@ -129,6 +130,7 @@ async def _send_ws(ws, msg_type: str, payload: dict, *, request_id: str | None =
 
 async def _wait_for_ws_sync(ws, *, request_id: str, timeout_seconds: int) -> dict:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
+    # Read socket responses until the matching sync result arrives or times out.
     while True:
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
@@ -183,6 +185,8 @@ async def main_async() -> int:
         plaintext = f"Hello from demo {secrets.token_hex(3)}"
         _step("3) User B opens WebSocket before joining the channel")
         _info("hello timeout=10s, subscribe acknowledgement timeout=10s, live delivery timeout=30s")
+        # Opening the socket before joining proves the join-after-connect
+        # subscription refresh path, not just the initial connection bindings.
         websocket_verified = False
         join_after_connect_verified = False
         live_payload: dict | None = None

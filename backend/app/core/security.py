@@ -20,6 +20,8 @@ def verify_password(password: str, password_hash: str) -> bool:
 def create_access_token(user_id: UUID) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
+    # Access tokens are intentionally short-lived and carry only identity plus
+    # token type; revocation is handled through refresh/session state.
     payload = {
         "sub": str(user_id),
         "type": "access",
@@ -32,6 +34,7 @@ def create_access_token(user_id: UUID) -> str:
 def create_refresh_token(user_id: UUID, session_id: UUID) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
+    # The session id links this refresh token to a revocable database session.
     payload = {
         "sub": str(user_id),
         "sid": str(session_id),
@@ -47,4 +50,5 @@ def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
     except JWTError as exc:
+        # The service layer maps token decode failures to API-specific auth errors.
         raise ValueError("invalid token") from exc

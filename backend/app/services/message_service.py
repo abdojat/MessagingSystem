@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 
 class MessageService:
+    """Owns message persistence, encryption, upload policy, and delivery outbox records."""
+
     @staticmethod
     async def _safe_log_event(
         db: AsyncSession,
@@ -44,6 +46,8 @@ class MessageService:
         actor_user_id: UUID | None = None,
         commit: bool = False,
     ) -> None:
+        # Security/audit events are useful, but a failed audit write should not
+        # hide the original authorization or validation error from the caller.
         try:
             await log_event(db, event_type, payload, channel_id=channel_id, actor_user_id=actor_user_id)
             if commit:
@@ -82,6 +86,8 @@ class MessageService:
         content_text = None
         content_json = None
         if not is_deleted:
+            # Outbox and REST responses both expose plaintext only after service
+            # authorization has succeeded; deleted messages stay as tombstones.
             content_text, content_json = MessageService._decrypt_message_content(message)
         return {
             "id": str(message.id),
@@ -115,6 +121,8 @@ class MessageService:
         sender_avatar_url: str | None = None,
     ) -> dict:
         is_deleted = message.deleted_at is not None
+        # Outbox payloads carry encrypted content because the worker and broker
+        # should not need plaintext access to fan messages out to subscribers.
         return {
             "id": str(message.id),
             "channel_id": str(message.channel_id),
@@ -150,6 +158,8 @@ class MessageService:
 
     @staticmethod
     async def publish_message(db: AsyncSession, channel_id: UUID, sender_id: UUID, req: PublishMessageRequest) -> Message:
+        # Lock the channel row while assigning seq_id so each channel keeps a
+        # stable per-topic ordering without requiring global message ordering.
         channel_row = await db.execute(select(Channel).where(Channel.id == channel_id).with_for_update())
         channel = channel_row.scalar_one_or_none()
         if not channel or channel.deleted_at is not None:
@@ -159,6 +169,8 @@ class MessageService:
         is_member_reply = role == MembershipRole.member and (
             req.reply_to_message_id is not None or req.reply_to_seq_id is not None
         )
+        # Members can reply even when normal publishing is reserved for admins,
+        # which keeps moderated channels usable for threaded responses.
         if not can_publish(role, membership.admin_permissions if membership else None) and not is_member_reply:
             await MessageService._safe_log_event(
                 db,
@@ -171,6 +183,8 @@ class MessageService:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         if req.client_msg_id is not None:
+            # Client message ids make retries idempotent when a browser resends
+            # after losing the HTTP response.
             existing = await db.execute(
                 select(Message).where(
                     Message.channel_id == channel_id,
@@ -246,6 +260,8 @@ class MessageService:
             channel_id=channel_id,
             actor_user_id=sender_id,
         )
+        # Message, encrypted payload, delivery outbox, and audit log commit
+        # together; the worker publishes only after this source-of-truth write.
         try:
             await db.commit()
         except IntegrityError as exc:
@@ -320,6 +336,8 @@ class MessageService:
         if order not in {"asc", "desc"}:
             raise AppError("order must be asc or desc", 400, code="VALIDATION_ERROR")
 
+        # Message history is paged by per-channel sequence numbers because they
+        # are stable across refreshes and simpler to reason about than timestamps.
         stmt = select(Message).where(Message.channel_id == channel_id)
         stmt = stmt.where(Message.deleted_at.is_(None))
         if before_seq_id is not None:
@@ -336,6 +354,8 @@ class MessageService:
         if not page:
             return page, None, None, has_more
 
+        # Return the next cursor matching the requested direction so clients can
+        # page older and newer history without guessing from item order.
         next_before_seq_id = None
         next_after_seq_id = None
         if order == "desc":
@@ -407,6 +427,8 @@ class MessageService:
             raise AppError("last_seen_seq_id out of range", 400, code="VALIDATION_ERROR")
 
         current_seen_seq = int(state.last_seen_seq_id or 0)
+        # Seen markers only move forward, so an older client cannot erase unread
+        # progress that was recorded by a newer tab or device.
         if requested_seq is not None and requested_seq >= current_seen_seq:
             state.last_seen_seq_id = requested_seq
             if clear_message_id:
@@ -457,6 +479,8 @@ class MessageService:
         membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
         role = membership.role if membership else None
         if not can_read(role):
+            # Private channel probing is recorded as a security event for the
+            # event-log requirement and for supervisor-demo visibility.
             await MessageService._safe_log_event(
                 db,
                 "security.unauthorized_read",
@@ -484,6 +508,8 @@ class MessageService:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         try:
+            # Edits reuse the same encryption path as publishing so stored
+            # message bodies keep one at-rest format.
             encrypted_text, encrypted_json = MessageService._encrypt_payload(req)
         except AppError:
             await MessageService._safe_log_event(
@@ -504,6 +530,8 @@ class MessageService:
             db,
             message.sender_user_id,
         )
+        # Message edits are sent through the outbox like new publications so
+        # realtime subscribers and REST history converge on the same payload.
         await enqueue_message_outbox(
             db,
             message.id,
@@ -536,6 +564,8 @@ class MessageService:
         if message.sender_user_id != actor_user_id and role not in {MembershipRole.owner, MembershipRole.admin}:
             raise AppError("forbidden", 403, code="FORBIDDEN")
         if message.deleted_at is None:
+            # Deletion is a tombstone: content is removed from future reads while
+            # the sequence number and reply relationships stay stable.
             message.deleted_at = utcnow()
             message.updated_at = message.deleted_at
             message.content_text = None
@@ -545,6 +575,8 @@ class MessageService:
                 db,
                 message.sender_user_id,
             )
+            # Subscribers receive the tombstone through the same update path used
+            # for edits, which keeps client cache handling simple.
             await enqueue_message_outbox(
                 db,
                 message.id,
@@ -596,6 +628,8 @@ class MessageService:
         )
         existing_reaction = existing.scalar_one_or_none()
         if existing_reaction is None:
+            # Reactions are idempotent per user/message/emoji; duplicate taps
+            # should return the current summary without creating another row.
             db.add(
                 MessageReaction(
                     channel_id=channel_id,
@@ -607,6 +641,8 @@ class MessageService:
             await db.flush()
         summary = await MessageService._reaction_summary(db, message_id, actor_user_id)
         if existing_reaction is None:
+            # Only a real state change is broadcast, keeping reaction update
+            # traffic quiet for duplicate client retries.
             await enqueue_message_outbox(
                 db,
                 message.id,
@@ -659,6 +695,8 @@ class MessageService:
             raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
         existing = await db.get(PinnedMessage, {"channel_id": channel_id, "message_id": message_id})
         if not existing:
+            # The separate pin row records who pinned it, while the denormalized
+            # message flag keeps list rendering cheap.
             db.add(PinnedMessage(channel_id=channel_id, message_id=message_id, pinned_by_user_id=actor_user_id))
         message.is_pinned = True
         await db.flush()
@@ -692,6 +730,8 @@ class MessageService:
             await db.delete(pin)
         message = await db.get(Message, message_id)
         if message and message.channel_id == channel_id:
+            # Missing message rows are tolerated during unpin so cleanup remains
+            # idempotent, but existing messages still broadcast their new state.
             message.is_pinned = False
             await db.flush()
             sender_username, sender_display_name, sender_avatar_url = await MessageService._load_sender_profile(
@@ -742,6 +782,8 @@ class MessageService:
         if media_type == "image/svg+xml":
             raise AppError("svg uploads are not allowed", 400, code="VALIDATION_ERROR")
         safe_filename = normalize_upload_filename(req.filename)
+        # The display filename is preserved, but storage uses a normalized path
+        # under the user's id to avoid path traversal and accidental collisions.
         upload = Upload(
             owner_user_id=actor_user_id,
             filename=req.filename,
@@ -773,6 +815,8 @@ class MessageService:
     async def sync(db: AsyncSession, actor_user_id: UUID, req: SyncRequest) -> dict:
         from app.services.channel_service import ChannelService
 
+        # REST sync is the durable backfill path for missed WebSocket messages;
+        # requested channels are intersected with memberships before any data is read.
         channel_state = {entry.channel_id: int(entry.last_seen_seq_id or 0) for entry in req.channels}
         channel_ids = list(channel_state.keys())
         membership_rows = await db.execute(
@@ -856,6 +900,8 @@ class MessageService:
     ) -> Upload:
         settings = get_settings()
         upload = await db.get(Upload, file_id)
+        # A user may only provide bytes for an upload record they created; later
+        # reads are authorized through ownership or message/channel membership.
         if not upload or upload.owner_user_id != actor_user_id:
             raise AppError("upload not found", 404, code="NOT_FOUND")
         if len(content) != upload.size_bytes:
@@ -873,6 +919,8 @@ class MessageService:
             )
             raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
         if upload.checksum:
+            # Optional checksums let the frontend or verifier prove the stored
+            # bytes are exactly the bytes that were intended at upload creation.
             digest = hashlib.sha256(content).hexdigest()
             if digest != upload.checksum:
                 await MessageService._safe_log_event(
@@ -888,6 +936,8 @@ class MessageService:
                 raise AppError("checksum mismatch", 400, code="VALIDATION_ERROR")
 
         full_path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
+        # The upload path resolver enforces containment; creating parents here is
+        # only for the generated storage layout, not user-controlled directories.
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(content)
         upload.public_url = f"/v1/uploads/{upload.id}/content"
@@ -940,6 +990,8 @@ class MessageService:
     def _resolve_upload_path(base_dir_value: str, storage_path: str) -> Path:
         base_dir = Path(base_dir_value).resolve()
         full_path = (base_dir / storage_path).resolve()
+        # Storage paths come from the database, but this guard still prevents a
+        # corrupt row from escaping the configured uploads directory.
         try:
             full_path.relative_to(base_dir)
         except ValueError as exc:
@@ -955,6 +1007,8 @@ class MessageService:
             return True
         if await MessageService._can_access_avatar_upload(db, actor_user_id, file_id):
             return True
+        # Message attachments inherit access from the channel containing the
+        # message; upload bytes are never public just because a URL is known.
         memberships = await db.execute(
             select(ChannelMembership.channel_id).where(
                 ChannelMembership.user_id == actor_user_id,
@@ -1016,6 +1070,8 @@ class MessageService:
             raise AppError("too many attachments", 400, code="VALIDATION_ERROR")
         normalized: list[dict] = []
         seen_file_ids: set[UUID] = set()
+        # Attachments must point to uploaded content owned by the publisher before
+        # they can be linked into channel message history.
         for raw_item in attachments:
             file_id_raw = raw_item.file_id if isinstance(raw_item, AttachmentReference) else raw_item.get("file_id")
             if not file_id_raw:

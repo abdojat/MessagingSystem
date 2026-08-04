@@ -39,6 +39,8 @@ async def update_me(req: UpdateMeRequest, db: DBDep, user: CurrentUserDep) -> Me
         return await me(user)
 
     try:
+        # Profile media may point to protected upload URLs, so verify ownership
+        # before saving a URL that another user could later render.
         if "avatar_url" in payload:
             await MessageService.validate_avatar_upload_reference(db, user.id, payload["avatar_url"])
         if "wallpaper_url" in payload:
@@ -95,6 +97,8 @@ async def search_users(
     if not q_raw:
         raise to_http_exception(AppError("q cannot be empty", 400, code="VALIDATION_ERROR"))
     pattern = f"%{q_raw}%"
+    # Cursor pagination follows the same username/id ordering as the query so
+    # duplicate or renamed display names do not skip users between pages.
     stmt = (
         select(User)
         .where(or_(User.username.ilike(pattern), User.display_name.ilike(pattern)))

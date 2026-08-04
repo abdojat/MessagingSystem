@@ -907,6 +907,8 @@ export default function ChannelView() {
         visited.add(cursorId);
         const message = messageById.get(cursorId);
         const parentId = message?.reply_to_message_id ?? null;
+        // Walk ancestors until the root reply is visible, expanding any collapsed
+        // parent chain needed before scrolling.
         if (!parentId) break;
         if (next.delete(parentId)) {
           changed = true;
