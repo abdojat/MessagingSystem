@@ -1,10 +1,17 @@
 # Stabilization Status
 
-Last updated: 2026-06-19
+Last updated: 2026-08-04
 
 ## Summary
 
-The latest pass hardens the bounded global superadmin console, removes raw audit-payload exposure, and improves operator search/filter/pagination without changing private-message authorization boundaries.
+The latest pass tightens channel list/detail previews so pending users and public discovery viewers do not receive decrypted message bodies. The previous superadmin hardening remains in place.
+
+## Channel List Preview Authorization Pass - 2026-08-04
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Channel list/detail preview authorization | Passed with focused runtime proof | `backend/app/services/channel_service.py` now enriches last-message previews, seen markers, and unread counts only for approved readable memberships; public discovery keeps channel metadata and last-activity time without decrypted message bodies | Existing developer Postgres volumes may have credentials that differ from `.env.example`, so host-side default DB runs can still skip | Keep using a clean Docker-backed test database or the canonical backend test command before final submission |
+| Regression coverage | Passed | Added `test_list_channels_scopes_pagination_and_preview_permissions` in `backend/tests/test_p0_requirements.py`; focused run against disposable Postgres on `localhost:55432` passed; `python -m compileall -q backend\app backend\tests` passed; default local P0 run reported `33 passed, 15 skipped` | Full backend suite was not rerun against the disposable database in this pass | Run the full Docker-backed backend suite before final submission |
 
 ## Superadmin Console Hardening Pass - 2026-06-19
 

@@ -35,6 +35,7 @@ from app.services.rbac import (
     can_demote,
     can_invite,
     can_promote,
+    can_read,
     can_remove,
     normalize_admin_permissions,
 )
@@ -219,10 +220,18 @@ class ChannelService:
         visibility: ChannelVisibility | None = None,
         scope: str = "my",
     ) -> tuple[list[dict], str | None, bool]:
-        last_message_sq = (
-            select(Message.channel_id, func.max(Message.created_at).label("last_message_at"))
+        last_seq_sq = (
+            select(Message.channel_id, func.max(Message.seq_id).label("last_seq_id"))
             .where(Message.deleted_at.is_(None))
             .group_by(Message.channel_id)
+            .subquery()
+        )
+        last_message_sq = (
+            select(Message.channel_id, Message.created_at.label("last_message_at"))
+            .join(
+                last_seq_sq,
+                and_(Message.channel_id == last_seq_sq.c.channel_id, Message.seq_id == last_seq_sq.c.last_seq_id),
+            )
             .subquery()
         )
         stmt = (
@@ -284,7 +293,7 @@ class ChannelService:
         page = all_rows[:limit]
         items = await ChannelService._enrich_channel_payload_batch(
             db,
-            [(channel, role, admin_permissions) for channel, role, admin_permissions, _ in page],
+            [(channel, role, admin_permissions, last_message_at) for channel, role, admin_permissions, last_message_at in page],
             user_id,
         )
         next_cursor = None
@@ -300,14 +309,15 @@ class ChannelService:
     @staticmethod
     async def _enrich_channel_payload_batch(
         db: AsyncSession,
-        channel_rows: list[tuple[Channel, MembershipRole | None, dict | None]],
+        channel_rows: list[tuple[Channel, MembershipRole | None, dict | None, datetime | None]],
         user_id: UUID,
     ) -> list[dict]:
         if not channel_rows:
             return []
-        channels_by_id = {channel.id: channel for channel, _, _ in channel_rows}
-        roles_by_id = {channel.id: role for channel, role, _ in channel_rows}
-        admin_permissions_by_id = {channel.id: admin_permissions for channel, _, admin_permissions in channel_rows}
+        channels_by_id = {channel.id: channel for channel, _, _, _ in channel_rows}
+        roles_by_id = {channel.id: role for channel, role, _, _ in channel_rows}
+        admin_permissions_by_id = {channel.id: admin_permissions for channel, _, admin_permissions, _ in channel_rows}
+        last_activity_by_id = {channel.id: last_message_at for channel, _, _, last_message_at in channel_rows}
         channel_ids = list(channels_by_id.keys())
 
         payloads = {
@@ -318,6 +328,11 @@ class ChannelService:
             )
             for channel_id in channel_ids
         }
+        readable_channel_ids = [channel_id for channel_id in channel_ids if can_read(roles_by_id.get(channel_id))]
+        for channel_id in channel_ids:
+            channel = channels_by_id[channel_id]
+            if can_read(roles_by_id.get(channel_id)) or channel.visibility == ChannelVisibility.public:
+                payloads[channel_id]["last_message_at"] = last_activity_by_id.get(channel_id)
 
         member_rows = await db.execute(
             select(ChannelMembership.channel_id, func.count(ChannelMembership.user_id))
@@ -346,19 +361,21 @@ class ChannelService:
 
         max_seq_sq = (
             select(Message.channel_id, func.max(Message.seq_id).label("max_seq"))
-            .where(Message.channel_id.in_(channel_ids), Message.deleted_at.is_(None))
+            .where(Message.channel_id.in_(readable_channel_ids), Message.deleted_at.is_(None))
             .group_by(Message.channel_id)
             .subquery()
         )
-        last_rows = await db.execute(
-            select(Message)
-            .join(
-                max_seq_sq,
-                and_(Message.channel_id == max_seq_sq.c.channel_id, Message.seq_id == max_seq_sq.c.max_seq),
+        last_messages = []
+        if readable_channel_ids:
+            last_rows = await db.execute(
+                select(Message)
+                .join(
+                    max_seq_sq,
+                    and_(Message.channel_id == max_seq_sq.c.channel_id, Message.seq_id == max_seq_sq.c.max_seq),
+                )
+                .order_by(Message.channel_id.asc())
             )
-            .order_by(Message.channel_id.asc())
-        )
-        last_messages = last_rows.scalars().all()
+            last_messages = last_rows.scalars().all()
         sender_ids = {message.sender_user_id for message in last_messages}
         sender_profiles: dict[UUID, User] = {}
         if sender_ids:
@@ -394,36 +411,38 @@ class ChannelService:
 
         state_rows = await db.execute(
             select(UserChannelState.channel_id, UserChannelState.last_seen_seq_id)
-            .where(UserChannelState.user_id == user_id, UserChannelState.channel_id.in_(channel_ids))
+            .where(UserChannelState.user_id == user_id, UserChannelState.channel_id.in_(readable_channel_ids))
         )
         seen_map = {cid: int(seq or 0) for cid, seq in state_rows.all()}
-        for channel_id in channel_ids:
+        for channel_id in readable_channel_ids:
             payloads[channel_id]["my_last_seen_seq_id"] = seen_map.get(channel_id)
 
         # Replies are excluded from unread counts so threaded side conversations do
         # not make the main channel list look noisier than the top-level stream.
         state_sq = (
             select(UserChannelState.channel_id, UserChannelState.last_seen_seq_id)
-            .where(UserChannelState.user_id == user_id, UserChannelState.channel_id.in_(channel_ids))
+            .where(UserChannelState.user_id == user_id, UserChannelState.channel_id.in_(readable_channel_ids))
             .subquery()
         )
-        unread_rows = await db.execute(
-            select(Message.channel_id, func.count(Message.id))
-            .outerjoin(state_sq, state_sq.c.channel_id == Message.channel_id)
-            .where(
-                Message.channel_id.in_(channel_ids),
-                Message.deleted_at.is_(None),
-                Message.seq_id > func.coalesce(state_sq.c.last_seen_seq_id, 0),
-                Message.reply_to_message_id.is_(None),
-                Message.reply_to_seq_id.is_(None),
+        unread_map: dict[UUID, int] = {}
+        if readable_channel_ids:
+            unread_rows = await db.execute(
+                select(Message.channel_id, func.count(Message.id))
+                .outerjoin(state_sq, state_sq.c.channel_id == Message.channel_id)
+                .where(
+                    Message.channel_id.in_(readable_channel_ids),
+                    Message.deleted_at.is_(None),
+                    Message.seq_id > func.coalesce(state_sq.c.last_seen_seq_id, 0),
+                    Message.reply_to_message_id.is_(None),
+                    Message.reply_to_seq_id.is_(None),
+                )
+                .group_by(Message.channel_id)
             )
-            .group_by(Message.channel_id)
-        )
-        unread_map = {cid: int(count or 0) for cid, count in unread_rows.all()}
-        for channel_id in channel_ids:
+            unread_map = {cid: int(count or 0) for cid, count in unread_rows.all()}
+        for channel_id in readable_channel_ids:
             payloads[channel_id]["unread_count"] = unread_map.get(channel_id, 0)
 
-        return [payloads[channel.id] for channel, _, _ in channel_rows]
+        return [payloads[channel.id] for channel, _, _, _ in channel_rows]
 
     @staticmethod
     async def get_channel_or_404(db: AsyncSession, channel_id: UUID) -> Channel:
@@ -1454,31 +1473,36 @@ class ChannelService:
         )
         last_message = last_msg_result.scalar_one_or_none()
         if last_message:
-            sender = await db.get(User, last_message.sender_user_id)
-            content_text, content_json = ChannelService._decrypted_message_payload(last_message)
-            payload["last_message"] = {
-                "id": last_message.id,
-                "channel_id": last_message.channel_id,
-                "sender_user_id": last_message.sender_user_id,
-                "sender_username": sender.username if sender else None,
-                "sender_display_name": sender.display_name if sender else None,
-                "sender_avatar_url": sender.avatar_url if sender else None,
-                "seq_id": last_message.seq_id,
-                "content_type": last_message.content_type.value,
-                "content_text": content_text,
-                "content_json": content_json,
-                "reply_to_message_id": last_message.reply_to_message_id,
-                "reply_to_seq_id": last_message.reply_to_seq_id,
-                "attachments": last_message.attachments,
-                "is_pinned": last_message.is_pinned,
-                "client_msg_id": last_message.client_msg_id,
-                "created_at": last_message.created_at,
-                "updated_at": last_message.updated_at,
-                "edited_at": last_message.edited_at,
-                "deleted_at": last_message.deleted_at,
-                "reactions_summary": {"counts": {}, "my_reaction": []},
-            }
-            payload["last_message_at"] = last_message.created_at
+            if can_read(role) or channel.visibility == ChannelVisibility.public:
+                payload["last_message_at"] = last_message.created_at
+            if can_read(role):
+                sender = await db.get(User, last_message.sender_user_id)
+                content_text, content_json = ChannelService._decrypted_message_payload(last_message)
+                payload["last_message"] = {
+                    "id": last_message.id,
+                    "channel_id": last_message.channel_id,
+                    "sender_user_id": last_message.sender_user_id,
+                    "sender_username": sender.username if sender else None,
+                    "sender_display_name": sender.display_name if sender else None,
+                    "sender_avatar_url": sender.avatar_url if sender else None,
+                    "seq_id": last_message.seq_id,
+                    "content_type": last_message.content_type.value,
+                    "content_text": content_text,
+                    "content_json": content_json,
+                    "reply_to_message_id": last_message.reply_to_message_id,
+                    "reply_to_seq_id": last_message.reply_to_seq_id,
+                    "attachments": last_message.attachments,
+                    "is_pinned": last_message.is_pinned,
+                    "client_msg_id": last_message.client_msg_id,
+                    "created_at": last_message.created_at,
+                    "updated_at": last_message.updated_at,
+                    "edited_at": last_message.edited_at,
+                    "deleted_at": last_message.deleted_at,
+                    "reactions_summary": {"counts": {}, "my_reaction": []},
+                }
+
+        if not can_read(role):
+            return payload
 
         state = await db.get(UserChannelState, {"channel_id": channel.id, "user_id": user_id})
         payload["my_last_seen_seq_id"] = state.last_seen_seq_id if state else None

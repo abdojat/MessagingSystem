@@ -3,6 +3,7 @@
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`
+- `test_list_channels_scopes_pagination_and_preview_permissions`
 - `test_message_encryption_round_trip_and_authz_and_event`
 - `test_upload_download_requires_channel_membership`
 - `test_media_attachments_can_be_published_without_text_and_synced`

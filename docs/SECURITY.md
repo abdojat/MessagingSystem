@@ -11,6 +11,7 @@
 
 ## Authorization
 - Channel reads and writes check membership/role permissions.
+- Channel list/detail payloads withhold decrypted last-message previews, seen markers, and unread counts unless the caller has an approved readable membership (`owner`, `admin`, or `member`). Public discovery can still expose basic channel metadata and last-activity time.
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
 - The upload route allows content only to the owner, and the download route only allows the owner or a user who is a member of a channel that references the upload.
 - Message media attachments use the same protected upload route. A message can reference uploaded photo, video, or audio content only after the uploader has stored the bytes; subscribers fetch/play that media through authenticated requests.

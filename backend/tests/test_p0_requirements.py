@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -59,6 +60,154 @@ async def test_channel_creation_generates_slug_and_logs_event(db_session, monkey
 
     events = (await db_session.execute(select(Event).where(Event.event_type == "channel.created"))).scalars().all()
     assert len(events) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_channels_scopes_pagination_and_preview_permissions(db_session, monkeypatch):
+    async def _noop_bind(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
+
+    owner = await AuthService.register(
+        db_session,
+        RegisterRequest(username="list_owner", email="list_owner@x.com", password="password123"),
+    )
+    member = await AuthService.register(
+        db_session,
+        RegisterRequest(username="list_member", email="list_member@x.com", password="password123"),
+    )
+    pending_user = await AuthService.register(
+        db_session,
+        RegisterRequest(username="list_pending", email="list_pending@x.com", password="password123"),
+    )
+    outsider = await AuthService.register(
+        db_session,
+        RegisterRequest(username="list_outsider", email="list_outsider@x.com", password="password123"),
+    )
+    amqp = _FakeAmqpConnection()
+
+    private_channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="Private List Room", visibility="private", join_mode="invite_only"),
+        amqp,
+    )
+    older_channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="Older List Room", visibility="public", join_mode="open"),
+        amqp,
+    )
+    fresh_channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="Fresh List Room", visibility="public", join_mode="open"),
+        amqp,
+    )
+    approval_channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="Approval List Room", visibility="public", join_mode="approval_required"),
+        amqp,
+    )
+
+    await ChannelService.join_channel(db_session, amqp, fresh_channel.id, member.id, JoinRequest())
+    pending_status, pending_membership, _ = await ChannelService.join_channel(
+        db_session,
+        amqp,
+        approval_channel.id,
+        pending_user.id,
+        JoinRequest(),
+    )
+    assert pending_status == "pending"
+    assert pending_membership is not None
+    assert pending_membership.role == MembershipRole.pending
+
+    older_message = await MessageService.publish_message(
+        db_session,
+        older_channel.id,
+        owner.id,
+        PublishMessageRequest(content_text="older visible preview"),
+    )
+    fresh_message = await MessageService.publish_message(
+        db_session,
+        fresh_channel.id,
+        owner.id,
+        PublishMessageRequest(content_text="fresh member preview"),
+    )
+    approval_message = await MessageService.publish_message(
+        db_session,
+        approval_channel.id,
+        owner.id,
+        PublishMessageRequest(content_text="approval-only preview"),
+    )
+    now = utcnow()
+    older_message.created_at = now - timedelta(minutes=20)
+    fresh_message.created_at = now - timedelta(minutes=10)
+    approval_message.created_at = now
+    await db_session.commit()
+
+    member_items, member_cursor, member_has_more = await ChannelService.list_channels(
+        db_session,
+        member.id,
+        cursor=None,
+        limit=10,
+        scope="my",
+    )
+    assert member_cursor is None
+    assert member_has_more is False
+    assert [item["id"] for item in member_items] == [fresh_channel.id]
+    assert member_items[0]["last_message"]["content_text"] == "fresh member preview"
+    assert member_items[0]["unread_count"] == 1
+
+    discover_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        outsider.id,
+        cursor=None,
+        limit=10,
+        scope="discover",
+    )
+    discover_by_id = {item["id"]: item for item in discover_items}
+    assert private_channel.id not in discover_by_id
+    assert {older_channel.id, fresh_channel.id, approval_channel.id}.issubset(discover_by_id)
+    assert all(item["last_message"] is None for item in discover_by_id.values())
+    assert discover_by_id[fresh_channel.id]["last_message_at"] == fresh_message.created_at
+
+    pending_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        pending_user.id,
+        cursor=None,
+        limit=10,
+        scope="my",
+    )
+    assert [item["id"] for item in pending_items] == [approval_channel.id]
+    assert pending_items[0]["my_role"] == MembershipRole.pending
+    assert pending_items[0]["last_message"] is None
+    assert pending_items[0]["unread_count"] == 0
+    assert pending_items[0]["pending_count"] == 0
+
+    first_page, next_cursor, has_more = await ChannelService.list_channels(
+        db_session,
+        owner.id,
+        cursor=None,
+        limit=2,
+        scope="my",
+    )
+    assert has_more is True
+    assert next_cursor is not None
+    assert [item["id"] for item in first_page] == [approval_channel.id, fresh_channel.id]
+
+    second_page, final_cursor, final_has_more = await ChannelService.list_channels(
+        db_session,
+        owner.id,
+        cursor=next_cursor,
+        limit=10,
+        scope="my",
+    )
+    assert final_has_more is False
+    assert final_cursor is None
+    assert [item["id"] for item in second_page] == [older_channel.id, private_channel.id]
 
 
 @pytest.mark.asyncio
