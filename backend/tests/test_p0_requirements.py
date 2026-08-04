@@ -2,14 +2,26 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.api.routes.messages import get_upload_content
+from app.core import encryption
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.db.models import ChannelMembership, ChannelVisibility, Event, MembershipRole, Message, Outbox
+from app.db.models import (
+    Channel,
+    ChannelCounter,
+    ChannelJoinMode,
+    ChannelMembership,
+    ChannelVisibility,
+    Event,
+    MembershipRole,
+    Message,
+    Outbox,
+)
 from app.schemas.auth import RegisterRequest
 from app.schemas.channels import ChannelCreateRequest, ChannelPatchRequest
 from app.schemas.messages import PublishMessageRequest, SyncRequest, UploadCreateRequest
@@ -337,6 +349,119 @@ async def test_list_channels_scope_visibility_and_search_filters(db_session, mon
         scope="discover",
     )
     assert [item["id"] for item in literal_underscore_items] == [literal_underscore_channel.id]
+
+
+@pytest.mark.asyncio
+async def test_list_channels_treats_owner_user_id_as_owner_when_membership_row_is_missing(db_session):
+    owner = await AuthService.register(
+        db_session,
+        RegisterRequest(username="legacy_owner", email="legacy_owner@x.com", password="password123"),
+    )
+    outsider = await AuthService.register(
+        db_session,
+        RegisterRequest(username="legacy_outsider", email="legacy_outsider@x.com", password="password123"),
+    )
+
+    public_channel = Channel(
+        owner_user_id=owner.id,
+        name="Legacy Public Channel",
+        channel_slug="legacy-public-channel",
+        visibility=ChannelVisibility.public,
+        join_mode=ChannelJoinMode.open,
+    )
+    private_channel = Channel(
+        owner_user_id=owner.id,
+        name="Legacy Private Channel",
+        channel_slug="legacy-private-channel",
+        visibility=ChannelVisibility.private,
+        join_mode=ChannelJoinMode.invite_only,
+    )
+    db_session.add_all([public_channel, private_channel])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            ChannelCounter(channel_id=public_channel.id, next_seq=0),
+            ChannelCounter(channel_id=private_channel.id, next_seq=0),
+        ]
+    )
+    await db_session.commit()
+
+    owner_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        owner.id,
+        cursor=None,
+        limit=10,
+        scope="my",
+    )
+    owner_items_by_id = {item["id"]: item for item in owner_items}
+    assert {public_channel.id, private_channel.id}.issubset(owner_items_by_id)
+    assert owner_items_by_id[public_channel.id]["my_role"] == MembershipRole.owner
+    assert owner_items_by_id[private_channel.id]["permissions"]["can_manage_members"] is True
+
+    owner_discover_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        owner.id,
+        cursor=None,
+        limit=10,
+        scope="discover",
+    )
+    assert public_channel.id not in {item["id"] for item in owner_discover_items}
+
+    outsider_discover_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        outsider.id,
+        cursor=None,
+        limit=10,
+        scope="discover",
+    )
+    outsider_discover_by_id = {item["id"]: item for item in outsider_discover_items}
+    assert public_channel.id in outsider_discover_by_id
+    assert private_channel.id not in outsider_discover_by_id
+    assert outsider_discover_by_id[public_channel.id]["my_role"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_list_channels_keeps_channels_visible_when_last_preview_key_is_unavailable(db_session, monkeypatch):
+    async def _noop_bind(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
+
+    owner = await AuthService.register(
+        db_session,
+        RegisterRequest(username="rotated_key_owner", email="rotated_key_owner@x.com", password="password123"),
+    )
+    channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(name="Rotated Key Channel", visibility="private", join_mode="invite_only"),
+        _FakeAmqpConnection(),
+    )
+    message = await MessageService.publish_message(
+        db_session,
+        channel.id,
+        owner.id,
+        PublishMessageRequest(content_text="encrypted with the original key"),
+    )
+
+    monkeypatch.setenv("MESSAGE_ENCRYPTION_KEY", Fernet.generate_key().decode("utf-8"))
+    get_settings.cache_clear()
+    encryption._build_fernet.cache_clear()
+
+    items, next_cursor, has_more = await ChannelService.list_channels(
+        db_session,
+        owner.id,
+        cursor=None,
+        limit=10,
+        scope="my",
+    )
+
+    assert next_cursor is None
+    assert has_more is False
+    assert [item["id"] for item in items] == [channel.id]
+    assert items[0]["my_role"] == MembershipRole.owner
+    assert items[0]["last_message"] is None
+    assert items[0]["last_message_at"] == message.created_at
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 import uuid
 import base64
+import logging
 import re
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -49,6 +50,8 @@ ROLE_WEIGHT = {
     MembershipRole.pending: 3,
 }
 
+logger = logging.getLogger(__name__)
+
 
 class ChannelService:
     """Coordinates channel state, membership rules, broker bindings, and audit events."""
@@ -93,6 +96,14 @@ class ChannelService:
     @staticmethod
     async def get_membership(db: AsyncSession, channel_id: UUID, user_id: UUID) -> ChannelMembership | None:
         return await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
+
+    @staticmethod
+    def _effective_role(channel: Channel, user_id: UUID, role: MembershipRole | None) -> MembershipRole | None:
+        if channel.owner_user_id == user_id:
+            return MembershipRole.owner
+        if role is not None:
+            return role
+        return None
 
     @staticmethod
     def membership_permissions(membership: ChannelMembership | None) -> dict[str, bool]:
@@ -253,9 +264,13 @@ class ChannelService:
             )
         )
         if scope == "my":
-            stmt = stmt.where(ChannelMembership.user_id.is_not(None))
+            stmt = stmt.where(or_(ChannelMembership.user_id.is_not(None), Channel.owner_user_id == user_id))
         elif scope == "discover":
-            stmt = stmt.where(Channel.visibility == ChannelVisibility.public).where(ChannelMembership.user_id.is_(None))
+            stmt = (
+                stmt.where(Channel.visibility == ChannelVisibility.public)
+                .where(ChannelMembership.user_id.is_(None))
+                .where(Channel.owner_user_id != user_id)
+            )
         else:
             raise AppError("scope must be my or discover", 400, code="VALIDATION_ERROR")
         if visibility is not None:
@@ -307,7 +322,15 @@ class ChannelService:
         page = all_rows[:limit]
         items = await ChannelService._enrich_channel_payload_batch(
             db,
-            [(channel, role, admin_permissions, last_message_at) for channel, role, admin_permissions, last_message_at in page],
+            [
+                (
+                    channel,
+                    ChannelService._effective_role(channel, user_id, role),
+                    admin_permissions if role is not None else None,
+                    last_message_at,
+                )
+                for channel, role, admin_permissions, last_message_at in page
+            ],
             user_id,
         )
         next_cursor = None
@@ -398,7 +421,22 @@ class ChannelService:
 
         for last_message in last_messages:
             sender = sender_profiles.get(last_message.sender_user_id)
-            content_text, content_json = ChannelService._decrypted_message_payload(last_message)
+            try:
+                content_text, content_json = ChannelService._decrypted_message_payload(last_message)
+            except AppError as exc:
+                if exc.code not in {"DECRYPTION_FAILED", "CONFIG_ERROR"}:
+                    raise
+                # A preview is optional navigation metadata. An old/lost encryption
+                # key must not make the caller's entire channel list unavailable.
+                # Keep last_message_at for ordering, omit the unreadable body, and
+                # leave full message endpoints to surface the underlying key issue.
+                logger.warning(
+                    "Skipping unreadable channel preview channel_id=%s message_id=%s error_code=%s",
+                    last_message.channel_id,
+                    last_message.id,
+                    exc.code,
+                )
+                continue
             payloads[last_message.channel_id]["last_message"] = {
                 "id": last_message.id,
                 "channel_id": last_message.channel_id,
@@ -483,7 +521,9 @@ class ChannelService:
         data = row.first()
         if not data:
             return None, None, None
-        return data[0], data[1], data[2]
+        channel, role, admin_permissions = data
+        effective_role = ChannelService._effective_role(channel, user_id, role)
+        return channel, effective_role, admin_permissions if role is not None else None
 
     @staticmethod
     async def get_channel_view(db: AsyncSession, channel_id: UUID, user_id: UUID) -> dict:

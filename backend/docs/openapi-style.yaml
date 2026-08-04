@@ -248,7 +248,7 @@ paths:
       security: [ { bearerAuth: [] } ]
       summary: List visible channels for current user
       parameters:
-        - { name: scope, in: query, schema: { type: string, enum: [my, discover], default: my }, description: "my returns the caller's memberships, including pending requests; discover returns public channels where the caller has no membership row." }
+        - { name: scope, in: query, schema: { type: string, enum: [my, discover], default: my }, description: "my returns the caller's memberships, including pending requests, plus channels they own through owner_user_id; discover returns public channels where the caller is neither a member nor the owner." }
         - { name: visibility, in: query, schema: { type: string, enum: [public, private] }, description: "Optional visibility filter. discover remains public-only." }
         - { name: q, in: query, schema: { type: string, minLength: 1, maxLength: 255 }, description: "Literal channel search over display name and channel slug; #slug shorthand is accepted." }
         - { name: cursor, in: query, schema: { type: string } }

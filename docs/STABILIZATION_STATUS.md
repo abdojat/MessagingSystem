@@ -4,13 +4,19 @@ Last updated: 2026-08-04
 
 ## Summary
 
-The latest pass tightens normal channel listing scopes and filters: member/discovery scope behavior remains intact, public/private visibility filtering is covered, channel search now supports safe `#slug` lookup, SQL wildcard characters are treated literally, and the frontend hook walks paginated list results. The previous channel preview authorization and superadmin hardening remain in place.
+The latest pass restores sidebar reliability when historical message previews cannot be decrypted: owned and joined channels remain visible, unreadable optional previews are omitted without exposing ciphertext, and the underlying key-rotation limitation remains explicit. Channel scope/search behavior, pagination, and the legacy owner-membership repair remain in place.
+
+## Sidebar Channel Visibility Fix - 2026-08-04
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Owned/joined sidebar channels | Fixed and verified | Runtime tracing showed `GET /v1/channels?scope=my` failed with `DECRYPTION_FAILED` when a last-message preview used an older Fernet key. `backend/app/services/channel_service.py` now logs and omits only that unreadable preview while retaining channel metadata and activity ordering; `test_list_channels_keeps_channels_visible_when_last_preview_key_is_unavailable` covers the regression. HTTP verification against the rebuilt backend returned `200` with 7 owned channels for `admin`, 7 owner/admin/member channels for `consumer`, and 2 member channels for `superadmin`; the isolated full backend suite passed (`72 passed`) | Full message bodies encrypted under a lost/old key remain unreadable by design; the application has no historical-key ring | Restore the original key or perform a deliberate re-encryption migration if historical message bodies must be recovered |
 
 ## Channel List Scope and Filter Pass - 2026-08-04
 
 | Area | Status | Evidence | Remaining Risk | Next Action |
 | ---- | ------ | -------- | -------------- | ----------- |
-| Normal channel list filters | Passed with focused regression coverage | `backend/app/services/channel_service.py` now escapes LIKE wildcards, searches channel names plus safe slugs, and keeps `discover` public-only while `my` returns the caller's membership rows; `test_list_channels_scope_visibility_and_search_filters` covers `my`, `discover`, visibility, `#slug`, `%`, and `_` cases | Route-level behavior was verified through the service test rather than a full HTTP client test | Add a small API route test only if channel query validation changes again |
+| Normal channel list filters | Passed with focused regression coverage | `backend/app/services/channel_service.py` now escapes LIKE wildcards, searches channel names plus safe slugs, keeps `discover` public-only, and makes `my` include membership rows plus channels owned through `owner_user_id`; `0016_backfill_owner_memberships.py` repairs existing owner rows; `test_list_channels_scope_visibility_and_search_filters` covers `my`, `discover`, visibility, `#slug`, `%`, and `_`, and `test_list_channels_treats_owner_user_id_as_owner_when_membership_row_is_missing` covers the legacy owner fallback | Route-level behavior was verified through service tests rather than a full HTTP client test | Add a small API route test only if channel query validation changes again |
 | Frontend channel listing | Improved | `frontend/src/hooks/use-channels.ts` now sends `limit=200`, follows `next_cursor` pages, includes visibility in the query key/params, and keeps scope/search filters stable across fetched pages | The sidebar still has no dedicated visibility filter UI; the hook supports it for future callers | Add UI controls only if the demo needs explicit public/private filtering |
 
 ## Channel List Preview Authorization Pass - 2026-08-04

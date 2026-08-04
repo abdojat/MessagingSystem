@@ -4,7 +4,9 @@
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`
 - `test_list_channels_scopes_pagination_and_preview_permissions`
+- `test_list_channels_keeps_channels_visible_when_last_preview_key_is_unavailable`
 - `test_list_channels_scope_visibility_and_search_filters`
+- `test_list_channels_treats_owner_user_id_as_owner_when_membership_row_is_missing`
 - `test_message_encryption_round_trip_and_authz_and_event`
 - `test_upload_download_requires_channel_membership`
 - `test_media_attachments_can_be_published_without_text_and_synced`

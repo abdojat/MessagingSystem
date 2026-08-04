@@ -47,6 +47,7 @@
 - Message content is encrypted at rest on the server side with Fernet.
 - The backend decrypts content only for authorized readers.
 - The encryption key must come from environment variables for demo and deployment runs.
+- Channel navigation remains available if an old last-message preview cannot be decrypted after a key change: the API logs a warning and omits that optional preview instead of returning ciphertext or failing the complete channel list. Direct message reads still fail until the original key is restored or a deliberate key-rotation migration is performed.
 
 ## Secret Handling
 - Do not commit real `.env` files, database passwords, JWT secrets, or encryption keys.
@@ -81,6 +82,7 @@ This protects against accidental or unauthorized event modification, insertion, 
 - This project is a university MVP, not a production-hardened identity or secret-management platform.
 - The frontend token storage and WebSocket token transport are demo-oriented and should not be presented as production-grade session security.
 - The project does not claim end-to-end encryption; it uses server-side encryption at rest.
+- There is no automatic encryption-key rotation or historical-key ring. Replacing `MESSAGE_ENCRYPTION_KEY` makes existing encrypted message bodies unreadable; retain the original key or migrate ciphertext deliberately before rotating it.
 - Event integrity is tamper-evident inside PostgreSQL, but it does not prove that the database itself was never rewritten by a fully privileged operator.
 - The verifier does not prove tail deletion unless the previous last hash was stored or witnessed outside the database.
 - Successful upload access logging is best-effort so a temporary audit-log failure does not break protected media playback; unauthorized access logging still blocks the request with `403 Forbidden`.
