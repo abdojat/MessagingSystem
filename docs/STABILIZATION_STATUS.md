@@ -4,7 +4,14 @@ Last updated: 2026-08-04
 
 ## Summary
 
-The latest pass tightens channel list/detail previews so pending users and public discovery viewers do not receive decrypted message bodies. The previous superadmin hardening remains in place.
+The latest pass tightens normal channel listing scopes and filters: member/discovery scope behavior remains intact, public/private visibility filtering is covered, channel search now supports safe `#slug` lookup, SQL wildcard characters are treated literally, and the frontend hook walks paginated list results. The previous channel preview authorization and superadmin hardening remain in place.
+
+## Channel List Scope and Filter Pass - 2026-08-04
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Normal channel list filters | Passed with focused regression coverage | `backend/app/services/channel_service.py` now escapes LIKE wildcards, searches channel names plus safe slugs, and keeps `discover` public-only while `my` returns the caller's membership rows; `test_list_channels_scope_visibility_and_search_filters` covers `my`, `discover`, visibility, `#slug`, `%`, and `_` cases | Route-level behavior was verified through the service test rather than a full HTTP client test | Add a small API route test only if channel query validation changes again |
+| Frontend channel listing | Improved | `frontend/src/hooks/use-channels.ts` now sends `limit=200`, follows `next_cursor` pages, includes visibility in the query key/params, and keeps scope/search filters stable across fetched pages | The sidebar still has no dedicated visibility filter UI; the hook supports it for future callers | Add UI controls only if the demo needs explicit public/private filtering |
 
 ## Channel List Preview Authorization Pass - 2026-08-04
 

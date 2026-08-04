@@ -193,6 +193,12 @@ export interface ChannelResponse {
   deleted_at?: string | null;
 }
 
+export interface ChannelListResponse {
+  items: ChannelResponse[];
+  next_cursor?: string | null;
+  has_more: boolean;
+}
+
 export interface JoinOutcomeResponse {
   status: "joined" | "pending" | "requires_invite" | "already_member";
   role: MembershipRole;

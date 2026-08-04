@@ -247,8 +247,14 @@ paths:
       tags: [channels]
       security: [ { bearerAuth: [] } ]
       summary: List visible channels for current user
+      parameters:
+        - { name: scope, in: query, schema: { type: string, enum: [my, discover], default: my }, description: "my returns the caller's memberships, including pending requests; discover returns public channels where the caller has no membership row." }
+        - { name: visibility, in: query, schema: { type: string, enum: [public, private] }, description: "Optional visibility filter. discover remains public-only." }
+        - { name: q, in: query, schema: { type: string, minLength: 1, maxLength: 255 }, description: "Literal channel search over display name and channel slug; #slug shorthand is accepted." }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
-        '200': { description: ChannelResponse[] (with my_role + permissions) }
+        '200': { description: ChannelListResponse with items, next_cursor, has_more }
 
   /channels/{channel_id}:
     get:

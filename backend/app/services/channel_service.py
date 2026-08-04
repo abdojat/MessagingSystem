@@ -144,6 +144,10 @@ class ChannelService:
         return my_role, ChannelService.build_permissions(role, admin_permissions, channel)
 
     @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    @staticmethod
     async def create_channel(db: AsyncSession, owner_user_id: UUID, req: ChannelCreateRequest, amqp: aio_pika.RobustConnection) -> Channel:
         # Channel avatars may reference protected uploads, so ownership and media type
         # are checked before the URL becomes visible to other channel readers.
@@ -256,9 +260,19 @@ class ChannelService:
             raise AppError("scope must be my or discover", 400, code="VALIDATION_ERROR")
         if visibility is not None:
             stmt = stmt.where(Channel.visibility == visibility)
-        if q:
-            pattern = f"%{q.strip()}%"
-            stmt = stmt.where(Channel.name.ilike(pattern))
+        if q and q.strip():
+            term = q.strip()
+            slug_term = term[1:] if term.startswith("#") else term
+            escaped = ChannelService._escape_like(term)
+            slug_escaped = ChannelService._escape_like(slug_term)
+            pattern = f"%{escaped}%"
+            slug_pattern = f"%{slug_escaped}%"
+            stmt = stmt.where(
+                or_(
+                    Channel.name.ilike(pattern, escape="\\"),
+                    Channel.channel_slug.ilike(slug_pattern, escape="\\"),
+                )
+            )
         if cursor:
             # Channel list pagination follows the same ordering as the query:
             # newest activity first, then channel creation time, then id.

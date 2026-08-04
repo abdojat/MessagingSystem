@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.api.routes.messages import get_upload_content
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.db.models import ChannelMembership, Event, MembershipRole, Message, Outbox
+from app.db.models import ChannelMembership, ChannelVisibility, Event, MembershipRole, Message, Outbox
 from app.schemas.auth import RegisterRequest
 from app.schemas.channels import ChannelCreateRequest, ChannelPatchRequest
 from app.schemas.messages import PublishMessageRequest, SyncRequest, UploadCreateRequest
@@ -208,6 +208,135 @@ async def test_list_channels_scopes_pagination_and_preview_permissions(db_sessio
     assert final_has_more is False
     assert final_cursor is None
     assert [item["id"] for item in second_page] == [older_channel.id, private_channel.id]
+
+
+@pytest.mark.asyncio
+async def test_list_channels_scope_visibility_and_search_filters(db_session, monkeypatch):
+    async def _noop_bind(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
+
+    owner = await AuthService.register(
+        db_session,
+        RegisterRequest(username="filter_owner", email="filter_owner@x.com", password="password123"),
+    )
+    member = await AuthService.register(
+        db_session,
+        RegisterRequest(username="filter_member", email="filter_member@x.com", password="password123"),
+    )
+    outsider = await AuthService.register(
+        db_session,
+        RegisterRequest(username="filter_outsider", email="filter_outsider@x.com", password="password123"),
+    )
+    amqp = _FakeAmqpConnection()
+
+    public_channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(
+            name="Release Board",
+            channel_slug="release-board",
+            visibility="public",
+            join_mode="open",
+        ),
+        amqp,
+    )
+    private_channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(
+            name="Private Board",
+            channel_slug="private-board",
+            visibility="private",
+            join_mode="invite_only",
+        ),
+        amqp,
+    )
+    literal_percent_channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(
+            name="Coverage 100%",
+            channel_slug="coverage-board",
+            visibility="public",
+            join_mode="open",
+        ),
+        amqp,
+    )
+    literal_underscore_channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(
+            name="Team_Room Updates",
+            channel_slug="team_room",
+            visibility="public",
+            join_mode="open",
+        ),
+        amqp,
+    )
+    await ChannelService.join_channel(db_session, amqp, public_channel.id, member.id, JoinRequest())
+
+    member_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        member.id,
+        cursor=None,
+        limit=10,
+        q="#release-board",
+        visibility=ChannelVisibility.public,
+        scope="my",
+    )
+    assert [item["id"] for item in member_items] == [public_channel.id]
+
+    owner_private_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        owner.id,
+        cursor=None,
+        limit=10,
+        visibility=ChannelVisibility.private,
+        scope="my",
+    )
+    assert [item["id"] for item in owner_private_items] == [private_channel.id]
+
+    discover_private_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        outsider.id,
+        cursor=None,
+        limit=10,
+        visibility=ChannelVisibility.private,
+        scope="discover",
+    )
+    assert discover_private_items == []
+
+    discover_hash_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        outsider.id,
+        cursor=None,
+        limit=10,
+        q="#team_room",
+        scope="discover",
+    )
+    assert [item["id"] for item in discover_hash_items] == [literal_underscore_channel.id]
+
+    literal_percent_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        outsider.id,
+        cursor=None,
+        limit=10,
+        q="%",
+        scope="discover",
+    )
+    assert [item["id"] for item in literal_percent_items] == [literal_percent_channel.id]
+
+    literal_underscore_items, _, _ = await ChannelService.list_channels(
+        db_session,
+        outsider.id,
+        cursor=None,
+        limit=10,
+        q="_",
+        scope="discover",
+    )
+    assert [item["id"] for item in literal_underscore_items] == [literal_underscore_channel.id]
 
 
 @pytest.mark.asyncio

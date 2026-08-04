@@ -3,6 +3,7 @@ import { apiClient } from '@/services/api/client';
 import {
   AdminPermissionsUpdateRequest,
   AdminPermissionsUpdateResponse,
+  ChannelListResponse,
   ChannelMembershipListResponse,
   ChannelPatchRequest,
   ChannelResponse,
@@ -12,10 +13,15 @@ import { useWS } from '@/hooks/use-websocket';
 import { isChannelListQueryKey } from '@/hooks/query-keys';
 
 type ChannelScope = 'my' | 'discover';
+type ChannelVisibilityFilter = 'public' | 'private';
+
+const CHANNEL_PAGE_LIMIT = 200;
+const MAX_CHANNEL_LIST_PAGES = 25;
 
 interface UseChannelsOptions {
   scope?: ChannelScope;
   q?: string;
+  visibility?: ChannelVisibilityFilter;
   enabled?: boolean;
 }
 
@@ -28,18 +34,31 @@ interface UseChannelMembersOptions {
 export function useChannels(options: UseChannelsOptions = {}) {
   const scope = options.scope ?? 'my';
   const q = options.q?.trim() ?? '';
+  const visibility = options.visibility;
   const enabled = options.enabled ?? true;
 
   return useQuery({
-    queryKey: ['/channels', { scope, q }],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      params.set('scope', scope);
-      if (q) {
-        params.set('q', q);
-      }
+    queryKey: ['/channels', { scope, q, visibility: visibility ?? null }],
+    queryFn: async () => {
+      const items: ChannelResponse[] = [];
+      let cursor: string | null | undefined = null;
+      let pageCount = 0;
 
-      return apiClient<{items: ChannelResponse[]}>(`/channels?${params.toString()}`).then(res => res.items);
+      do {
+        const params = new URLSearchParams();
+        params.set('scope', scope);
+        params.set('limit', String(CHANNEL_PAGE_LIMIT));
+        if (q) params.set('q', q);
+        if (visibility) params.set('visibility', visibility);
+        if (cursor) params.set('cursor', cursor);
+
+        const page = await apiClient<ChannelListResponse>(`/channels?${params.toString()}`);
+        items.push(...page.items);
+        cursor = page.has_more ? page.next_cursor : null;
+        pageCount += 1;
+      } while (cursor && pageCount < MAX_CHANNEL_LIST_PAGES);
+
+      return items;
     },
     enabled,
   });
