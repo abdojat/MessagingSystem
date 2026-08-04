@@ -255,6 +255,13 @@ export interface ChannelMembershipListResponse {
   has_more: boolean;
 }
 
+export interface ChannelInviteResponse {
+  id: string;
+  token: string;
+  channel_id: string;
+  expires_at: string;
+}
+
 export interface SessionResponse {
   id: string;
   created_at: string;

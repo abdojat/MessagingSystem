@@ -3,6 +3,7 @@
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`
+- `test_owner_can_create_generic_invite_for_every_channel_kind` (six public/private and join-policy combinations)
 - `test_list_channels_scopes_pagination_and_preview_permissions`
 - `test_list_channels_keeps_channels_visible_when_last_preview_key_is_unavailable`
 - `test_list_channels_scope_visibility_and_search_filters`

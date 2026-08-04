@@ -7,10 +7,12 @@ import { useMutation } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import {
   Check,
+  Copy,
   DoorOpen,
   Hash,
   Info,
   Lock,
+  Link2,
   Shield,
   ShieldPlus,
   UserMinus,
@@ -37,6 +39,7 @@ import {
   useApproveMember,
   useChannel,
   useChannelMembers,
+  useCreateChannelInvite,
   useDemoteMember,
   useJoinChannel,
   useLeaveChannel,
@@ -91,6 +94,31 @@ function normalizeAdminPermissions(permissions?: AdminPermissions | null): Admin
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+async function copyToClipboard(value: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  if (typeof document === "undefined") {
+    throw new Error("Clipboard is not available in this environment.");
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "absolute";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("Copy action was blocked by the browser.");
+  }
 }
 
 function ChannelDetailsSkeleton() {
@@ -157,6 +185,7 @@ export default function ChannelDetailsPage() {
   const joinChannel = useJoinChannel();
   const leaveChannel = useLeaveChannel();
   const updateChannel = useUpdateChannel();
+  const createChannelInvite = useCreateChannelInvite();
   const approveMember = useApproveMember();
   const promoteMember = usePromoteMember();
   const demoteMember = useDemoteMember();
@@ -171,6 +200,7 @@ export default function ChannelDetailsPage() {
     joinMode: "open" as "open" | "approval_required" | "invite_only",
   });
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [latestInviteUrl, setLatestInviteUrl] = useState("");
 
   const uploadAvatar = useMutation({
     mutationFn: async (file: File): Promise<string> => {
@@ -427,6 +457,38 @@ export default function ChannelDetailsPage() {
     });
   }
 
+  async function copyInviteUrl(inviteUrl: string) {
+    try {
+      await copyToClipboard(inviteUrl);
+      toast({
+        title: t("toasts.inviteCopiedTitle"),
+        description: t("toasts.inviteCopiedDescription"),
+      });
+    } catch {
+      toast({
+        title: t("toasts.inviteCopyFailedTitle"),
+        description: t("toasts.inviteCopyFailedDescription"),
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function handleCreateAndCopyInvite(targetChannelId: string) {
+    try {
+      const invite = await createChannelInvite.mutateAsync(targetChannelId);
+      const invitePath = localePath(`/invites/${encodeURIComponent(invite.token)}`);
+      const inviteUrl = new URL(invitePath, window.location.origin).toString();
+      setLatestInviteUrl(inviteUrl);
+      await copyInviteUrl(inviteUrl);
+    } catch {
+      toast({
+        title: t("toasts.inviteCreateFailedTitle"),
+        description: commonT("tryAgainLater"),
+        variant: "destructive",
+      });
+    }
+  }
+
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
       <div className="mx-auto max-w-5xl space-y-6">
@@ -529,6 +591,45 @@ export default function ChannelDetailsPage() {
               <p className="mt-2 text-sm font-semibold">{joinModeLabel(channel.join_mode)}</p>
             </Card>
           </div>
+
+          {channel.permissions.can_invite ? (
+            <div className="border-t border-border/60 p-6">
+              <Card className="rounded-2xl p-5">
+                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                  <div>
+                    <h3 className="flex items-center gap-2 text-lg font-semibold">
+                      <Link2 className="h-5 w-5 text-primary" />
+                      {t("sections.inviteLink")}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">{t("inviteLinkDescription")}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => handleCreateAndCopyInvite(channel.id)}
+                    disabled={createChannelInvite.isPending}
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    {createChannelInvite.isPending ? t("actions.creatingInviteLink") : t("actions.copyInviteLink")}
+                  </Button>
+                </div>
+                {latestInviteUrl ? (
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={latestInviteUrl}
+                      readOnly
+                      aria-label={t("fields.inviteLink")}
+                      onFocus={(event) => event.currentTarget.select()}
+                    />
+                    <Button type="button" variant="secondary" onClick={() => copyInviteUrl(latestInviteUrl)}>
+                      <Copy className="mr-2 h-4 w-4" />
+                      {t("actions.copy")}
+                    </Button>
+                  </div>
+                ) : null}
+              </Card>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 border-t border-border/60 p-6 lg:grid-cols-[1.1fr_0.9fr]">
             <Card className="rounded-2xl p-5">

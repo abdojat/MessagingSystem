@@ -3,6 +3,7 @@ import { apiClient } from '@/services/api/client';
 import {
   AdminPermissionsUpdateRequest,
   AdminPermissionsUpdateResponse,
+  ChannelInviteResponse,
   ChannelListResponse,
   ChannelMembershipListResponse,
   ChannelPatchRequest,
@@ -137,6 +138,21 @@ export function useUpdateChannel() {
       queryClient.invalidateQueries({ queryKey: ['/channels'] });
       queryClient.invalidateQueries({ queryKey: ['/channels', vars.channelId] });
     }
+  });
+}
+
+export function useCreateChannelInvite() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (channelId: string) =>
+      apiClient<ChannelInviteResponse>(`/channels/${channelId}/invite`, {
+        method: 'POST',
+        body: JSON.stringify({ is_generic: true }),
+      }),
+    onSuccess: (_, channelId) => {
+      queryClient.invalidateQueries({ queryKey: ['/channels', channelId, 'events'] });
+    },
   });
 }
 

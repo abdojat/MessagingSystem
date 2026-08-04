@@ -98,12 +98,13 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
 4. Register/login User B (incognito or second browser profile).
 5. Register/login User C in a third window or separate profile.
 6. User A creates a channel.
-7. User B joins/subscribes.
-8. User A publishes a text message.
-9. User A uses the paperclip composer button to attach and publish a small photo, video, or audio file; caption text is optional.
-10. User B receives/reads the text and media messages.
-11. Open channel details -> Event Log.
-12. Click Verify integrity and show `Audit integrity: Verified`.
+7. User A opens Channel Details and clicks **Create and copy invite link**. This action is available to the owner for public/private channels with any join policy.
+8. User B opens the copied link and accepts the invitation (or joins/subscribes through the configured join flow).
+9. User A publishes a text message.
+10. User A uses the paperclip composer button to attach and publish a small photo, video, or audio file; caption text is optional.
+11. User B receives/reads the text and media messages.
+12. Open channel details -> Event Log.
+13. Click Verify integrity and show `Audit integrity: Verified`.
     - If the database contains pre-upgrade legacy events, run the canonical Docker backfill command first or explain the Not initialized state honestly.
     - Dry-run first:
       ```bash
@@ -113,20 +114,20 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
       ```bash
       docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
       ```
-13. Open the Delivery Monitor from User A's Profile page.
+14. Open the Delivery Monitor from User A's Profile page.
     - Normal demo state should show published/pending counters and empty failed/dead-lettered tables.
     - If a delivery has failed in the environment, use the per-row Retry button or Retry all button to move it back to pending.
     - Worker logs show retry scheduling and dead-letter transitions when RabbitMQ publish failures occur.
-14. Show unauthorized behavior:
+15. Show unauthorized behavior:
    - Use a private upload download blocked for User C.
    - Optionally show a private channel where non-member read/publish is denied.
-15. Show ciphertext at rest:
+16. Show ciphertext at rest:
 ```bash
 docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
 ```
 Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not plaintext.
-16. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
-17. Optional superadmin proof:
+17. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
+18. Optional superadmin proof:
    - Log in with the explicitly bootstrapped superadmin account and open the shield link (`/app/admin`).
    - Show that the global event table includes system and cross-channel events.
    - Revoke a disposable user's sessions, then demonstrate that their next protected request/login is blocked if the account is deactivated.

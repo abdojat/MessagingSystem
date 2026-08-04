@@ -23,9 +23,8 @@ from app.db.models import (
     Outbox,
 )
 from app.schemas.auth import RegisterRequest
-from app.schemas.channels import ChannelCreateRequest, ChannelPatchRequest
+from app.schemas.channels import ChannelCreateRequest, ChannelPatchRequest, InviteRequest, JoinRequest
 from app.schemas.messages import PublishMessageRequest, SyncRequest, UploadCreateRequest
-from app.schemas.channels import JoinRequest
 from app.schemas.users import UpdateMeRequest
 from app.services.auth_service import AuthService
 from app.services.channel_service import ChannelService
@@ -72,6 +71,51 @@ async def test_channel_creation_generates_slug_and_logs_event(db_session, monkey
 
     events = (await db_session.execute(select(Event).where(Event.event_type == "channel.created"))).scalars().all()
     assert len(events) == 2
+
+
+@pytest.mark.parametrize("visibility", ["public", "private"])
+@pytest.mark.parametrize("join_mode", ["open", "approval_required", "invite_only"])
+@pytest.mark.asyncio
+async def test_owner_can_create_generic_invite_for_every_channel_kind(
+    db_session,
+    monkeypatch,
+    visibility,
+    join_mode,
+):
+    async def _noop_bind(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
+
+    owner = await AuthService.register(
+        db_session,
+        RegisterRequest(username="invite_owner", email="invite_owner@x.com", password="password123"),
+    )
+    channel = await ChannelService.create_channel(
+        db_session,
+        owner.id,
+        ChannelCreateRequest(
+            name=f"{visibility} {join_mode} invite channel",
+            visibility=visibility,
+            join_mode=join_mode,
+        ),
+        _FakeAmqpConnection(),
+    )
+
+    invite, token = await ChannelService.create_invite(
+        db_session,
+        channel.id,
+        owner.id,
+        InviteRequest(is_generic=True),
+    )
+    preview = await ChannelService.get_invite_preview(db_session, token)
+
+    assert invite.channel_id == channel.id
+    assert invite.invited_user_id is None
+    assert invite.invited_email is None
+    assert token
+    assert preview["is_valid"] is True
+    assert preview["channel"]["id"] == channel.id
 
 
 @pytest.mark.asyncio
