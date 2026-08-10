@@ -562,20 +562,15 @@ class AdminService:
 
     @staticmethod
     async def restore_channel(db: AsyncSession, amqp: aio_pika.RobustConnection, actor: User, channel_id: UUID) -> None:
-        channel = await db.get(Channel, channel_id)
+        channel = (
+            await db.execute(select(Channel).where(Channel.id == channel_id).with_for_update())
+        ).scalar_one_or_none()
         if not channel:
             raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         if channel.deleted_at is None:
             raise AppError("channel is already active", 409, code="CONFLICT")
 
         channel.deleted_at = None
-        await log_event(
-            db,
-            "superadmin.channel_restored",
-            {"channel_id": str(channel.id), "channel_slug": channel.channel_slug},
-            channel_id=channel.id,
-            actor_user_id=actor.id,
-        )
         await enqueue_channel_event_outbox(
             db,
             channel.id,
@@ -592,6 +587,13 @@ class AdminService:
                 )
             )
         ).scalars().all()
-        for member_user_id in member_user_ids:
+        for member_user_id in sorted(member_user_ids, key=str):
             await enqueue_broker_binding_outbox(db, channel.id, member_user_id, "bind")
+        await log_event(
+            db,
+            "superadmin.channel_restored",
+            {"channel_id": str(channel.id), "channel_slug": channel.channel_slug},
+            channel_id=channel.id,
+            actor_user_id=actor.id,
+        )
         await db.commit()

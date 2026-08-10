@@ -120,29 +120,35 @@ async def process_outbox_batch(
     settings: Settings,
     limit: int = 100,
 ) -> int:
-    # SKIP LOCKED lets multiple worker processes share the outbox without
-    # publishing the same row at the same time.
-    rows = await db.execute(
-        text(
-            """
-            SELECT id, payload, routing_key, attempts, max_attempts,
-                   channel_id, aggregate_type, aggregate_id, type
-            FROM outbox
-            WHERE status = 'pending'
-               OR (status = 'retry_scheduled' AND next_retry_at <= now())
-            ORDER BY created_at ASC
-            LIMIT :limit
-            FOR UPDATE SKIP LOCKED
-            """
-        ),
-        {"limit": limit},
-    )
-    records = rows.mappings().all()
-    if not records:
-        await db.rollback()
-        return 0
+    processed = 0
+    while processed < limit:
+        # One outbox/projection pair per transaction avoids retaining multiple
+        # BrokerBindingState locks in an order derived from retry timing.
+        rows = await db.execute(
+            text(
+                """
+                SELECT id, payload, routing_key, attempts, max_attempts,
+                       channel_id, aggregate_type, aggregate_id, type
+                FROM outbox
+                WHERE status = 'pending'
+                   OR (status = 'retry_scheduled' AND next_retry_at <= now())
+                ORDER BY created_at ASC
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+                """
+            )
+        )
+        rec = rows.mappings().one_or_none()
+        if rec is None:
+            # Do not expire caller-owned ORM objects after successfully
+            # processing earlier rows in this batch-shaped call.
+            if processed:
+                await db.commit()
+            else:
+                await db.rollback()
+            break
 
-    for rec in records:
+        diagnostic: tuple[str, Any, dict[str, Any]] | None = None
         await _mark_publishing(db, rec["id"])
         body = _payload_to_body(rec["payload"])
         try:
@@ -152,10 +158,16 @@ async def process_outbox_batch(
                 await _publish_to_exchange(exchange, rec["routing_key"], body)
             await _mark_published(db, rec["id"])
         except Exception as exc:
-            await _handle_publish_failure(db, dead_letter_exchange, rec, body, exc, settings)
+            diagnostic = await _handle_publish_failure(db, dead_letter_exchange, rec, body, exc, settings)
 
-    await db.commit()
-    return len(records)
+        # Projection/outbox status is authoritative and commits before any
+        # diagnostic event attempts the event-chain advisory lock.
+        await db.commit()
+        if diagnostic is not None:
+            await _persist_delivery_event_after_status_commit(db, *diagnostic)
+        processed += 1
+
+    return processed
 
 
 def _payload_to_body(payload: Any) -> bytes:
@@ -349,7 +361,7 @@ async def _handle_publish_failure(
     body: bytes,
     exc: BaseException,
     settings: Settings,
-) -> None:
+) -> tuple[str, Any, dict[str, Any]]:
     error_text = sanitize_error(exc)
     previous_attempts = int(rec["attempts"] or 0)
     attempt_count = previous_attempts + 1
@@ -359,8 +371,7 @@ async def _handle_publish_failure(
         # After the final retry, the database status is the authoritative record;
         # the RabbitMQ dead-letter publish is a diagnostic mirror for operators.
         await _mark_dead_lettered(db, rec["id"], error_text, attempt_count)
-        await _insert_delivery_event(
-            db,
+        diagnostic = (
             "broker.dead_lettered",
             rec.get("channel_id"),
             {
@@ -379,12 +390,11 @@ async def _handle_publish_failure(
                 rec["id"],
                 sanitize_error(dlq_exc),
             )
-        return
+        return diagnostic
 
     delay = calculate_retry_delay(attempt_count, settings)
     await _mark_retry_scheduled(db, rec["id"], error_text, attempt_count, delay)
-    await _insert_delivery_event(
-        db,
+    return (
         "broker.retry_scheduled",
         rec.get("channel_id"),
         {
@@ -396,6 +406,47 @@ async def _handle_publish_failure(
             "last_error": error_text,
         },
     )
+
+
+def _retryable_transaction_error(exc: BaseException) -> bool:
+    current: Any = exc
+    for _ in range(4):
+        sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
+        if sqlstate in {"40P01", "40001"}:
+            return True
+        current = getattr(current, "orig", None) or getattr(current, "__cause__", None)
+        if current is None:
+            break
+    return False
+
+
+async def _persist_delivery_event_after_status_commit(
+    db: AsyncSession,
+    event_type: str,
+    channel_id: Any,
+    payload: dict[str, Any],
+    *,
+    max_attempts: int = 3,
+) -> bool:
+    """Best-effort diagnostic transaction with safe, bounded DB retry."""
+
+    for attempt in range(1, max(1, max_attempts) + 1):
+        try:
+            await _insert_delivery_event(db, event_type, channel_id, payload)
+            await db.commit()
+            return True
+        except Exception as exc:
+            await db.rollback()
+            if attempt < max_attempts and _retryable_transaction_error(exc):
+                await asyncio.sleep(0.05 * attempt)
+                continue
+            logger.warning(
+                "outbox status committed but diagnostic event %s could not be stored: %s",
+                event_type,
+                sanitize_error(exc),
+            )
+            return False
+    return False
 
 
 async def _mark_retry_scheduled(db: AsyncSession, outbox_id: Any, error_text: str, attempt_count: int, delay: int) -> None:

@@ -55,7 +55,7 @@ Important:
 - `DATABASE_URL`
 - `RABBITMQ_URL`
 - `REDIS_URL`
-- `JWT_SECRET` (replace the development default; production/prod/staging require at least 32 non-placeholder characters)
+- `JWT_SECRET` (replace the development default; only `dev`, `development`, `local`, and `test` allow placeholders; every other environment label requires a strong deployment secret)
 - `JWT_ACCESS_TTL_MIN` (default `30`), `JWT_REFRESH_TTL_DAYS` (idle lifetime, default `14`), and `SESSION_ABSOLUTE_TTL_DAYS` (non-sliding maximum, default `30`)
 - `WS_TICKET_TTL_SECONDS` (single-use Redis-backed WebSocket ticket lifetime, default `30` seconds)
 - `WS_MAX_INBOUND_MESSAGE_BYTES` (default `16384`; enforced by Docker Uvicorn and again before application JSON parsing)
@@ -63,6 +63,7 @@ Important:
 - `MESSAGE_ENCRYPTION_ENABLED=true`
 - `MESSAGE_ENCRYPTION_KEY` (Fernet key)
 - `UPLOAD_MAX_SIZE_BYTES` (defaults to 25 MiB; upload bodies are streamed and bounded by this value)
+- `API_REQUEST_BODY_MAX_BYTES` (defaults to 128 KiB for ordinary `POST`/`PUT`/`PATCH`/`DELETE` bodies; the protected upload-content `PUT` keeps its separate streaming limit)
 - `MESSAGE_TEXT_MAX_BYTES`, `MESSAGE_JSON_MAX_BYTES`, `MESSAGE_JSON_MAX_DEPTH` (validated before encryption/outbox work)
 - `RATE_LIMIT_*` grouped auth/search/message/media/channel/WebSocket/sync/admin limits; `RATE_LIMIT_LOCAL_MAX_KEYS` bounds the fail-closed per-process sensitive fallback used when Redis is unavailable
 - `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, and `MAX_WEBSOCKET_CONNECTIONS_PER_USER`
@@ -80,13 +81,14 @@ Important:
 - Keep `.env` local only; the repository tracks `.env.example` for documentation.
 
 Development note:
-- In `dev/test/local`, empty `MESSAGE_ENCRYPTION_KEY` uses a fallback key.
-- For `production`, `prod`, and `staging`, startup rejects missing/default/weak JWT secrets and rejects a missing or invalid Fernet key while message encryption is enabled.
+- In `dev`, `development`, `local`, and `test`, an empty `MESSAGE_ENCRYPTION_KEY` uses a fallback key.
+- Every other environment label, including unknown deployment aliases, is production-like: startup rejects missing/default/weak JWT secrets and a missing or invalid Fernet key while message encryption is enabled.
 - Access JWTs are bound to their database session. Logout, explicit revocation, logout-all, replay detection, absolute expiry, and account deactivation invalidate later HTTP authentication immediately.
 - WebSocket clients obtain a short-lived, one-time opaque ticket with `POST /auth/ws-ticket`; long-lived access JWTs are not accepted in WebSocket URLs. Redis control events close matching sockets across backend instances when Redis is available.
 - Established sockets use per-socket weighted command and history-row token buckets. Subscribe/resume history is capped globally per command, identical subscribe/cursor requests do not refetch history, and inbound dispatch remains one command at a time. These budgets are per backend process/socket, not a distributed global quota.
 - Generic invite links are reusable until revoked, expired, or their channel is deleted. Targeted invites are one-use and accept/revoke/delete ordering is serialized through PostgreSQL row locks. Existing-account email targets resolve once to immutable `user_id`; unresolved pre-registration email targets require verified ownership of the normalized email. Changing an account email clears verification. The repository intentionally does not implement email delivery/verification issuance, so a deployment must supply that trusted completion flow before unresolved email invites can be accepted.
 - Membership topology is stored as versioned desired state in PostgreSQL and snapshotted through the outbox. The worker locks the user/channel state, rejects stale generations, re-derives current authorization, removes obsolete slug bindings, and retries a complete idempotent projection. Run `python -m app.db.reconcile_broker_bindings` in the backend environment to enqueue a full repair from PostgreSQL.
+- Security-sensitive database writes follow the documented global lock order in [`backend/docs/LOCK_ORDERING.md`](backend/docs/LOCK_ORDERING.md). Worker retry/dead-letter state commits before its best-effort diagnostic event transaction, avoiding the historical binding-row/event-advisory inversion.
 - RabbitMQ user queues are bounded realtime buffers (expiry, message TTL, maximum length). Missed or evicted events are recovered through PostgreSQL-backed REST sync.
 - Generate one with:
 ```bash

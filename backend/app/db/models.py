@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -242,6 +243,7 @@ class Message(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
+        UniqueConstraint("id", "channel_id", name="uq_messages_id_channel"),
         UniqueConstraint("channel_id", "seq_id", name="uq_messages_channel_seq"),
         Index("ix_messages_channel_created_at", "channel_id", "created_at"),
         Index("ix_messages_channel_seq", "channel_id", "seq_id"),
@@ -260,7 +262,7 @@ class MessageAttachment(Base):
     __tablename__ = "message_attachments"
 
     message_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True
+        UUID(as_uuid=True), primary_key=True
     )
     upload_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("uploads.id", ondelete="CASCADE"), primary_key=True
@@ -271,6 +273,12 @@ class MessageAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["message_id", "channel_id"],
+            ["messages.id", "messages.channel_id"],
+            name="fk_message_attachments_message_channel",
+            ondelete="CASCADE",
+        ),
         Index("ix_message_attachments_upload_channel", "upload_id", "channel_id"),
         Index("ix_message_attachments_channel_message", "channel_id", "message_id"),
     )

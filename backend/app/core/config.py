@@ -8,7 +8,9 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-PRODUCTION_ENVIRONMENTS = {"prod", "production", "staging"}
+# Development conveniences must be selected explicitly. Every other label is
+# production-like so deployment aliases and typos fail safe.
+DEVELOPMENT_ENVIRONMENTS = {"dev", "development", "local", "test"}
 INSECURE_JWT_SECRETS = {
     "change-me",
     "change-this-jwt-secret",
@@ -96,6 +98,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
     upload_max_size_bytes: int = 25 * 1024 * 1024
+    # Applied by streaming ASGI middleware to ordinary HTTP request bodies.
+    # Upload-content PUTs are exempt because their separate streaming service
+    # enforces UPLOAD_MAX_SIZE_BYTES without buffering the file.
+    api_request_body_max_bytes: int = Field(default=128 * 1024, ge=1024, le=10 * 1024 * 1024)
     uploads_base_dir: str = "/data/uploads"
     api_v1_prefix: str = "/v1"
     message_encryption_enabled: bool = True
@@ -125,6 +131,14 @@ class Settings(BaseSettings):
             return [part.strip() for part in raw.split(",") if part.strip()]
         return ["http://localhost:3000", "http://localhost:5173"]
 
+    @field_validator("environment", mode="before")
+    @classmethod
+    def _normalize_environment(cls, value: Any) -> str:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("ENVIRONMENT must not be empty")
+        return normalized
+
     @field_validator("trusted_proxy_cidrs", mode="before")
     @classmethod
     def _parse_trusted_proxy_cidrs(cls, value: Any) -> list[str]:
@@ -149,8 +163,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
-        environment = self.environment.strip().lower()
-        if environment not in PRODUCTION_ENVIRONMENTS:
+        if self.environment in DEVELOPMENT_ENVIRONMENTS:
             return self
 
         jwt_secret = self.jwt_secret.strip()

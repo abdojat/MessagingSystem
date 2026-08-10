@@ -4,7 +4,17 @@ Last updated: 2026-08-10
 
 ## Summary
 
-The latest pass completes scoped Phase 6 hardening for P5V-01 and P5V-02. Existing-account email invitations now bind once to immutable user IDs; unresolved/pre-registration targets require explicit verified-email ownership; email changes clear verification; and canonical email normalization is shared across the relevant flows. Protected downloads now reserve per-user, trusted client-IP, and process-global capacity atomically, while a separate Nginx-fronted Compose file provides the recommended bounded HTTP path without changing direct development Compose. Email verification delivery, distributed limits across backend replicas, live slow-reader load testing, P5V-03/P5V-04, AV-09 through AV-11, httpOnly-cookie migration, and attachment encryption remain explicitly deferred.
+The latest pass completes the scoped Phase 7 application/database fixes for P5V-03, P5V-04, AV-09, and AV-10. Security-sensitive transactions now follow one documented lock order; worker delivery diagnostics cannot roll back authoritative retry/dead-letter state; authentication fields and ordinary raw bodies are bounded without buffering upload streams; PostgreSQL enforces attachment/message channel consistency; and only explicit development/test environment labels permit placeholder secrets. AV-11 production redesign, email verification delivery, distributed limits across backend replicas, live broker/proxy load testing, httpOnly-cookie migration, attachment encryption, and multi-socket presence reliability remain explicitly deferred.
+
+## Security Hardening Phase 7 - 2026-08-10
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Database/advisory lock order (P5V-03) | Fixed for reviewed application/worker paths | Global order documented; channel/dependent/topology/event paths normalized; worker commits status before separate diagnostic event; real PostgreSQL historical-cycle and channel/member tests pass | Unrelated PostgreSQL contention remains possible; no live RabbitMQ outage or broad stress test | Monitor SQLSTATE `40P01`/`40001` and add live broker/load coverage before scaled deployment |
+| Auth/raw body bounds (P5V-04) | Fixed at schema and ASGI boundaries | 255-character identity, 256-character password, 2 KiB token, 128 KiB ordinary body; digest limiter keys; bounded audit prefix/hash; upload `PUT` stays streamed | Proxy/application configuration must remain aligned; per-process rate fallback remains | Keep limits documented and add ingress observability in the production phase |
+| Attachment relation integrity (AV-09) | Fixed and PostgreSQL-enforced | Migration 0021 normalizes historical rows and adds composite FK to authoritative `(message_id, channel_id)`; active/outsider/deleted-channel tests pass | Downgrade retains normalized historical values; attachments remain server-readable/unencrypted | Preserve the composite invariant in future schema changes |
+| Unknown environments (AV-10) | Fixed fail-safe | Only dev/development/local/test are development-like; production/staging/live/release/prod-eu/foo placeholder tests fail | AV-11 secret delivery/KMS/rotation is not implemented | Complete deployment secret management in the production phase |
+| Validation | Passed | Phase 7 `23 passed`; Phase 1–6 security `117 passed`; complete backend `218 passed, 1 warning`; fresh/upgrade migrations; frontend typecheck; direct/hardened Compose render | Existing passlib/argon2 warning; Rabbit failure is mocked and concurrency uses PostgreSQL without live Rabbit | Run the live demo and a controlled Rabbit outage before deployment claims |
 
 ## Security Hardening Phase 6 - 2026-08-10
 

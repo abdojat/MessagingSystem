@@ -149,6 +149,39 @@ docker run --rm --add-host backend:127.0.0.1 --add-host frontend:127.0.0.1 \
 docker compose -f docker-compose.hardened.yml config --quiet
 ```
 
+## Security Hardening Phase 7
+
+`backend/tests/security/test_phase7_final_app_hardening.py` contains 23 focused
+cases covering:
+
+- real PostgreSQL independent-session reproduction of the historical
+  event-advisory/broker-binding cycle and channel-delete/member serialization;
+- mocked RabbitMQ failure with durable retry state, post-commit diagnostics,
+  audit failure isolation, and transactional rollback safety;
+- bounded login/password/refresh/logout fields, fixed-size auth limiter keys,
+  bounded failed-login audit data, declared/chunked raw JSON rejection, and an
+  unbuffered upload-stream exemption;
+- development-environment allowlisting and fail-safe unknown labels; and
+- valid/invalid attachment relationships, active-member/outsider authorization,
+  and deleted-channel lifecycle behavior under the composite foreign key.
+
+Run:
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_phase7_final_app_hardening.py
+```
+
+Verified on 2026-08-10 against disposable PostgreSQL 16: Phase 7 passed
+`23 passed, 1 warning`; Phase 1–6 security suites passed `117 passed, 1 warning`;
+the complete backend suite passed `218 passed, 1 warning`. Migration
+`0021_phase7_attachment_integrity` passed on a fresh database and on a 0020
+fixture containing two attachments (one deliberately mismatched), two users,
+and one invite. The mismatch was normalized without deleting relations and a
+new inconsistent write was rejected by PostgreSQL. Frontend typecheck and both
+Compose render checks passed. RabbitMQ failure was mocked; no live RabbitMQ
+outage test is claimed.
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`

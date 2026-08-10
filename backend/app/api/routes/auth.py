@@ -6,6 +6,7 @@ from app.api.deps import CurrentAuthDep, CurrentUserDep, DBDep, RedisDep
 from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
+from app.core.utils import sha256_hex
 from app.schemas.auth import (
     LoginRequest,
     LogoutAllResponse,
@@ -28,6 +29,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 async def _enforce_auth_rate_limits(redis: RedisDep, scope: str, ip: str, identity: str) -> None:
     settings = get_settings()
+    # Keep attacker-controlled identity text out of Redis and local limiter
+    # keys. Normalization retains stable case-insensitive login semantics while
+    # SHA-256 gives every accepted input a fixed-size representation.
+    identity_digest = sha256_hex(identity.strip().lower())
     await enforce_rate_limit(
         redis,
         f"rl:auth:{scope}:ip:{ip}",
@@ -36,7 +41,7 @@ async def _enforce_auth_rate_limits(redis: RedisDep, scope: str, ip: str, identi
     )
     await enforce_rate_limit(
         redis,
-        f"rl:auth:{scope}:identity:{identity.lower()}",
+        f"rl:auth:{scope}:identity:{identity_digest}",
         limit=settings.rate_limit_auth_identity_per_minute,
         window_seconds=60,
     )
@@ -73,7 +78,8 @@ async def login(req: LoginRequest, db: DBDep, request: Request, redis: RedisDep)
                 db,
                 "security.login_failed",
                 {
-                    "identity": req.username_or_email.strip().lower(),
+                    "identity_prefix": req.username_or_email.strip().lower()[:32],
+                    "identity_sha256": sha256_hex(req.username_or_email.strip().lower()),
                     "ip": ip,
                 },
                 channel_id=None,

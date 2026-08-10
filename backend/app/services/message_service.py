@@ -413,13 +413,12 @@ class MessageService:
     async def mark_seen(db: AsyncSession, channel_id: UUID, user_id: UUID, req: SeenRequest) -> UserChannelState:
         # Seen/unread state is derived from private message history, so it uses
         # the same approved-reader check as history, sync, and WebSocket resume.
-        await MessageService._assert_can_read(db, channel_id, user_id)
-        # Serialize state creation/advancement per membership so two concurrent
-        # first-seen requests cannot both observe a missing state row.
-        await db.execute(
-            select(ChannelMembership)
-            .where(ChannelMembership.channel_id == channel_id, ChannelMembership.user_id == user_id)
-            .with_for_update()
+        await MessageService._assert_can_read(
+            db,
+            channel_id,
+            user_id,
+            lock_channel=True,
+            lock_membership=True,
         )
         channel = await db.get(Channel, channel_id)
         if channel is None:  # Defensive; _assert_can_read already checks this.
@@ -503,11 +502,27 @@ class MessageService:
         return state
 
     @staticmethod
-    async def _assert_can_read(db: AsyncSession, channel_id: UUID, user_id: UUID) -> MembershipRole:
-        channel = await db.get(Channel, channel_id)
+    async def _assert_can_read(
+        db: AsyncSession,
+        channel_id: UUID,
+        user_id: UUID,
+        *,
+        lock_channel: bool = False,
+        lock_membership: bool = False,
+    ) -> MembershipRole:
+        channel_stmt = select(Channel).where(Channel.id == channel_id)
+        if lock_channel:
+            channel_stmt = channel_stmt.with_for_update(read=True)
+        channel = (await db.execute(channel_stmt)).scalar_one_or_none()
         if not channel or channel.deleted_at is not None:
             raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
-        membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
+        membership_stmt = select(ChannelMembership).where(
+            ChannelMembership.channel_id == channel_id,
+            ChannelMembership.user_id == user_id,
+        )
+        if lock_membership:
+            membership_stmt = membership_stmt.with_for_update()
+        membership = (await db.execute(membership_stmt)).scalar_one_or_none()
         role = membership.role if membership else None
         if not can_read(role):
             # Private channel probing is recorded as a security event for the
@@ -531,7 +546,7 @@ class MessageService:
         message_id: UUID,
         req: MessagePatchRequest,
     ) -> Message:
-        role = await MessageService._assert_can_read(db, channel_id, actor_user_id)
+        role = await MessageService._assert_can_read(db, channel_id, actor_user_id, lock_channel=True)
         message_rows = await db.execute(
             select(Message).where(Message.id == message_id).with_for_update()
         )
@@ -591,8 +606,10 @@ class MessageService:
         actor_user_id: UUID,
         message_id: UUID,
     ) -> Message:
-        role = await MessageService._assert_can_read(db, channel_id, actor_user_id)
-        message = await db.get(Message, message_id)
+        role = await MessageService._assert_can_read(db, channel_id, actor_user_id, lock_channel=True)
+        message = (
+            await db.execute(select(Message).where(Message.id == message_id).with_for_update())
+        ).scalar_one_or_none()
         if not message or message.channel_id != channel_id:
             raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
         if message.sender_user_id != actor_user_id and role not in {MembershipRole.owner, MembershipRole.admin}:
@@ -666,7 +683,7 @@ class MessageService:
             emoji = normalize_reaction(emoji)
         except ValueError as exc:
             raise AppError(str(exc), 400, code="VALIDATION_ERROR") from exc
-        await MessageService._assert_can_read(db, channel_id, actor_user_id)
+        await MessageService._assert_can_read(db, channel_id, actor_user_id, lock_channel=True)
         message_rows = await db.execute(
             select(Message).where(Message.id == message_id).with_for_update()
         )
@@ -726,8 +743,10 @@ class MessageService:
             emoji = normalize_reaction(emoji)
         except ValueError as exc:
             raise AppError(str(exc), 400, code="VALIDATION_ERROR") from exc
-        await MessageService._assert_can_read(db, channel_id, actor_user_id)
-        message = await db.get(Message, message_id)
+        await MessageService._assert_can_read(db, channel_id, actor_user_id, lock_channel=True)
+        message = (
+            await db.execute(select(Message).where(Message.id == message_id).with_for_update())
+        ).scalar_one_or_none()
         if not message or message.channel_id != channel_id or message.deleted_at is not None:
             raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
         delete_result = await db.execute(
@@ -755,10 +774,12 @@ class MessageService:
 
     @staticmethod
     async def pin_message(db: AsyncSession, channel_id: UUID, message_id: UUID, actor_user_id: UUID) -> None:
-        role = await MessageService._assert_can_read(db, channel_id, actor_user_id)
+        role = await MessageService._assert_can_read(db, channel_id, actor_user_id, lock_channel=True)
         if role not in {MembershipRole.owner, MembershipRole.admin}:
             raise AppError("forbidden", 403, code="FORBIDDEN")
-        message = await db.get(Message, message_id)
+        message = (
+            await db.execute(select(Message).where(Message.id == message_id).with_for_update())
+        ).scalar_one_or_none()
         if not message or message.channel_id != channel_id:
             raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
         existing = await db.get(PinnedMessage, {"channel_id": channel_id, "message_id": message_id})
@@ -790,13 +811,15 @@ class MessageService:
 
     @staticmethod
     async def unpin_message(db: AsyncSession, channel_id: UUID, message_id: UUID, actor_user_id: UUID) -> None:
-        role = await MessageService._assert_can_read(db, channel_id, actor_user_id)
+        role = await MessageService._assert_can_read(db, channel_id, actor_user_id, lock_channel=True)
         if role not in {MembershipRole.owner, MembershipRole.admin}:
             raise AppError("forbidden", 403, code="FORBIDDEN")
+        message = (
+            await db.execute(select(Message).where(Message.id == message_id).with_for_update())
+        ).scalar_one_or_none()
         pin = await db.get(PinnedMessage, {"channel_id": channel_id, "message_id": message_id})
         if pin:
             await db.delete(pin)
-        message = await db.get(Message, message_id)
         if message and message.channel_id == channel_id:
             # Missing message rows are tolerated during unpin so cleanup remains
             # idempotent, but existing messages still broadcast their new state.

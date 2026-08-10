@@ -4,7 +4,7 @@ Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
 
-This report is evidence-based and references the current codebase. Last updated after Phase 6 medium security hardening on 2026-08-10.
+This report is evidence-based and references the current codebase. Last updated after Phase 7 final application/database hardening on 2026-08-10.
 
 ## 1. Executive Summary
 
@@ -19,7 +19,7 @@ It does more than a toy chat app:
 - It has a substantial Next.js frontend for login, channel management, publishing, membership control, and event logs.
 - It implements password hashing, JWT auth, role-based authorization, and Fernet message encryption at rest.
 - It supports protected photo/video/audio attachments with server-derived attachment metadata and upload audit events.
-- It now has atomic Redis counters with non-evicting fail-safe outage limiting, bounded logical messages/protocol arrays and `/sync` materialization, established-socket frame/command/history budgets, idempotent seen/reaction changes, active-channel attachment lifecycle authorization, streamed downloads with atomic per-user/IP/process admission, immutable existing-account invite targets plus explicit pre-registration verification state, locked targeted/reusable invite lifecycles, basic account quotas, bounded broker queues, versioned broker desired state, pre-decryption WebSocket membership generations, and paced Redis fanout retries.
+- It now has atomic Redis counters with non-evicting fail-safe outage limiting, bounded auth/raw ordinary request bodies, bounded logical messages/protocol arrays and `/sync` materialization, established-socket frame/command/history budgets, idempotent seen/reaction changes, active-channel attachment lifecycle authorization with database-enforced message/channel consistency, streamed downloads with atomic per-user/IP/process admission, immutable existing-account invite targets plus explicit pre-registration verification state, locked targeted/reusable invite lifecycles, a documented database lock order, basic account quotas, bounded broker queues, versioned broker desired state, pre-decryption WebSocket membership generations, and paced Redis fanout retries.
 - It has a separate, environment-bootstrapped global superadmin privilege with guarded global audit, account/session, channel lifecycle, and delivery controls. The console API now returns allowlisted event summaries instead of raw payloads, marks sensitive list responses non-cacheable, and supports ranked/escaped search plus server-side filters and selectable pagination. Audit rows recover channel context from safe message/outbox/upload references where the canonical event field is absent, show the unique slug alongside the channel name, link channels to their existing view route, and link actor identities to the appropriate profile page.
 
 Biggest strengths:
@@ -35,7 +35,7 @@ Biggest risks:
 - Security is not strong enough for a serious deployment.
 - Frontend auth tokens are browser-managed, which is acceptable for a demo but not production-grade.
 - Runtime verification still depends on the full Docker stack, even though the demo verifier now exercises the live WebSocket path when available with REST backfill fallback.
-- Phase 4 broker ordering/missed-Redis-removal, Phase 5 WebSocket/Redis-outage abuse, and Phase 6 download concurrency are deterministic application/component tests rather than live multi-worker/multi-backend/TCP load runs. Download and socket work limits remain per backend process; the Nginx path bounds one proxy instance but does not coordinate replicas or guarantee minimum client throughput. Email verification delivery is not implemented.
+- Phase 4 broker ordering/missed-Redis-removal, Phase 5 WebSocket/Redis-outage abuse, and Phase 6 download concurrency are deterministic application/component tests rather than live multi-worker/multi-backend/TCP load runs. Phase 7 lock concurrency uses real independent PostgreSQL sessions, but RabbitMQ failure is mocked rather than a live broker outage. Download and socket work limits remain per backend process; the Nginx path bounds one proxy instance but does not coordinate replicas or guarantee minimum client throughput. Email verification delivery is not implemented, and multi-socket presence can still mark a user offline when one of several sockets closes.
 - There is no full Merkle tree, external hash anchoring, or anomaly detection feature in the codebase.
 - Superadmin authentication is still password/JWT based without MFA or an external privileged-access workflow, so it remains appropriate for the university MVP rather than production operations.
 
@@ -415,7 +415,7 @@ flowchart LR
 - REST `/sync` membership updates are scoped to approved channels plus self-targeted membership changes, including post-removal notification.
 - REST `/sync` message queries use one decreasing global row budget and SQL `LIMIT`, with deterministic channel/sequence cursors.
 - Empty WebSocket subscription sets reject ordinary channel traffic while self-targeted membership removal remains deliverable.
-- Pending members are denied private read-derived state, and production/prod/staging reject unsafe JWT or encryption-key configuration at startup.
+- Pending members are denied private read-derived state, and only explicit dev/development/local/test labels permit development secrets; every other environment label rejects unsafe JWT or encryption-key configuration at startup.
 - SVG uploads are rejected to keep protected media rendering focused on ordinary photo/video/audio content.
 - Event audit rows are tamper-evident through a per-scope SHA-256 hash chain with an authorized verification endpoint.
 
@@ -548,6 +548,7 @@ The frontend is real and fairly complete.
 - Delivery reliability tests: [`backend/tests/test_delivery_reliability.py`](backend/tests/test_delivery_reliability.py)
 - Event integrity tests: [`backend/tests/test_event_integrity.py`](backend/tests/test_event_integrity.py)
 - Phase 1 security regression tests: [`backend/tests/security/test_phase1_hardening.py`](backend/tests/security/test_phase1_hardening.py)
+- Phase 7 security regression tests: [`backend/tests/security/test_phase7_final_app_hardening.py`](backend/tests/security/test_phase7_final_app_hardening.py)
 - Demo verifier: [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py)
 - WebSocket helper: [`scripts/ws_client.py`](scripts/ws_client.py)
 
@@ -570,6 +571,7 @@ The frontend is real and fairly complete.
 - On 2026-08-10, Phase 4 P0 regressions passed `15` tests and the complete backend suite passed `158` tests against isolated PostgreSQL 16. Fresh migration through 0019 and an upgrade from 0018 with active/removed historical broker rows passed. No live multi-worker RabbitMQ ordering or Redis-loss scenario was run.
 - On 2026-08-10, Phase 5 regressions passed `18` tests, Phase 1–4 security suites passed `80`, and the complete backend suite passed `176` tests against disposable PostgreSQL 16. Invite races used two independent sessions; Redis/WebSocket outage/flood behavior was deterministic rather than live multi-backend load. No migration was required.
 - On 2026-08-10, Phase 6 regressions passed `19` tests, Phase 1–5 security suites passed `98`, and the complete backend suite passed `195` tests against disposable PostgreSQL 16. Fresh and representative 0019→0020 migrations passed; frontend typecheck, both Compose render checks, and containerized Nginx syntax validation passed. Email verification completion was simulated, and no live proxy slow-reader load test was run.
+- On 2026-08-10, Phase 7 regressions passed `23` tests, Phase 1–6 security suites passed `117`, and the complete backend suite passed `218` tests against disposable PostgreSQL 16. Fresh and representative 0020→0021 migrations passed; one historical attachment mismatch was normalized without deleting either relation and PostgreSQL rejected a later mismatch. The historical advisory/binding cycle and channel/member serialization used independent real PostgreSQL sessions; RabbitMQ failure was mocked. Frontend typecheck and both Compose render checks passed.
 
 ### Practical Testing Plan
 

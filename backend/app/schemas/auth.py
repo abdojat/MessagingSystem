@@ -7,6 +7,13 @@ from app.core.email_identity import normalize_email
 from app.core.identifiers import validate_username as validate_username_value
 
 
+AUTH_IDENTITY_MAX_LENGTH = 255
+AUTH_PASSWORD_MAX_LENGTH = 256
+# Current HS256 refresh JWTs are only a few hundred bytes. Two KiB leaves
+# ample headroom for compatible claim growth without accepting arbitrary data.
+AUTH_REFRESH_TOKEN_MAX_LENGTH = 2048
+
+
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     email: EmailStr | None = None
@@ -27,16 +34,16 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username_or_email: str
-    password: str
+    username_or_email: str = Field(min_length=1, max_length=AUTH_IDENTITY_MAX_LENGTH)
+    password: str = Field(min_length=1, max_length=AUTH_PASSWORD_MAX_LENGTH)
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(min_length=1, max_length=AUTH_REFRESH_TOKEN_MAX_LENGTH)
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(min_length=1, max_length=AUTH_REFRESH_TOKEN_MAX_LENGTH)
 
 
 class TokenPair(BaseModel):

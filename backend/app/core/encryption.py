@@ -7,7 +7,7 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.core.config import get_settings
+from app.core.config import DEVELOPMENT_ENVIRONMENTS, get_settings
 from app.core.errors import AppError
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ def _build_fernet() -> Fernet:
     enabled = bool(settings.message_encryption_enabled)
     key = settings.message_encryption_key.strip() if settings.message_encryption_key else ""
     env = settings.environment.lower().strip()
-    is_dev_like = env in {"dev", "development", "local", "test"}
+    is_dev_like = env in DEVELOPMENT_ENVIRONMENTS
 
     if not enabled:
         raise AppError("message encryption is disabled", 500, code="CONFIG_ERROR")

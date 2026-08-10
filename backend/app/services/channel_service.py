@@ -83,6 +83,28 @@ class ChannelService:
             raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
         return channel
 
+    @staticmethod
+    async def _get_memberships_for_update(
+        db: AsyncSession,
+        channel_id: UUID,
+        user_ids: list[UUID],
+    ) -> dict[UUID, ChannelMembership]:
+        """Lock membership rows after the channel, in deterministic user order."""
+
+        ordered_user_ids = sorted(set(user_ids), key=str)
+        if not ordered_user_ids:
+            return {}
+        rows = await db.execute(
+            select(ChannelMembership)
+            .where(
+                ChannelMembership.channel_id == channel_id,
+                ChannelMembership.user_id.in_(ordered_user_ids),
+            )
+            .order_by(ChannelMembership.user_id)
+            .with_for_update()
+        )
+        return {membership.user_id: membership for membership in rows.scalars().all()}
+
     # Converts a channel name into a broker-safe slug; channel creation uses it when
     # the client does not provide an explicit routing identifier.
     @staticmethod
@@ -231,6 +253,9 @@ class ChannelService:
                 approved_at=utcnow(),
             )
         )
+        await enqueue_broker_binding_outbox(db, channel.id, owner_user_id, "bind")
+        # Event-integrity advisory locks are always last after transactional
+        # resource/projection locks, preventing advisory/row lock inversion.
         await log_event(
             db,
             "channel.created",
@@ -246,7 +271,6 @@ class ChannelService:
                 channel_id=channel.id,
                 actor_user_id=owner_user_id,
             )
-        await enqueue_broker_binding_outbox(db, channel.id, owner_user_id, "bind")
         await db.commit()
         await db.refresh(channel)
         return channel
@@ -568,7 +592,7 @@ class ChannelService:
         req: ChannelPatchRequest,
         amqp: aio_pika.RobustConnection,
     ) -> Channel:
-        channel = await ChannelService.get_channel_or_404(db, channel_id)
+        channel = await ChannelService._get_channel_for_update(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not ChannelService.membership_permissions(membership)["can_edit_channel"]:
             raise AppError("forbidden", 403, code="FORBIDDEN")
@@ -593,21 +617,6 @@ class ChannelService:
         if req.join_mode is not None:
             channel.join_mode = req.join_mode
 
-        await log_event(
-            db,
-            "channel.updated",
-            {
-                "channel_id": str(channel_id),
-                "name": channel.name,
-                "channel_slug": channel.channel_slug,
-                "description": channel.description,
-                "avatar_url": channel.avatar_url,
-                "visibility": channel.visibility.value,
-                "join_mode": channel.join_mode.value,
-            },
-            channel_id=channel_id,
-            actor_user_id=actor_user_id,
-        )
         await enqueue_channel_event_outbox(
             db,
             uuid.uuid4(),
@@ -636,8 +645,23 @@ class ChannelService:
                     ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
                 )
             )
-            for member_user_id in member_rows.scalars().all():
+            for member_user_id in sorted(member_rows.scalars().all(), key=str):
                 await enqueue_broker_binding_outbox(db, channel_id, member_user_id, "bind")
+        await log_event(
+            db,
+            "channel.updated",
+            {
+                "channel_id": str(channel_id),
+                "name": channel.name,
+                "channel_slug": channel.channel_slug,
+                "description": channel.description,
+                "avatar_url": channel.avatar_url,
+                "visibility": channel.visibility.value,
+                "join_mode": channel.join_mode.value,
+            },
+            channel_id=channel_id,
+            actor_user_id=actor_user_id,
+        )
         await db.commit()
         await db.refresh(channel)
         return channel
@@ -660,13 +684,6 @@ class ChannelService:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         channel.deleted_at = utcnow()
-        await log_event(
-            db,
-            "channel.deleted",
-            {"channel_id": str(channel_id), "superadmin_override": is_superadmin_override},
-            channel_id=channel_id,
-            actor_user_id=actor_user_id,
-        )
         await enqueue_channel_event_outbox(
             db,
             uuid.uuid4(),
@@ -681,8 +698,15 @@ class ChannelService:
                 ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
             )
         )
-        for member_user_id in member_rows.scalars().all():
+        for member_user_id in sorted(member_rows.scalars().all(), key=str):
             await enqueue_broker_binding_outbox(db, channel_id, member_user_id, "unbind")
+        await log_event(
+            db,
+            "channel.deleted",
+            {"channel_id": str(channel_id), "superadmin_override": is_superadmin_override},
+            channel_id=channel_id,
+            actor_user_id=actor_user_id,
+        )
         await db.commit()
 
     @staticmethod
@@ -739,19 +763,19 @@ class ChannelService:
             raise AppError("join not allowed", 403, code="FORBIDDEN")
 
         db.add(membership)
-        await log_event(
-            db,
-            "membership.joined",
-            {"channel_id": str(channel_id), "user_id": str(user_id), "role": membership.role.value},
-            channel_id=channel_id,
-            actor_user_id=user_id,
-        )
         await ChannelService._enqueue_membership_update(
             db,
             channel_id,
             user_id,
             membership.role,
             reason="join",
+        )
+        await log_event(
+            db,
+            "membership.joined",
+            {"channel_id": str(channel_id), "user_id": str(user_id), "role": membership.role.value},
+            channel_id=channel_id,
+            actor_user_id=user_id,
         )
         await db.commit()
 
@@ -981,19 +1005,19 @@ class ChannelService:
 
         if not ChannelService._is_generic_invite(invite):
             invite.accepted_at = utcnow()
-        await log_event(
-            db,
-            "invite.accepted",
-            {"channel_id": str(invite.channel_id), "user_id": str(user_id)},
-            channel_id=invite.channel_id,
-            actor_user_id=user_id,
-        )
         await ChannelService._enqueue_membership_update(
             db,
             invite.channel_id,
             user_id,
             MembershipRole.member,
             reason="invite_accepted",
+        )
+        await log_event(
+            db,
+            "invite.accepted",
+            {"channel_id": str(invite.channel_id), "user_id": str(user_id)},
+            channel_id=invite.channel_id,
+            actor_user_id=user_id,
         )
         await db.commit()
 
@@ -1007,8 +1031,10 @@ class ChannelService:
         actor_id: UUID,
         target_id: UUID,
     ) -> ChannelMembership:
-        actor = await ChannelService.get_membership(db, channel_id, actor_id)
-        target = await ChannelService.get_membership(db, channel_id, target_id)
+        await ChannelService._get_channel_for_update(db, channel_id)
+        memberships = await ChannelService._get_memberships_for_update(db, channel_id, [actor_id, target_id])
+        actor = memberships.get(actor_id)
+        target = memberships.get(target_id)
         if not actor or not target:
             raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if not can_approve(actor.role, actor.admin_permissions):
@@ -1019,19 +1045,19 @@ class ChannelService:
         target.role = MembershipRole.member
         target.admin_permissions = None
         target.approved_at = utcnow()
-        await log_event(
-            db,
-            "membership.approved",
-            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
-            channel_id=channel_id,
-            actor_user_id=actor_id,
-        )
         await ChannelService._enqueue_membership_update(
             db,
             channel_id,
             target_id,
             MembershipRole.member,
             reason="approved",
+        )
+        await log_event(
+            db,
+            "membership.approved",
+            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
+            channel_id=channel_id,
+            actor_user_id=actor_id,
         )
         await db.commit()
 
@@ -1045,11 +1071,13 @@ class ChannelService:
         actor_id: UUID,
         target_id: UUID,
     ) -> ChannelMembership:
-        actor = await ChannelService.get_membership(db, channel_id, actor_id)
+        await ChannelService._get_channel_for_update(db, channel_id)
+        memberships = await ChannelService._get_memberships_for_update(db, channel_id, [actor_id, target_id])
+        actor = memberships.get(actor_id)
         if not ChannelService.membership_permissions(actor)["can_manage_members"]:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
-        target = await ChannelService.get_membership(db, channel_id, target_id)
+        target = memberships.get(target_id)
         if target:
             target.role = MembershipRole.member
             target.admin_permissions = None
@@ -1064,13 +1092,6 @@ class ChannelService:
                 invited_by_user_id=actor_id,
             )
             db.add(target)
-        await log_event(
-            db,
-            "membership.added",
-            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
-            channel_id=channel_id,
-            actor_user_id=actor_id,
-        )
         await ChannelService._enqueue_membership_update(
             db,
             channel_id,
@@ -1078,27 +1099,29 @@ class ChannelService:
             MembershipRole.member,
             reason="added",
         )
+        await log_event(
+            db,
+            "membership.added",
+            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
+            channel_id=channel_id,
+            actor_user_id=actor_id,
+        )
         await db.commit()
 
         return target
 
     @staticmethod
     async def promote_member(db: AsyncSession, channel_id: UUID, actor_id: UUID, target_id: UUID) -> ChannelMembership:
-        actor = await ChannelService.get_membership(db, channel_id, actor_id)
-        target = await ChannelService.get_membership(db, channel_id, target_id)
+        await ChannelService._get_channel_for_update(db, channel_id)
+        memberships = await ChannelService._get_memberships_for_update(db, channel_id, [actor_id, target_id])
+        actor = memberships.get(actor_id)
+        target = memberships.get(target_id)
         if not actor or not target:
             raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if not can_promote(actor.role, target.role):
             raise AppError("forbidden", 403, code="FORBIDDEN")
         target.role = MembershipRole.admin
         target.admin_permissions = normalize_admin_permissions(target.admin_permissions)
-        await log_event(
-            db,
-            "member.promoted",
-            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
-            channel_id=channel_id,
-            actor_user_id=actor_id,
-        )
         await ChannelService._enqueue_membership_update(
             db,
             channel_id,
@@ -1106,32 +1129,41 @@ class ChannelService:
             MembershipRole.admin,
             reason="promoted",
         )
+        await log_event(
+            db,
+            "member.promoted",
+            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
+            channel_id=channel_id,
+            actor_user_id=actor_id,
+        )
         await db.commit()
         return target
 
     @staticmethod
     async def demote_member(db: AsyncSession, channel_id: UUID, actor_id: UUID, target_id: UUID) -> ChannelMembership:
-        actor = await ChannelService.get_membership(db, channel_id, actor_id)
-        target = await ChannelService.get_membership(db, channel_id, target_id)
+        await ChannelService._get_channel_for_update(db, channel_id)
+        memberships = await ChannelService._get_memberships_for_update(db, channel_id, [actor_id, target_id])
+        actor = memberships.get(actor_id)
+        target = memberships.get(target_id)
         if not actor or not target:
             raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if not can_demote(actor.role, target.role):
             raise AppError("forbidden", 403, code="FORBIDDEN")
         target.role = MembershipRole.member
         target.admin_permissions = None
-        await log_event(
-            db,
-            "member.demoted",
-            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
-            channel_id=channel_id,
-            actor_user_id=actor_id,
-        )
         await ChannelService._enqueue_membership_update(
             db,
             channel_id,
             target_id,
             MembershipRole.member,
             reason="demoted",
+        )
+        await log_event(
+            db,
+            "member.demoted",
+            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
+            channel_id=channel_id,
+            actor_user_id=actor_id,
         )
         await db.commit()
         return target
@@ -1144,8 +1176,10 @@ class ChannelService:
         target_id: UUID,
         req: AdminPermissionsUpdateRequest,
     ) -> ChannelMembership:
-        actor = await ChannelService.get_membership(db, channel_id, actor_id)
-        target = await ChannelService.get_membership(db, channel_id, target_id)
+        await ChannelService._get_channel_for_update(db, channel_id)
+        memberships = await ChannelService._get_memberships_for_update(db, channel_id, [actor_id, target_id])
+        actor = memberships.get(actor_id)
+        target = memberships.get(target_id)
         if not actor or not target:
             raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if actor.role != MembershipRole.owner:
@@ -1168,6 +1202,13 @@ class ChannelService:
             current_permissions["can_edit_channel"] = req.can_edit_channel
         target.admin_permissions = current_permissions
 
+        await ChannelService._enqueue_membership_update(
+            db,
+            channel_id,
+            target_id,
+            MembershipRole.admin,
+            reason="admin_permissions_updated",
+        )
         await log_event(
             db,
             "member.permissions.updated",
@@ -1179,20 +1220,15 @@ class ChannelService:
             channel_id=channel_id,
             actor_user_id=actor_id,
         )
-        await ChannelService._enqueue_membership_update(
-            db,
-            channel_id,
-            target_id,
-            MembershipRole.admin,
-            reason="admin_permissions_updated",
-        )
         await db.commit()
         return target
 
     @staticmethod
     async def remove_member(db: AsyncSession, amqp: aio_pika.RobustConnection, channel_id: UUID, actor_id: UUID, target_id: UUID) -> None:
-        actor = await ChannelService.get_membership(db, channel_id, actor_id)
-        target = await ChannelService.get_membership(db, channel_id, target_id)
+        await ChannelService._get_channel_for_update(db, channel_id)
+        memberships = await ChannelService._get_memberships_for_update(db, channel_id, [actor_id, target_id])
+        actor = memberships.get(actor_id)
+        target = memberships.get(target_id)
         if not actor or not target:
             raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if not ChannelService.membership_permissions(actor)["can_manage_members"]:
@@ -1201,19 +1237,19 @@ class ChannelService:
             raise AppError("forbidden", 403, code="FORBIDDEN")
 
         await db.delete(target)
-        await log_event(
-            db,
-            "member.removed",
-            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
-            channel_id=channel_id,
-            actor_user_id=actor_id,
-        )
         await ChannelService._enqueue_membership_update(
             db,
             channel_id,
             target_id,
             None,
             reason="removed",
+        )
+        await log_event(
+            db,
+            "member.removed",
+            {"channel_id": str(channel_id), "target_user_id": str(target_id)},
+            channel_id=channel_id,
+            actor_user_id=actor_id,
         )
         await db.commit()
 
@@ -1225,25 +1261,26 @@ class ChannelService:
         channel_id: UUID,
         user_id: UUID,
     ) -> None:
-        membership = await ChannelService.get_membership(db, channel_id, user_id)
+        await ChannelService._get_channel_for_update(db, channel_id)
+        membership = (await ChannelService._get_memberships_for_update(db, channel_id, [user_id])).get(user_id)
         if not membership:
             raise AppError("membership not found", 404, code="MEMBERSHIP_NOT_FOUND")
         if membership.role == MembershipRole.owner:
             raise AppError("owner cannot leave channel without transferring ownership", 409, code="OWNER_CANNOT_LEAVE")
         await db.delete(membership)
-        await log_event(
-            db,
-            "membership.left",
-            {"channel_id": str(channel_id), "user_id": str(user_id)},
-            channel_id=channel_id,
-            actor_user_id=user_id,
-        )
         await ChannelService._enqueue_membership_update(
             db,
             channel_id,
             user_id,
             None,
             reason="left",
+        )
+        await log_event(
+            db,
+            "membership.left",
+            {"channel_id": str(channel_id), "user_id": str(user_id)},
+            channel_id=channel_id,
+            actor_user_id=user_id,
         )
         await db.commit()
 

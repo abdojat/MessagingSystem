@@ -166,6 +166,8 @@ class DeliveryService:
             # The API only resets outbox state; the worker remains responsible
             # for publishing so retry behavior stays in one place.
             DeliveryService._reset_for_manual_retry(outbox)
+            # Acquire the outbox row lock before the event advisory lock.
+            await db.flush()
             await log_event(
                 db,
                 "broker.manual_retry_requested",
@@ -204,12 +206,25 @@ class DeliveryService:
         ).all()
 
         items: list[DeliveryItemResponse] = []
+        audit_rows: list[tuple[Outbox, str, int]] = []
         for outbox, channel_slug in rows:
             previous_status = DeliveryService._status_value(outbox.status)
             previous_attempt_count = outbox.attempts
             # Bulk retry follows the same contract as retry_one: hand rows back
             # to the outbox worker instead of publishing from the admin request.
             DeliveryService._reset_for_manual_retry(outbox)
+            audit_rows.append((outbox, previous_status, previous_attempt_count))
+            items.append(DeliveryService._to_item(outbox, channel_slug))
+
+        if rows:
+            # Lock/update every selected outbox row before taking any event
+            # advisory lock. Multiple channel scopes are then locked in stable
+            # order so two bulk retries cannot invert them.
+            await db.flush()
+        for outbox, previous_status, previous_attempt_count in sorted(
+            audit_rows,
+            key=lambda item: (str(item[0].channel_id), str(item[0].id)),
+        ):
             await log_event(
                 db,
                 "broker.manual_retry_requested",
@@ -222,7 +237,6 @@ class DeliveryService:
                 channel_id=outbox.channel_id,
                 actor_user_id=actor_user_id,
             )
-            items.append(DeliveryService._to_item(outbox, channel_slug))
 
         if rows:
             await db.commit()

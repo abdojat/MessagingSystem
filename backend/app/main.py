@@ -13,6 +13,7 @@ from app.api.routes import admin, auth, channels, delivery, events, health, memb
 from app.core.config import get_settings
 from app.core.errors import AppError, default_error_code
 from app.core.logging import configure_logging
+from app.core.request_body_limit import RequestBodyLimitMiddleware
 from app.db.session import SessionLocal
 from app.mq.topology import ensure_topology
 from app.realtime.protocol import build_error
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Channels Backend", version="0.1.0", lifespan=lifespan)
 settings = get_settings()
+app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=settings.api_request_body_max_bytes)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
