@@ -182,6 +182,29 @@ new inconsistent write was rejected by PostgreSQL. Frontend typecheck and both
 Compose render checks passed. RabbitMQ failure was mocked; no live RabbitMQ
 outage test is claimed.
 
+## Post-Phase-7 Targeted Security Repairs
+
+`backend/tests/security/test_post_phase7_repairs.py` contains 21 focused cases
+for the two findings in `SECURITY_VERIFICATION_AFTER_PHASE7.md`:
+
+- direct, spoofed, trusted-proxy, and conservative malformed-forwarding client-IP behavior for WebSockets;
+- distinct connection limiter keys and independent fixed-window allowances for two clients behind one trusted Nginx peer;
+- missing/empty `ENVIRONMENT` failure, explicit development labels, strict unknown labels, secure production-like configuration, and proof that a missing environment cannot reach the development Fernet fallback.
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_post_phase7_repairs.py
+```
+
+Verified on 2026-08-11: the pre-fix reproduction produced `3 failed, 18 passed`.
+After the targeted repair, the focused file passed `21 passed`; the Phase 6 and
+Phase 7 files passed `42 passed, 1 warning`; and the complete suite passed
+`239 passed, 1 warning` against a disposable PostgreSQL 16 container. The
+warning remains the existing `passlib` access to deprecated
+`argon2.__version__` metadata. Frontend typecheck and direct/hardened Compose
+render checks also passed. Nginx configuration was unchanged, so no new
+`nginx -t` result is claimed for this repair.
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`

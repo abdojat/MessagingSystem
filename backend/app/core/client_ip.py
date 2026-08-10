@@ -2,12 +2,12 @@
 
 from ipaddress import ip_address, ip_network
 
-from starlette.requests import Request
+from starlette.requests import HTTPConnection
 
 from app.core.config import get_settings
 
 
-def get_client_ip(request: Request) -> str:
+def get_client_ip(connection: HTTPConnection) -> str:
     """Return a bounded client address, trusting forwarding only from configured peers.
 
     The hardened proxy overwrites ``X-Forwarded-For`` with one validated client
@@ -15,7 +15,8 @@ def get_client_ip(request: Request) -> str:
     ignores arbitrary forwarding headers.
     """
 
-    peer = request.client.host if request.client else "unknown"
+    connection_client = getattr(connection, "client", None)
+    peer = connection_client.host if connection_client else "unknown"
     settings = get_settings()
     try:
         peer_address = ip_address(peer)
@@ -26,7 +27,7 @@ def get_client_ip(request: Request) -> str:
     if not trusted:
         return peer_address.compressed
 
-    forwarded = request.headers.get("x-forwarded-for", "").strip()
+    forwarded = connection.headers.get("x-forwarded-for", "").strip()
     # The repository proxy deliberately sends one address, not a client-
     # controlled chain. Refuse ambiguous/malformed values instead of guessing.
     if not forwarded or "," in forwarded or len(forwarded) > 64:

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 
 from app.api.routes import admin, auth, channels, delivery, events, health, memberships, messages, users
+from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
 from app.core.errors import AppError, default_error_code
 from app.core.logging import configure_logging
@@ -129,8 +130,7 @@ async def websocket_endpoint_v1(websocket: WebSocket):
 async def _run_websocket(websocket: WebSocket) -> None:
     # Browsers present only a short-lived, single-use opaque ticket. Raw access
     # JWT query parameters, headers, and first-frame credentials are rejected.
-    websocket_client = getattr(websocket, "client", None)
-    client_ip = websocket_client.host if websocket_client else "unknown"
+    client_ip = get_client_ip(websocket)
     websocket_rate_key = f"rl:websocket:connect:{client_ip}"
     app_redis = getattr(app.state, "redis", None)
     if app_redis is None:

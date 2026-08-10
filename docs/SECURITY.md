@@ -90,7 +90,7 @@
 - The repository keeps `.env.example` as documentation for required settings.
 - A local `.env` file may be used for development, but it should remain untracked.
 - In the current repository state, `git ls-files` does not show any tracked `.env` file.
-- Only `dev`, `development`, `local`, and `test` opt into development secret behavior. Every other normalized label is production-like, so values such as `live`, `release`, `prod-eu`, or an arbitrary typo refuse startup when `JWT_SECRET` is absent/placeholder/weak or when enabled message encryption lacks a valid Fernet key.
+- `ENVIRONMENT` is required and normalized; missing or empty values fail configuration instead of selecting a default. Only `dev`, `development`, `local`, and `test` opt into development secret behavior. Every other normalized label is production-like, so values such as `live`, `release`, `prod-eu`, or an arbitrary typo refuse startup when `JWT_SECRET` is absent/placeholder/weak or when enabled message encryption lacks a valid Fernet key. The deterministic development Fernet fallback is therefore unreachable unless a development-like environment is explicitly selected.
 
 ## Database lock ordering
 
@@ -115,6 +115,7 @@
 ## Abuse Resistance and Resource Bounds
 - Rate limits are grouped into auth, search, message-write, media, channel-management, WebSocket, sync, and administration policies. Defaults are configurable with `RATE_LIMIT_*` environment variables.
 - Login, registration, refresh, WebSocket ticket/connection attempts, search, message mutations, upload create/PUT/GET, channel/member/invite mutations, sync, and superadmin mutations are covered by the relevant group.
+- HTTP and WebSocket abuse controls share one conservative client-IP resolver. Direct or untrusted peers use the immediate peer address and cannot spoof `X-Forwarded-For`; a peer inside `TRUSTED_PROXY_CIDRS` may supply exactly one valid, bounded forwarded IP. Missing, malformed, oversized, or comma-separated forwarding values fall back to the proxy peer. This keeps `rl:websocket:connect:<client-ip>` buckets isolated for clients behind the repository Nginx proxy.
 - Redis is the normal distributed rate-limit store. One Lua evaluation atomically increments a fixed-window counter, installs the TTL on the first hit, repairs a legacy no-TTL key, and returns the count/TTL without extending the window on later hits.
 - If Redis fails, sensitive operations use a capped in-process fixed-window fallback instead of becoming unlimited. Active state is never evicted to admit attacker-controlled churn. Expired windows are reclaimed through a bounded expiry heap; at `RATE_LIMIT_LOCAL_MAX_KEYS` saturation (default 10,000), unseen sensitive keys are denied until capacity expires. Ordinary `failure_policy=allow` reads remain available and do not consume this fallback.
 - The emergency fallback is deliberately per-process: it prevents unlimited traffic to one instance but is weaker than healthy Redis across several backend replicas. A Redis response-loss/uncertain-execution error can conservatively consume both a Redis hit and a local allowance; recovery resumes the distributed Redis counters on the next successful request.

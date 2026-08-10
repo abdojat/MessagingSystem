@@ -1,10 +1,18 @@
 # Stabilization Status
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 ## Summary
 
-The latest pass completes the scoped Phase 7 application/database fixes for P5V-03, P5V-04, AV-09, and AV-10. Security-sensitive transactions now follow one documented lock order; worker delivery diagnostics cannot roll back authoritative retry/dead-letter state; authentication fields and ordinary raw bodies are bounded without buffering upload streams; PostgreSQL enforces attachment/message channel consistency; and only explicit development/test environment labels permit placeholder secrets. AV-11 production redesign, email verification delivery, distributed limits across backend replicas, live broker/proxy load testing, httpOnly-cookie migration, attachment encryption, and multi-socket presence reliability remain explicitly deferred.
+The latest targeted repair closes the two findings from the independent post-Phase-7 source review. HTTP and WebSocket connection controls now share trusted client-IP semantics, so proxied clients do not consume one Nginx-peer WebSocket bucket. `ENVIRONMENT` is now required, so missing or empty configuration cannot silently opt into development secrets or encryption fallback. The prior Phase 7 application/database controls remain in place. AV-11 production redesign, email verification delivery, distributed limits across backend replicas, live broker/proxy load testing, httpOnly-cookie migration, attachment encryption, and multi-socket presence reliability remain explicitly deferred.
+
+## Post-Phase-7 Targeted Security Repair - 2026-08-11
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Proxied WebSocket client-IP isolation (R7-01) | Confirmed and fixed | `_run_websocket()` uses the shared `HTTPConnection` resolver; direct/untrusted/trusted/malformed cases, distinct proxy-client keys, and bucket isolation are covered in `test_post_phase7_repairs.py` | Redis-outage fallback and per-socket quotas remain per backend process; no live multi-client proxy flood was run | Keep the fixed Nginx `/32` and sanitized single forwarding header aligned with `TRUSTED_PROXY_CIDRS` |
+| Explicit environment requirement (R7-02) | Confirmed and fixed | `Settings.environment` has no default; missing/empty fail; explicit dev/test labels work; unknown labels remain strict; missing environment cannot reach the development Fernet fallback | AV-11 secret distribution, KMS, and key rotation remain outside scope | Keep `ENVIRONMENT` explicit in every local/deployment environment and retain `.env.example` guidance |
+| Validation | Passed | Focused repair `21 passed`; Phase 6–7 `42 passed, 1 warning`; complete backend `239 passed, 1 warning`; frontend typecheck; direct/hardened Compose render; `git diff --check` | Existing passlib/argon2 warning; deterministic component tests are not a live proxy/load certification | Run the normal supervisor demo; treat production hardening as a separate phase |
 
 ## Security Hardening Phase 7 - 2026-08-10
 

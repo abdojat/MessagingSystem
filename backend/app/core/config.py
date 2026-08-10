@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "channels-backend"
-    environment: str = "dev"
+    environment: str
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/channels"
     rabbitmq_url: str = "amqp://guest:guest@rabbitmq:5672/"
