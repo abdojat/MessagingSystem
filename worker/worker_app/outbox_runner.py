@@ -5,7 +5,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import aio_pika
 from sqlalchemy import text
@@ -147,7 +147,7 @@ async def process_outbox_batch(
         body = _payload_to_body(rec["payload"])
         try:
             if rec["aggregate_type"] == "broker_binding":
-                await _apply_broker_binding(exchange, rec["payload"], settings)
+                await _apply_broker_binding(db, exchange, rec["payload"], settings)
             else:
                 await _publish_to_exchange(exchange, rec["routing_key"], body)
             await _mark_published(db, rec["id"])
@@ -176,23 +176,114 @@ async def _publish_to_exchange(exchange: aio_pika.abc.AbstractExchange, routing_
 
 
 async def _apply_broker_binding(
+    db: AsyncSession,
     exchange: aio_pika.abc.AbstractExchange,
     payload: dict[str, Any],
     settings: Settings,
-) -> None:
-    action = str(payload.get("action") or "")
-    username = str(payload.get("username") or "").strip()
-    channel_slug = str(payload.get("channel_slug") or "").strip()
-    if action not in {"bind", "unbind"}:
-        raise ValueError("invalid broker binding action")
+) -> str:
+    # Pre-Phase-4 rows describe historical actions and have no generation.
+    # They are deliberately acknowledged as superseded; migration 0019 creates
+    # a current desired-state snapshot for every known pair.
+    if not isinstance(payload, dict) or payload.get("generation") is None:
+        return "stale_legacy"
+    try:
+        user_id = UUID(str(payload.get("user_id")))
+        channel_id = UUID(str(payload.get("channel_id")))
+        command_generation = int(payload.get("generation"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid broker binding state reference") from exc
+
+    # Every worker and every retry serializes on the durable desired-state row.
+    # Application membership/topology changes update the same row under lock,
+    # so the DB check and Rabbit operation cannot race a committed generation.
+    state_row = await db.execute(
+        text(
+            """
+            SELECT bs.generation,
+                   bs.desired_bound,
+                   bs.desired_routing_key,
+                   bs.routing_keys,
+                   c.channel_slug,
+                   c.deleted_at,
+                   u.username,
+                   cm.role::text AS membership_role
+            FROM broker_binding_states AS bs
+            JOIN channels AS c ON c.id = bs.channel_id
+            JOIN users AS u ON u.id = bs.user_id
+            LEFT JOIN channel_memberships AS cm
+              ON cm.channel_id = bs.channel_id
+             AND cm.user_id = bs.user_id
+            WHERE bs.channel_id = :channel_id
+              AND bs.user_id = :user_id
+            FOR UPDATE OF bs
+            """
+        ),
+        {"channel_id": channel_id, "user_id": user_id},
+    )
+    state = state_row.mappings().one_or_none()
+    if state is None:
+        return "stale_missing_state"
+    current_generation = int(state["generation"])
+    if command_generation != current_generation:
+        return "stale_generation"
+
+    username = str(state["username"] or "").strip()
+    channel_slug = str(state["channel_slug"] or "").strip()
     if not SAFE_IDENTIFIER_RE.fullmatch(username) or not SAFE_IDENTIFIER_RE.fullmatch(channel_slug):
         raise ValueError("unsafe broker binding identifier")
+
+    current_routing_key = f"channel.{channel_slug}"
+    known_routing_keys: list[str] = []
+    for value in [*(state["routing_keys"] or []), state["desired_routing_key"], current_routing_key]:
+        routing_key = str(value or "").strip()
+        if not routing_key.startswith("channel."):
+            raise ValueError("unsafe broker binding routing key")
+        routing_slug = routing_key.removeprefix("channel.")
+        if not SAFE_IDENTIFIER_RE.fullmatch(routing_slug):
+            raise ValueError("unsafe broker binding routing key")
+        if routing_key not in known_routing_keys:
+            known_routing_keys.append(routing_key)
+
+    # PostgreSQL membership/channel state is an additional fail-safe over the
+    # state projection. A malformed/stale desired flag can never grant access.
+    membership_role = str(state["membership_role"] or "")
+    actual_desired_bound = bool(
+        state["deleted_at"] is None and membership_role in {"owner", "admin", "member"}
+    )
     queue, _ = await declare_user_queue(exchange.channel, username, settings)
-    routing_key = f"channel.{channel_slug}"
-    if action == "bind":
-        await queue.bind(exchange, routing_key=routing_key)
+    if actual_desired_bound:
+        for routing_key in known_routing_keys:
+            if routing_key != current_routing_key:
+                await queue.unbind(exchange, routing_key=routing_key)
+        await queue.bind(exchange, routing_key=current_routing_key)
     else:
-        await queue.unbind(exchange, routing_key=routing_key)
+        for routing_key in known_routing_keys:
+            await queue.unbind(exchange, routing_key=routing_key)
+
+    # Rabbit operations happen before this update. A process crash rolls back
+    # the DB transaction, so the retry repeats the idempotent full projection.
+    await db.execute(
+        text(
+            """
+            UPDATE broker_binding_states
+            SET desired_bound = :desired_bound,
+                desired_routing_key = :routing_key,
+                routing_keys = CAST(:routing_keys AS jsonb),
+                reconciled_generation = generation,
+                updated_at = now()
+            WHERE channel_id = :channel_id
+              AND user_id = :user_id
+            """
+        ),
+        {
+            "desired_bound": actual_desired_bound,
+            "routing_key": current_routing_key,
+            "routing_keys": json.dumps([current_routing_key]),
+            "channel_id": channel_id,
+            "user_id": user_id,
+        },
+    )
+    return "applied_bound" if actual_desired_bound else "applied_unbound"
 
 
 async def _publish_to_dead_letter_exchange(

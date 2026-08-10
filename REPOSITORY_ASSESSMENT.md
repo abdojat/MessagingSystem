@@ -4,7 +4,7 @@ Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
 
-This report is evidence-based and references the current codebase. Last updated after Phase 3 abuse/reliability hardening on 2026-08-10.
+This report is evidence-based and references the current codebase. Last updated after Phase 4 P0 security hardening on 2026-08-10.
 
 ## 1. Executive Summary
 
@@ -19,7 +19,7 @@ It does more than a toy chat app:
 - It has a substantial Next.js frontend for login, channel management, publishing, membership control, and event logs.
 - It implements password hashing, JWT auth, role-based authorization, and Fernet message encryption at rest.
 - It supports protected photo/video/audio attachments with server-derived attachment metadata and upload audit events.
-- It now has grouped Redis-outage-safe abuse limits, bounded logical messages/protocol arrays, idempotent seen/reaction changes, normalized attachment authorization, basic account quotas, bounded broker queues, durable membership binding commands, and paced Redis fanout retries.
+- It now has grouped Redis-outage-safe abuse limits, bounded logical messages/protocol arrays and `/sync` materialization, idempotent seen/reaction changes, normalized attachment authorization, streaming/concurrency-bounded downloads, basic account quotas, bounded broker queues, versioned broker desired state, pre-decryption WebSocket membership generations, and paced Redis fanout retries.
 - It has a separate, environment-bootstrapped global superadmin privilege with guarded global audit, account/session, channel lifecycle, and delivery controls. The console API now returns allowlisted event summaries instead of raw payloads, marks sensitive list responses non-cacheable, and supports ranked/escaped search plus server-side filters and selectable pagination. Audit rows recover channel context from safe message/outbox/upload references where the canonical event field is absent, show the unique slug alongside the channel name, link channels to their existing view route, and link actor identities to the appropriate profile page.
 
 Biggest strengths:
@@ -35,6 +35,7 @@ Biggest risks:
 - Security is not strong enough for a serious deployment.
 - Frontend auth tokens are browser-managed, which is acceptable for a demo but not production-grade.
 - Runtime verification still depends on the full Docker stack, even though the demo verifier now exercises the live WebSocket path when available with REST backfill fallback.
+- Phase 4 broker ordering and missed-Redis-removal scenarios are deterministic component tests rather than a live multi-worker outage run; protected-download concurrency is per backend process and production proxy limits remain external.
 - There is no full Merkle tree, external hash anchoring, or anomaly detection feature in the codebase.
 - Superadmin authentication is still password/JWT based without MFA or an external privileged-access workflow, so it remains appropriate for the university MVP rather than production operations.
 
@@ -162,14 +163,14 @@ flowchart LR
 |---|---|---|---|---|---|
 | 1. Topic/channel creation | Complete | [`backend/app/services/channel_service.py`](backend/app/services/channel_service.py) `ChannelService.create_channel`; [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`; [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py) `ChannelCreateRequest` | Safe identifier validation exists and is backed by database constraints; docs should keep the broker-safe policy explicit | High | Keep the current safe identifier policy and document it clearly |
 | 2. Publishing messages to a specific channel | Complete | [`backend/app/services/message_service.py`](backend/app/services/message_service.py) `publish_message`; [`backend/app/api/routes/messages.py`](backend/app/api/routes/messages.py) `publish_message`; outbox in [`backend/app/services/outbox_service.py`](backend/app/services/outbox_service.py) `enqueue_message_outbox`; attachment-only photo/video/audio publishing and attachment-reference validation are covered in [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) | Reply-only member publish path is a custom exception; broker delivery still benefits from more integration coverage | High | Add broker/WebSocket integration tests and document the reply exception clearly |
-| 3. Automatic delivery to subscribers | Mostly complete | [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) `_consume_user`; [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py) `_redis_forward_loop`; durable membership binding commands in the outbox worker; `scripts/verify_demo_flow.py`; `scripts/verify_approval_flow.py` | Join/approval desired state is retryable and Redis requeue is paced, but there is still no browser e2e test or live CI broker/Redis outage job | High | Keep the verifiers in the supervisor path and add a CI broker/WebSocket outage integration test later |
+| 3. Automatic delivery to subscribers | Mostly complete | Worker Rabbit/Redis fanout; generation-aware `WSManager`; versioned `broker_binding_states`; stale-command/active-delivery Phase 4 tests; demo/approval verifiers | Desired state and final plaintext authorization are hardened, but there is still no browser e2e test or live multi-worker broker/Redis outage job | High | Keep the verifiers in the supervisor path and add a CI broker/WebSocket outage integration test later |
 | 4. Channel management interface/API | Complete | [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`, `list_channels`, `get_channel`, `patch_channel`, `delete_channel`, `channel_stats` | Duplicate root routes are also exposed by [`backend/app/main.py`](backend/app/main.py) | Medium | Keep only one public API surface or document the duplicate compatibility routes |
 | 5. Subscriber management interface/API | Complete | [`backend/app/api/routes/memberships.py`](backend/app/api/routes/memberships.py) `join_channel`, `leave_channel`, `list_members`, `list_pending_requests`, `create_invite`, `accept_invite`, `approve_member`, `add_member_direct`, `promote_member`, `demote_member`, `update_admin_permissions`, `remove_member` | Complex permission matrix; not all flows are exercised by tests | Medium | Add integration tests for join/approve/invite/promote/demote/remove paths |
 | 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) session-bound access checks, row-locked refresh rotation/replay detection, idle/absolute lifetime, and revocation; [`backend/app/services/ws_ticket_service.py`](backend/app/services/ws_ticket_service.py) one-time tickets; migration `0017_auth_session_hardening`; Phase 2 regressions | Frontend still uses a JS-managed access-token cookie plus `localStorage` refresh token storage, which is fine for the demo but not production-grade | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
 | 7. Authorization/permissions | Complete | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership/avatar/wallpaper-reference rules before returning bytes | Browser token handling remains the larger remaining security caveat | High | Keep backend authorization strong and document the client-side limitation honestly |
 | 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; encryption key must stay out of tracked files | High | Treat encryption key as an external secret only and keep the env story explicit |
 | 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message/upload services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py) hash-chain verification | Event logging is not guaranteed if the logging path fails; event visibility and integrity verification are limited to channel managers | Medium | Keep the log path best-effort, document the limitation, and backfill legacy event hashes before final demos |
-| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | [`backend/app/mq/topology.py`](backend/app/mq/topology.py) `ensure_topology`; bounded queues in [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py); event publishing and idempotent bind/unbind application in [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py); demo/delivery verifiers; Delivery Monitor APIs/UI | DB membership and desired broker binding state now commit together, but the asynchronous command may remain retrying/dead-lettered during a prolonged outage and the DLQ path still needs a real broker-outage integration test | High | Keep the live verifier and delivery verifier; add broker outage/reconciliation integration coverage later |
+| 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | Bounded topology; versioned desired state/migration `0019`; worker generation check plus row lock/current DB authorization; reconnect and global repair command; demo/delivery verifiers; Delivery Monitor | Current state dominates stale commands, but asynchronous current reconciliation can remain retrying/dead-lettered during a prolonged outage and still needs a live outage test | High | Keep the verifiers and add live broker outage/recovery coverage later |
 | 11. Docker/environment setup | Complete | [`docker-compose.yml`](docker-compose.yml); [`backend/Dockerfile`](backend/Dockerfile); [`worker/Dockerfile`](worker/Dockerfile); [`frontend/Dockerfile`](frontend/Dockerfile) | There are manual steps and a few platform caveats in docs | Medium | Keep the env story explicit and keep the compose path as the canonical run path |
 | 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md); [`docs/SECURITY.md`](docs/SECURITY.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
 | 13. Testing | Mostly complete | [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) now covers authz, uploads, media attachments, avatar/wallpaper URL and upload rules, identifier validation, and smoke flow; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) is a manual verifier | No frontend tests, no broker integration tests, no load tests | High | Add at least one RabbitMQ/WebSocket integration test and one frontend smoke test; keep the demo verifier as a separate tool |
@@ -183,8 +184,8 @@ flowchart LR
 
 - Starts in [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`.
 - Delegates to [`backend/app/services/channel_service.py`](backend/app/services/channel_service.py) `ChannelService.create_channel`.
-- Creates the channel row, counter row, owner membership, `channel.created` event, and a durable `broker_binding.bind` outbox command.
-- Commits those records together; the worker applies the idempotent queue binding with normal retry/dead-letter tracking.
+- Creates the channel row, counter row, owner membership, `channel.created` event, versioned broker desired state, and a `broker_binding.reconcile` outbox snapshot.
+- Commits those records together; the worker applies the current projection with normal retry/dead-letter tracking.
 
 ### Message Publish
 
@@ -204,7 +205,7 @@ flowchart LR
 
 - [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py) reads pending outbox rows.
 - It publishes persistent AMQP messages to the `ex.channels` topic exchange.
-- For `broker_binding` rows it applies idempotent queue bind/unbind desired state instead of publishing an application event.
+- For `broker_binding` rows it locks the desired-state pair, rejects stale generations, re-derives current authorization, and applies/removes routing keys instead of publishing an application event.
 - It marks successful rows `published`, schedules retryable failures as `retry_scheduled`, and marks exhausted failures `dead_lettered`.
 - Terminal dead-letter rows are also mirrored to RabbitMQ `q.dead.messages` when possible.
 - [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) watches online users and republishes payloads to Redis pub/sub.
@@ -218,7 +219,7 @@ flowchart LR
   - direct add,
   - approval,
   - initial WebSocket connect.
-- Those flows persist the desired bind/unbind action in PostgreSQL; the worker applies it. Initial WebSocket connect also performs idempotent reconciliation for currently approved memberships.
+- Those flows update versioned desired state in PostgreSQL; the worker applies it. Initial WebSocket connect re-enqueues both desired and undesired states known for the user.
 
 ### Message Reception
 
@@ -242,8 +243,8 @@ flowchart LR
 ### Where the Chain Breaks
 
 - The system still benefits from a strict broker-safe identifier policy, even though usernames and upload paths are now sanitized.
-- Broker binding application is asynchronous. PostgreSQL membership and the desired bind/unbind command are atomic, but an exhausted/dead-lettered command still needs operator retry or later WebSocket reconciliation.
-- WebSocket subscription state is refreshed explicitly after joins and targeted membership updates; approval-after-connect is covered by `scripts/verify_approval_flow.py`.
+- Broker binding application is asynchronous. PostgreSQL membership and versioned desired state are atomic, but an exhausted current reconciliation still needs operator retry, reconnect, or `python -m app.db.reconcile_broker_bindings`.
+- WebSocket plaintext forwarding checks membership generations before decryption. Matching/older queued events can use the one-second default cache; newly published post-change events force immediate DB refresh.
 
 ## 5. Backend Code Quality Review
 
@@ -408,7 +409,9 @@ flowchart LR
 - Upload downloads are authenticated and authorized; owners and members of the attached channel can access content.
 - Upload creation, content storage, content access, and size/checksum store failures are logged; attachment publish requests only accept upload IDs and derive metadata server-side.
 - Upload PUT bodies are streamed with bounded size/checksum validation, failure cleanup, row-locked finalization, and immutable stored bytes.
+- Upload GET bodies use `FileResponse` streaming and per-user/per-backend concurrency leases that release on completion/cancellation.
 - REST `/sync` membership updates are scoped to approved channels plus self-targeted membership changes, including post-removal notification.
+- REST `/sync` message queries use one decreasing global row budget and SQL `LIMIT`, with deterministic channel/sequence cursors.
 - Empty WebSocket subscription sets reject ordinary channel traffic while self-targeted membership removal remains deliverable.
 - Pending members are denied private read-derived state, and production/prod/staging reject unsafe JWT or encryption-key configuration at startup.
 - SVG uploads are rejected to keep protected media rendering focused on ordinary photo/video/audio content.
@@ -562,6 +565,7 @@ The frontend is real and fairly complete.
 - `scripts/verify_demo_flow.py` and `scripts/verify_approval_flow.py` are the current supervisor-facing WebSocket verifiers; rerun them against a live Docker stack before final review.
 - The new migration is `0013_event_integrity`; a live Alembic upgrade was not separately run in this pass, but `docker compose config` passed and backend tests validated the model-level schema path.
 - On 2026-08-10, Phase 1 security regressions passed `27` tests, the existing upload/sync-focused group passed `29`, and the complete backend suite passed `105` tests against a dedicated PostgreSQL 16 container; `docker compose config --quiet` and `git diff --check` also passed. One existing passlib/argon2 deprecation warning remains.
+- On 2026-08-10, Phase 4 P0 regressions passed `15` tests and the complete backend suite passed `158` tests against isolated PostgreSQL 16. Fresh migration through 0019 and an upgrade from 0018 with active/removed historical broker rows passed. No live multi-worker RabbitMQ ordering or Redis-loss scenario was run.
 
 ### Practical Testing Plan
 

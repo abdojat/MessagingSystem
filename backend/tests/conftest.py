@@ -10,6 +10,7 @@ from app.core import encryption
 from app.core.config import get_settings
 from app.db.models import Base
 from app.services.rate_limit_service import RateLimitService
+from app.services.download_service import protected_download_limiter
 
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@postgres:5432/channels")
@@ -23,6 +24,7 @@ def _clear_settings_cache() -> None:
     get_settings.cache_clear()
     encryption._build_fernet.cache_clear()
     RateLimitService.reset_local_for_tests()
+    protected_download_limiter.reset_for_tests()
 
 
 @pytest_asyncio.fixture
@@ -58,13 +60,16 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             )
             await conn.execute(text("ALTER TABLE user_sessions ALTER COLUMN absolute_expires_at SET NOT NULL"))
             await conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS replay_detected_at timestamptz"))
+            await conn.execute(
+                text("ALTER TABLE channels ADD COLUMN IF NOT EXISTS membership_generation bigint NOT NULL DEFAULT 1")
+            )
     except Exception as exc:
         await engine.dispose()
         pytest.skip(f"PostgreSQL test database is not reachable for DATABASE_URL={database_url!r}: {exc}")
     session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with session_maker() as session:
         # Isolate test cases while reusing a migrated schema.
-        await session.execute(text("TRUNCATE TABLE outbox, events, user_channel_state, pinned_messages, message_reactions, message_attachments, messages, channel_invites, channel_memberships, channel_counters, channels, user_sessions, users RESTART IDENTITY CASCADE"))
+        await session.execute(text("TRUNCATE TABLE outbox, events, user_channel_state, pinned_messages, message_reactions, message_attachments, messages, channel_invites, broker_binding_states, channel_memberships, channel_counters, channels, user_sessions, users RESTART IDENTITY CASCADE"))
         await session.commit()
         yield session
     await engine.dispose()

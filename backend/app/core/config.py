@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     max_pending_uploads_per_user: int = Field(default=10, ge=1)
     max_stored_upload_bytes_per_user: int = Field(default=1024 * 1024 * 1024, ge=1)
     max_websocket_connections_per_user: int = Field(default=5, ge=1, le=100)
+    max_concurrent_downloads_per_user: int = Field(default=3, ge=1, le=100)
+    # Matching membership generations avoid a database lookup for each normal
+    # realtime message. The short TTL bounds legacy/pre-removal queued events
+    # that do not force an immediate generation refresh.
+    ws_membership_auth_cache_ttl_seconds: float = Field(default=1.0, ge=0.0, le=5.0)
 
     rabbit_user_queue_expires_ms: int = Field(default=7 * 24 * 60 * 60 * 1000, ge=60_000)
     rabbit_user_queue_message_ttl_ms: int = Field(default=24 * 60 * 60 * 1000, ge=1_000)

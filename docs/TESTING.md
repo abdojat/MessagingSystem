@@ -64,6 +64,37 @@ Verified on 2026-08-10 against isolated PostgreSQL 16: `19 passed, 1 warning`. F
 
 The broker-binding and Redis-outage tests are deterministic fake-broker/fake-Redis checks of retry state, arguments, and backoff. They are not claimed as a live RabbitMQ/Redis outage integration test.
 
+## Security Hardening Phase 4
+
+`backend/tests/security/test_phase4_p0_hardening.py` contains 15 focused regressions:
+
+- `test_old_bind_generation_cannot_beat_newer_unbind`: delayed old bind is rejected after a newer unbind generation.
+- `test_old_unbind_generation_cannot_beat_newer_rejoin`: delayed old unbind cannot remove a legitimate newer rejoin.
+- `test_duplicate_current_generation_is_idempotent`: duplicate current projection is harmless.
+- `test_worker_crash_after_rabbit_action_retries_full_projection_safely`: rollback after Rabbit success repeats safely.
+- `test_missed_membership_event_cannot_deliver_or_decrypt_post_removal_message`: lost Redis removal does not expose plaintext.
+- `test_active_member_refreshes_generation_and_receives_realtime_message`: generation refresh preserves legitimate delivery.
+- `test_slug_delete_and_restore_use_same_versioned_reconciliation`: all related topology paths use desired state.
+- `test_sync_large_single_channel_materializes_only_global_limit`: 10,000 missed rows with `limit=100` materialize 100.
+- `test_sync_many_channels_uses_one_decreasing_global_row_budget`: 100 channels share one 500-row budget and deterministic order.
+- `test_sync_next_cursor_has_no_skip_or_duplicate`: successive sequence cursors neither skip nor duplicate.
+- `test_sync_arbitrary_pending_removed_and_outsider_cursors_return_no_history`: cursor IDs do not bypass authorization.
+- `test_protected_download_uses_chunked_file_response_without_read_bytes`: multiple bounded ASGI chunks are sent without `Path.read_bytes`.
+- `test_protected_download_authorization_blocks_pending_removed_and_outsider_before_stream`: denial happens before streaming/admission.
+- `test_download_concurrency_limit_allows_boundary_and_rejects_one_above`: the per-user lease boundary is race-safe.
+- `test_aborted_stream_releases_download_slot`: cancellation releases the lease for reuse.
+
+Run:
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_phase4_p0_hardening.py
+```
+
+Verified on 2026-08-10 against isolated PostgreSQL 16: `15 passed, 1 warning`; the complete backend suite passed with `158 passed, 1 warning`. Fresh migration through `0019_phase4_p0_hardening` passed. A separate upgrade from revision 0018 with one active member and one already-removed historical binding produced desired `BOUND`/`UNBOUND` states, retained both old/current routing keys, and enqueued two current reconcile rows.
+
+The broker-ordering and missed-Redis-notification tests are deterministic simulations. No live multi-worker RabbitMQ ordering or live Redis-loss test is claimed. Download concurrency is per backend process; proxy bandwidth limits are outside the application test boundary.
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`

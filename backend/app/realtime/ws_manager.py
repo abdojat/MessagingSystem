@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from contextlib import suppress
 from datetime import datetime
 from typing import Any
@@ -46,6 +47,8 @@ class WSManager:
         self._redis = redis
         self._amqp = amqp
         self._subscriptions: dict[int, set[str]] = {}
+        self._subscription_generations: dict[int, dict[str, int]] = {}
+        self._subscription_checked_at: dict[int, dict[str, float]] = {}
         self._connections: dict[UUID, dict[int, WebSocket]] = {}
         self._session_connections: dict[UUID, dict[int, WebSocket]] = {}
         self._socket_sessions: dict[int, UUID] = {}
@@ -88,9 +91,15 @@ class WSManager:
                 await websocket.accept()
             await mark_user_online(self._redis, username)
             # Refresh broker bindings on connect so users who were offline during a
-            # membership change still have the correct durable queues.
+            # membership change get a durable desired-state reconciliation row.
             await self._ensure_user_bindings(user_id, username)
-            self._subscriptions[id(websocket)] = set(await self._member_channel_ids(user_id))
+            channel_states = await self._member_channel_states(user_id)
+            self._subscriptions[id(websocket)] = set(channel_states)
+            self._subscription_generations[id(websocket)] = dict(channel_states)
+            checked_at = time.monotonic()
+            self._subscription_checked_at[id(websocket)] = {
+                channel_id: checked_at for channel_id in channel_states
+            }
         except Exception:
             sockets = self._connections.get(user_id, {})
             sockets.pop(id(websocket), None)
@@ -102,6 +111,8 @@ class WSManager:
 
     async def disconnect(self, websocket: WebSocket, username: str) -> None:
         self._subscriptions.pop(id(websocket), None)
+        self._subscription_generations.pop(id(websocket), None)
+        self._subscription_checked_at.pop(id(websocket), None)
         getattr(self, "_closing_sockets", set()).discard(id(websocket))
         for user_id, sockets in list(self._connections.items()):
             sockets.pop(id(websocket), None)
@@ -193,14 +204,20 @@ class WSManager:
         await websocket.close(code=4001, reason="authentication expired")
 
     async def _member_channel_ids(self, user_id: UUID) -> list[str]:
+        return list(await self._member_channel_states(user_id))
+
+    async def _member_channel_states(self, user_id: UUID) -> dict[str, int]:
         async with self._session_factory() as db:
             rows = await db.execute(
-                select(ChannelMembership.channel_id).where(
+                select(ChannelMembership.channel_id, Channel.membership_generation)
+                .join(Channel, Channel.id == ChannelMembership.channel_id)
+                .where(
                     ChannelMembership.user_id == user_id,
                     ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+                    Channel.deleted_at.is_(None),
                 )
             )
-            return [str(cid) for cid in rows.scalars().all()]
+            return {str(channel_id): int(generation) for channel_id, generation in rows.all()}
 
     async def _member_channel_slugs(self, user_id: UUID) -> list[str]:
         async with self._session_factory() as db:
@@ -216,14 +233,12 @@ class WSManager:
             return [str(slug) for slug in rows.scalars().all()]
 
     async def _ensure_user_bindings(self, user_id: UUID, username: str) -> None:
-        channel_slugs = await self._member_channel_slugs(user_id)
-        amqp_channel = await self._amqp.channel()
-        try:
-            await ensure_user_queue(amqp_channel, username)
-            for channel_slug in channel_slugs:
-                await bind_user_channel(amqp_channel, username, channel_slug)
-        finally:
-            await amqp_channel.close()
+        _ = username
+        from app.services.outbox_service import enqueue_user_broker_binding_reconciliation
+
+        async with self._session_factory() as db:
+            await enqueue_user_broker_binding_reconciliation(db, user_id)
+            await db.commit()
 
     async def _send_history(
         self,
@@ -424,12 +439,18 @@ class WSManager:
         except Exception as exc:
             await websocket.send_json(build_error("invalid subscribe payload", "VALIDATION_ERROR", request_id, {"error": str(exc)}))
             return
-        allowed = set(await self._member_channel_ids(user_id))
+        allowed_states = await self._member_channel_states(user_id)
+        allowed = set(allowed_states)
         wanted = {str(cid) for cid in req.channel_ids}
         # A client may ask for any channel id, but realtime subscriptions are
         # intersected with current membership before history is returned.
         granted = sorted(list(wanted & allowed))
         self._subscriptions[id(websocket)] = set(granted)
+        self._subscription_generations[id(websocket)] = {
+            channel_id: allowed_states[channel_id] for channel_id in granted
+        }
+        checked_at = time.monotonic()
+        self._subscription_checked_at[id(websocket)] = {channel_id: checked_at for channel_id in granted}
         await self._send_history(websocket, user_id, granted, from_seq_id=req.from_seq_id, request_id=request_id)
 
     async def _handle_unsubscribe(self, websocket: WebSocket, payload: dict[str, Any], request_id: UUID | None) -> None:
@@ -439,8 +460,13 @@ class WSManager:
             await websocket.send_json(build_error("invalid unsubscribe payload", "VALIDATION_ERROR", request_id, {"error": str(exc)}))
             return
         current = self._subscriptions.get(id(websocket), set())
+        generations = self._subscription_generations.get(id(websocket), {})
+        checked = self._subscription_checked_at.get(id(websocket), {})
         for channel_id in req.channel_ids:
-            current.discard(str(channel_id))
+            channel_id_raw = str(channel_id)
+            current.discard(channel_id_raw)
+            generations.pop(channel_id_raw, None)
+            checked.pop(channel_id_raw, None)
         self._subscriptions[id(websocket)] = current
         await websocket.send_json(
             build_envelope(
@@ -525,11 +551,6 @@ class WSManager:
                     event = json.loads(payload_raw)
                 except Exception:
                     continue
-                try:
-                    event = self._decrypt_event_payload(event)
-                except AppError as exc:
-                    logger.warning("failed to decrypt realtime event: %s", exc.code)
-                    continue
                 await self._forward_event(websocket, user_id, event)
         finally:
             await pubsub.unsubscribe(channel_name)
@@ -569,6 +590,8 @@ class WSManager:
         is_targeted_membership_update = (
             event_type == "membership_update" and str(event.get("user_id") or "") == str(user_id)
         )
+        if event_type in {"message", "message_updated"} and not channel_id:
+            return False
 
         if is_targeted_membership_update:
             # A removal/leave notification must reach the affected user even
@@ -576,11 +599,77 @@ class WSManager:
             # any later ordinary channel event can be forwarded.
             if channel_id and str(event.get("new_role") or "none") not in {"owner", "admin", "member"}:
                 subs.discard(channel_id)
-        elif channel_id and channel_id not in subs:
+                self._subscription_generations.get(id(websocket), {}).pop(channel_id, None)
+                self._subscription_checked_at.get(id(websocket), {}).pop(channel_id, None)
+        elif channel_id:
             # Empty means no ordinary channel subscriptions, not a wildcard.
-            return False
+            if channel_id not in subs:
+                return False
+            if not await self._authorize_channel_delivery(websocket, user_id, channel_id, event):
+                return False
 
-        await websocket.send_json(build_envelope(event_type, event))
+        try:
+            authorized_event = self._decrypt_event_payload(dict(event))
+        except AppError as exc:
+            logger.warning("failed to decrypt realtime event: %s", exc.code)
+            return False
+        await websocket.send_json(build_envelope(event_type, authorized_event))
+        return True
+
+    async def _authorize_channel_delivery(
+        self,
+        websocket: WebSocket,
+        user_id: UUID,
+        channel_id: str,
+        event: dict[str, Any],
+    ) -> bool:
+        socket_id = id(websocket)
+        generations = self._subscription_generations.setdefault(socket_id, {})
+        checked = self._subscription_checked_at.setdefault(socket_id, {})
+        cached_generation = generations.get(channel_id)
+        checked_at = checked.get(channel_id, 0.0)
+        try:
+            event_generation = int(event["membership_generation"])
+        except (KeyError, TypeError, ValueError):
+            event_generation = None
+
+        cache_ttl = get_settings().ws_membership_auth_cache_ttl_seconds
+        cache_is_fresh = time.monotonic() - checked_at <= cache_ttl
+        if (
+            event_generation is not None
+            and cached_generation is not None
+            and event_generation <= cached_generation
+            and cache_is_fresh
+        ):
+            return True
+
+        try:
+            channel_uuid = UUID(channel_id)
+        except ValueError:
+            return False
+        async with self._session_factory() as db:
+            row = await db.execute(
+                select(Channel.membership_generation)
+                .join(ChannelMembership, ChannelMembership.channel_id == Channel.id)
+                .where(
+                    Channel.id == channel_uuid,
+                    Channel.deleted_at.is_(None),
+                    ChannelMembership.user_id == user_id,
+                    ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+                )
+            )
+            current_generation = row.scalar_one_or_none()
+
+        if current_generation is None:
+            self._subscriptions.get(socket_id, set()).discard(channel_id)
+            generations.pop(channel_id, None)
+            checked.pop(channel_id, None)
+            return False
+        current_generation = int(current_generation)
+        if event_generation is not None and event_generation > current_generation:
+            return False
+        generations[channel_id] = current_generation
+        checked[channel_id] = time.monotonic()
         return True
 
     def _decrypt_event_payload(self, event: dict[str, Any]) -> dict[str, Any]:

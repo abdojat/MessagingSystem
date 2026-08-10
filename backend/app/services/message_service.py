@@ -924,16 +924,24 @@ class MessageService:
                 }
             )
 
+        # Preserve the existing deterministic (channel UUID, sequence) order,
+        # while treating req.limit as one global materialization budget. Every
+        # per-channel query receives only the remaining budget and has a SQL
+        # LIMIT, so at most req.limit Message objects enter Python.
         messages_payload: list[Message] = []
+        remaining = int(req.limit)
         for cid in selected:
+            if remaining <= 0:
+                break
             seq_marker = channel_state.get(cid, 0)
-            rows = await db.execute(
-                select(Message)
-                .where(Message.channel_id == cid, Message.seq_id > seq_marker, Message.deleted_at.is_(None))
-                .order_by(Message.seq_id.asc())
+            channel_page = await MessageService._fetch_sync_message_page(
+                db,
+                cid,
+                seq_marker,
+                remaining,
             )
-            messages_payload.extend(list(rows.scalars().all()))
-        messages_payload = sorted(messages_payload, key=lambda m: (str(m.channel_id), int(m.seq_id)))[: req.limit]
+            messages_payload.extend(channel_page)
+            remaining -= len(channel_page)
 
         membership_updates: list[dict] = []
         if req.since is not None:
@@ -990,6 +998,26 @@ class MessageService:
             "membership_updates": membership_updates,
             "messages": messages_payload,
         }
+
+    @staticmethod
+    async def _fetch_sync_message_page(
+        db: AsyncSession,
+        channel_id: UUID,
+        after_seq_id: int,
+        limit: int,
+    ) -> list[Message]:
+        bounded_limit = max(1, int(limit))
+        rows = await db.execute(
+            select(Message)
+            .where(
+                Message.channel_id == channel_id,
+                Message.seq_id > int(after_seq_id),
+                Message.deleted_at.is_(None),
+            )
+            .order_by(Message.seq_id.asc(), Message.id.asc())
+            .limit(bounded_limit)
+        )
+        return list(rows.scalars().all())
 
     @staticmethod
     async def store_upload_content(

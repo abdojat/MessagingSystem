@@ -25,7 +25,11 @@ from app.schemas.admin import (
     AdminUserItem,
 )
 from app.services.event_service import log_event
-from app.services.outbox_service import enqueue_channel_event_outbox
+from app.services.outbox_service import (
+    bump_channel_membership_generation,
+    enqueue_broker_binding_outbox,
+    enqueue_channel_event_outbox,
+)
 
 
 class AdminService:
@@ -579,23 +583,15 @@ class AdminService:
             "channel_restored",
             {"type": "channel_restored", "channel_id": str(channel.id)},
         )
-        await db.commit()
-
-        usernames = (
+        await bump_channel_membership_generation(db, channel.id)
+        member_user_ids = (
             await db.execute(
-                select(User.username)
-                .join(ChannelMembership, ChannelMembership.user_id == User.id)
-                .where(
+                select(ChannelMembership.user_id).where(
                     ChannelMembership.channel_id == channel.id,
                     ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
                 )
             )
         ).scalars().all()
-        amqp_channel = await amqp.channel()
-        try:
-            # Restoring a channel also restores broker bindings for active
-            # members so realtime delivery resumes without waiting for rejoin.
-            for username in usernames:
-                await bind_user_channel(amqp_channel, username, channel.channel_slug)
-        finally:
-            await amqp_channel.close()
+        for member_user_id in member_user_ids:
+            await enqueue_broker_binding_outbox(db, channel.id, member_user_id, "bind")
+        await db.commit()

@@ -1,5 +1,6 @@
 from datetime import timedelta
 import hashlib
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -393,11 +394,19 @@ async def test_subscribed_channel_event_is_delivered() -> None:
     websocket = _RecordingWebSocket()
     manager = WSManager.__new__(WSManager)
     manager._subscriptions = {id(websocket): {str(channel_id)}}
+    manager._subscription_generations = {id(websocket): {str(channel_id): 1}}
+    manager._subscription_checked_at = {id(websocket): {str(channel_id): time.monotonic()}}
+    manager._decrypt_event_payload = lambda event: event
 
     delivered = await manager._forward_event(
         websocket,
         user_id,
-        {"type": "message", "channel_id": str(channel_id), "content_text": "allowed"},
+        {
+            "type": "message",
+            "channel_id": str(channel_id),
+            "membership_generation": 1,
+            "content_text": "allowed",
+        },
     )
 
     assert delivered is True
@@ -450,6 +459,8 @@ async def test_unsubscribing_final_channel_blocks_ordinary_channel_events() -> N
     websocket = _RecordingWebSocket()
     manager = WSManager.__new__(WSManager)
     manager._subscriptions = {id(websocket): {str(channel_id)}}
+    manager._subscription_generations = {id(websocket): {str(channel_id): 1}}
+    manager._subscription_checked_at = {id(websocket): {str(channel_id): time.monotonic()}}
 
     await manager._handle_unsubscribe(
         websocket,
@@ -474,6 +485,8 @@ async def test_targeted_membership_removal_reaches_affected_unsubscribed_user() 
     websocket = _RecordingWebSocket()
     manager = WSManager.__new__(WSManager)
     manager._subscriptions = {id(websocket): set()}
+    manager._subscription_generations = {id(websocket): {}}
+    manager._subscription_checked_at = {id(websocket): {}}
 
     delivered = await manager._forward_event(
         websocket,

@@ -25,6 +25,7 @@ from app.schemas.messages import (
     UploadCreateResponse,
 )
 from app.services.message_service import MessageService
+from app.services.download_service import LeasedFileResponse, protected_download_limiter
 from app.services.rate_limit_service import enforce_rate_limit
 from app.services.event_service import log_event
 
@@ -465,18 +466,37 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep, red
     path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
     if not path.exists():
         raise to_http_exception(AppError("upload content not found", 404, code="NOT_FOUND"))
-    await MessageService._safe_log_event(
-        db,
-        "upload.accessed",
-        {
-            "upload_id": str(file_id),
-            "content_type": upload.content_type,
-            "size_bytes": int(upload.size_bytes),
-        },
-        actor_user_id=user.id,
-        commit=True,
+    lease = await protected_download_limiter.try_acquire(
+        user.id,
+        get_settings().max_concurrent_downloads_per_user,
     )
-    return Response(content=path.read_bytes(), media_type=upload.content_type)
+    if lease is None:
+        raise to_http_exception(
+            AppError(
+                "concurrent download limit exceeded",
+                429,
+                code="DOWNLOAD_CONCURRENCY_LIMIT",
+            )
+        )
+    try:
+        await MessageService._safe_log_event(
+            db,
+            "upload.accessed",
+            {
+                "upload_id": str(file_id),
+                "content_type": upload.content_type,
+                "size_bytes": int(upload.size_bytes),
+            },
+            actor_user_id=user.id,
+            commit=True,
+        )
+        # Authorization/audit DB work is complete before a potentially slow
+        # client starts consuming bytes; release the pooled connection now.
+        await db.close()
+    except BaseException:
+        await lease.release()
+        raise
+    return LeasedFileResponse(path, lease, media_type=upload.content_type)
 
 
 @router.post(

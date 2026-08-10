@@ -30,7 +30,12 @@ from app.db.models import (
 from app.mq.publisher import bind_user_channel, unbind_user_channel
 from app.schemas.channels import AdminPermissionsUpdateRequest, ChannelCreateRequest, ChannelPatchRequest, InviteRequest, JoinRequest
 from app.services.event_service import log_event
-from app.services.outbox_service import enqueue_broker_binding_outbox, enqueue_channel_event_outbox, enqueue_user_event_outbox
+from app.services.outbox_service import (
+    bump_channel_membership_generation,
+    enqueue_broker_binding_outbox,
+    enqueue_channel_event_outbox,
+    enqueue_user_event_outbox,
+)
 from app.services.rbac import (
     build_permissions as build_rbac_permissions,
     can_approve,
@@ -600,28 +605,20 @@ class ChannelService:
                 },
             },
         )
-        await db.commit()
-        await db.refresh(channel)
-
         if old_channel_slug != channel.channel_slug:
-            # The database is already committed when broker bindings are updated;
-            # reconnect or join flows can repair bindings if RabbitMQ is transiently down.
+            # Slug changes affect every active subscriber's topology. Persist
+            # desired-state generations before commit; the worker will remove
+            # the old key and add the new one without trusting execution order.
             member_rows = await db.execute(
-                select(User.username)
-                .join(ChannelMembership, ChannelMembership.user_id == User.id)
-                .where(
+                select(ChannelMembership.user_id).where(
                     ChannelMembership.channel_id == channel_id,
                     ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
                 )
             )
-            usernames = list(member_rows.scalars().all())
-            amqp_channel = await amqp.channel()
-            try:
-                for username in usernames:
-                    await unbind_user_channel(amqp_channel, username, old_channel_slug)
-                    await bind_user_channel(amqp_channel, username, channel.channel_slug)
-            finally:
-                await amqp_channel.close()
+            for member_user_id in member_rows.scalars().all():
+                await enqueue_broker_binding_outbox(db, channel_id, member_user_id, "bind")
+        await db.commit()
+        await db.refresh(channel)
         return channel
 
     @staticmethod
@@ -653,6 +650,7 @@ class ChannelService:
             "channel_deleted",
             {"type": "channel_deleted", "channel_id": str(channel_id)},
         )
+        await bump_channel_membership_generation(db, channel_id)
         member_rows = await db.execute(
             select(ChannelMembership.user_id).where(
                 ChannelMembership.channel_id == channel_id,
@@ -1363,6 +1361,7 @@ class ChannelService:
         role: MembershipRole | None,
         reason: str,
     ) -> None:
+        await bump_channel_membership_generation(db, channel_id)
         # Broadcast to current channel subscribers and also to the affected user,
         # covering the case where they were just removed from the channel.
         target_payload = {

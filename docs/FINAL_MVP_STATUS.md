@@ -10,6 +10,7 @@
 - Message encryption at rest on the server side.
 - Private upload download protection with authentication and authorization checks.
 - Uploaded content is streamed with bounded size/checksum validation and becomes immutable after the first successful store.
+- Authorized upload downloads are streamed with backpressure and a configurable per-user/per-backend concurrency boundary; authorization and audit DB work finishes before the file transfer.
 - Message attachments support protected photo, video, and audio publishing, including attachment-only messages.
 - Attachment publish requests accept only upload `file_id` references, with trusted attachment metadata generated server-side.
 - Upload create/store/access and upload store failure events are logged for audit visibility.
@@ -18,6 +19,8 @@
 - Safe identifier validation for usernames, channel slugs, and broker-facing routing identifiers.
 - Production/prod/staging startup rejects missing, placeholder, weak, or invalid JWT/message-encryption secrets.
 - REST membership-event sync is channel-scoped while retaining self-targeted removal notifications; empty WebSocket subscriptions do not act as wildcards; pending memberships do not gain private read-derived privileges.
+- RabbitMQ membership topology uses versioned PostgreSQL desired state; stale opposite commands are rejected, obsolete slug keys are removed, and reconnect/global reconciliation covers desired bindings and stale undesired bindings.
+- Realtime message events carry membership generations and are authorized before WebSocket decryption; `/sync` message materialization is bounded by its global page limit.
 - Docker Compose run path for PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend.
 - Backend P0 regression tests for the main security and demo-flow behavior.
 - Verified during Delivery Reliability Upgrade v1: Docker-backed backend tests passed, frontend typecheck passed, Docker Compose config passed, and a temporary-database Alembic upgrade to head passed.
@@ -32,6 +35,7 @@
 - Verified during Phase 1 security hardening on 2026-08-10: the focused security suite passed (`27 passed`), existing upload/sync-focused tests passed (`29 passed`), the full backend suite passed (`105 passed`) against isolated PostgreSQL 16, and `docker compose config --quiet` plus `git diff --check` passed. One existing passlib/argon2 deprecation warning remains.
 - Verified during Phase 2 authentication hardening on 2026-08-10: migration `0017_auth_session_hardening` applied on fresh PostgreSQL 16 and preserved/backfilled an existing session in a downgrade/upgrade check; the focused Phase 2 suite passed (`19 passed`), relevant Phase 1/superadmin coverage passed (`36 passed`), the full backend suite passed (`124 passed`), and frontend typecheck passed. One existing passlib/argon2 deprecation warning remains.
 - Verified during Phase 3 abuse/reliability hardening on 2026-08-10: migration `0018_phase3_abuse_hardening` applied on fresh PostgreSQL 16 and backfilled a historical attachment relation from a pre-Phase-3 row; the focused Phase 3 suite passed (`19 passed`) and the full backend suite passed (`143 passed`). Rate-limit fallback, payload/protocol bounds, idempotent state changes, fixed reaction query counts, indexed upload authorization, quotas, bounded queue arguments, durable membership-binding commands, and Redis fanout backoff have regression coverage. One existing passlib/argon2 deprecation warning remains; live broker/Redis outage integration remains future work.
+- Verified during Phase 4 P0 hardening on 2026-08-10: migration `0019_phase4_p0_hardening` passed on a fresh database and an upgrade from 0018 with active/removed historical binding rows; the focused Phase 4 suite passed (`15 passed`) and the complete backend suite passed (`158 passed, 1 warning`). Deterministic tests cover stale opposite generations, duplicate/crash retries, missed membership signals, bounded sync rows/cursors/authorization, and streaming/concurrency/cancellation. Live multi-worker RabbitMQ/Redis loss remains future work.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 - Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.

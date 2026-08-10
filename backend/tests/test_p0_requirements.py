@@ -54,6 +54,38 @@ class _AllowRateRedis:
         return 60
 
 
+async def _streamed_response_body(response) -> bytes:
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    await response(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "http_version": "1.1",
+            "scheme": "http",
+            "method": "GET",
+            "path": "/v1/uploads/content",
+            "raw_path": b"/v1/uploads/content",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+            "server": ("test", 80),
+            "extensions": {},
+        },
+        receive,
+        send,
+    )
+    return b"".join(
+        message.get("body", b"") for message in sent if message["type"] == "http.response.body"
+    )
+
+
 @pytest.mark.asyncio
 async def test_channel_creation_generates_slug_and_logs_event(db_session, monkeypatch):
     async def _noop_bind(*args, **kwargs):
@@ -688,7 +720,7 @@ async def test_upload_download_requires_channel_membership(db_session, monkeypat
     assert exc_info.value.status_code == 403
 
     owner_response = await get_upload_content(upload.id, db_session, owner, _AllowRateRedis())
-    assert owner_response.body == b"hello world"
+    assert await _streamed_response_body(owner_response) == b"hello world"
 
     unauthorized_events = (
         await db_session.execute(select(Event).where(Event.event_type == "security.unauthorized_upload_access"))

@@ -17,7 +17,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.core.identifiers import SAFE_IDENTIFIER_PATTERN
@@ -117,6 +117,10 @@ class Channel(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seq_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    # Incremented in the same transaction as every membership/read-access
+    # transition. Realtime events carry this generation so a socket can detect
+    # missed ephemeral membership notifications before decrypting content.
+    membership_generation: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1, server_default="1")
 
     __table_args__ = (
         CheckConstraint(f"channel_slug ~ '{SAFE_IDENTIFIER_PATTERN}'", name="ck_channels_slug_safe_identifier"),
@@ -154,6 +158,37 @@ class ChannelMembership(Base):
     __table_args__ = (
         Index("ix_channel_memberships_user_id", "user_id"),
         Index("ix_channel_memberships_channel_role", "channel_id", "role"),
+    )
+
+
+class BrokerBindingState(Base):
+    """Current PostgreSQL-owned desired RabbitMQ state for one subscriber/topic."""
+
+    __tablename__ = "broker_binding_states"
+
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1, server_default="1")
+    desired_bound: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    desired_routing_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Keep every not-yet-reconciled key across slug changes. The worker prunes
+    # this list only after the corresponding Rabbit operations and DB update
+    # commit together, which makes crash retries safe.
+    routing_keys: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    reconciled_generation: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_broker_binding_states_user", "user_id"),
+        Index("ix_broker_binding_states_pending", "generation", "reconciled_generation"),
     )
 
 

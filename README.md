@@ -49,7 +49,8 @@ Important:
 - `UPLOAD_MAX_SIZE_BYTES` (defaults to 25 MiB; upload bodies are streamed and bounded by this value)
 - `MESSAGE_TEXT_MAX_BYTES`, `MESSAGE_JSON_MAX_BYTES`, `MESSAGE_JSON_MAX_DEPTH` (validated before encryption/outbox work)
 - `RATE_LIMIT_*` grouped auth/search/message/media/channel/WebSocket/sync/admin limits; sensitive groups use a small per-process fallback if Redis is unavailable
-- `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, `MAX_WEBSOCKET_CONNECTIONS_PER_USER`
+- `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, `MAX_WEBSOCKET_CONNECTIONS_PER_USER`, `MAX_CONCURRENT_DOWNLOADS_PER_USER`
+- `WS_MEMBERSHIP_AUTH_CACHE_TTL_SECONDS` (default `1.0`; short fallback window for matching/older realtime membership generations)
 - `RABBIT_USER_QUEUE_EXPIRES_MS`, `RABBIT_USER_QUEUE_MESSAGE_TTL_MS`, `RABBIT_USER_QUEUE_MAX_LENGTH`; PostgreSQL/REST sync remains authoritative after realtime queue expiry/eviction
 - `REDIS_FANOUT_MAX_ATTEMPTS`, `REDIS_FANOUT_INITIAL_RETRY_DELAY_SECONDS`, `REDIS_FANOUT_MAX_RETRY_DELAY_SECONDS`
 - `OUTBOX_MAX_ATTEMPTS`
@@ -65,7 +66,7 @@ Development note:
 - For `production`, `prod`, and `staging`, startup rejects missing/default/weak JWT secrets and rejects a missing or invalid Fernet key while message encryption is enabled.
 - Access JWTs are bound to their database session. Logout, explicit revocation, logout-all, replay detection, absolute expiry, and account deactivation invalidate later HTTP authentication immediately.
 - WebSocket clients obtain a short-lived, one-time opaque ticket with `POST /auth/ws-ticket`; long-lived access JWTs are not accepted in WebSocket URLs. Redis control events close matching sockets across backend instances when Redis is available.
-- Membership bind/unbind desired state is committed to the existing PostgreSQL outbox with the membership change. The worker applies idempotent broker commands and retries failures; it no longer relies on a one-shot post-commit RabbitMQ call.
+- Membership topology is stored as versioned desired state in PostgreSQL and snapshotted through the outbox. The worker locks the user/channel state, rejects stale generations, re-derives current authorization, removes obsolete slug bindings, and retries a complete idempotent projection. Run `python -m app.db.reconcile_broker_bindings` in the backend environment to enqueue a full repair from PostgreSQL.
 - RabbitMQ user queues are bounded realtime buffers (expiry, message TTL, maximum length). Missed or evicted events are recovered through PostgreSQL-backed REST sync.
 - Generate one with:
 ```bash
@@ -181,12 +182,14 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Membership/permission authorization checks.
 - Message encryption at rest (Fernet).
 - Private uploads require authentication and channel/ownership checks before download.
+- Protected downloads use chunked `FileResponse` streaming and a configurable per-user/per-backend concurrency lease; production proxy bandwidth/connection limits remain necessary.
 - Message attachments support protected photo, video, and audio publishing through the existing upload API.
 - Profile/channel avatar uploads and profile chat wallpaper uploads use validated image references and protected authenticated media loading.
 - Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.
 - Unauthorized read/publish events logged.
 - Sensitive abuse-prone endpoints remain locally bounded during a Redis rate-limit outage; ordinary paginated reads stay available.
 - Message text/JSON, reaction values, REST sync arrays, and WebSocket subscribe/resume/sync arrays have explicit limits.
+- REST `/sync` uses one global message-row budget: each channel query has `LIMIT remaining`, so Python message materialization never exceeds the requested page limit.
 - Event logs include tamper-evident hash-chain metadata for new events.
 - Do not commit real secrets.
 

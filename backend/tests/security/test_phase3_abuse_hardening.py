@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.encryption import encrypt_message
 from app.core.errors import AppError
 from app.db.models import (
+    BrokerBindingState,
     ChannelMembership,
     ContentType,
     MembershipRole,
@@ -465,20 +466,24 @@ async def test_membership_changes_generate_durable_bind_and_unbind_commands(db_s
         select(Outbox).where(
             Outbox.aggregate_type == "broker_binding",
             Outbox.aggregate_id == member.id,
-            Outbox.type == "broker_binding.bind",
+            Outbox.type == "broker_binding.reconcile",
         )
     )
     assert bind_rows.scalar_one_or_none() is not None
+    state = await db_session.get(BrokerBindingState, {"channel_id": channel.id, "user_id": member.id})
+    assert state is not None and state.desired_bound is True
 
     await ChannelService.remove_member(db_session, _UnusedAmqp(), channel.id, owner.id, member.id)
     unbind_rows = await db_session.execute(
         select(Outbox).where(
             Outbox.aggregate_type == "broker_binding",
             Outbox.aggregate_id == member.id,
-            Outbox.type == "broker_binding.unbind",
+            Outbox.type == "broker_binding.reconcile",
         )
     )
-    assert unbind_rows.scalar_one_or_none() is not None
+    assert len(unbind_rows.scalars().all()) == 2
+    await db_session.refresh(state)
+    assert state.desired_bound is False
     assert await ChannelService.get_membership(db_session, channel.id, member.id) is None
 
 
@@ -492,11 +497,12 @@ async def test_failed_broker_unbind_is_retryable_without_undoing_membership(db_s
     await db_session.commit()
 
     await ChannelService.remove_member(db_session, _UnusedAmqp(), channel.id, owner.id, member.id)
-    unbind = (
+    binding_rows = (
         await db_session.execute(
-            select(Outbox).where(Outbox.aggregate_id == member.id, Outbox.type == "broker_binding.unbind")
+            select(Outbox).where(Outbox.aggregate_id == member.id, Outbox.type == "broker_binding.reconcile")
         )
-    ).scalar_one()
+    ).scalars().all()
+    unbind = max(binding_rows, key=lambda row: int(row.payload["generation"]))
     await db_session.execute(
         update(Outbox)
         .where(Outbox.id != unbind.id, Outbox.status == OutboxStatus.pending)
@@ -515,17 +521,24 @@ async def test_failed_broker_unbind_is_retryable_without_undoing_membership(db_s
 
 
 @pytest.mark.asyncio
-async def test_duplicate_broker_binding_processing_is_safe() -> None:
+async def test_duplicate_broker_binding_processing_is_safe(db_session) -> None:
+    owner = await _register(db_session, "duplicate_user")
+    channel = await _channel(db_session, owner, "Duplicate Channel")
+    row = (
+        await db_session.execute(
+            select(Outbox).where(
+                Outbox.aggregate_id == owner.id,
+                Outbox.type == "broker_binding.reconcile",
+            )
+        )
+    ).scalar_one()
     exchange = _BrokerExchange()
     settings = WorkerSettings()
-    bind_payload = {"action": "bind", "username": "duplicate_user", "channel_slug": "duplicate_channel"}
-    unbind_payload = {**bind_payload, "action": "unbind"}
-    await _apply_broker_binding(exchange, bind_payload, settings)
-    await _apply_broker_binding(exchange, bind_payload, settings)
-    await _apply_broker_binding(exchange, unbind_payload, settings)
-    await _apply_broker_binding(exchange, unbind_payload, settings)
-    assert exchange.queue.bindings.count("channel.duplicate_channel") == 2
-    assert exchange.queue.unbindings.count("channel.duplicate_channel") == 2
+    await _apply_broker_binding(db_session, exchange, row.payload, settings)
+    await db_session.commit()
+    await _apply_broker_binding(db_session, exchange, row.payload, settings)
+    await db_session.commit()
+    assert exchange.queue.bindings.count(f"channel.{channel.channel_slug}") == 2
 
 
 @pytest.mark.asyncio

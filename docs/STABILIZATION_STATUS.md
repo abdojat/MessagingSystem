@@ -4,7 +4,18 @@ Last updated: 2026-08-10
 
 ## Summary
 
-The latest pass completes Phase 3 abuse and messaging-reliability hardening: sensitive rate limits stay bounded during Redis failure, logical message/protocol inputs have explicit limits, repeated seen/reaction operations are idempotent, reaction and upload-authorization queries are bounded, basic account quotas are enforced, RabbitMQ queues have lifecycle bounds, membership binding changes use the transactional outbox, and Redis fanout cannot create a tight RabbitMQ requeue loop. The isolated PostgreSQL-backed suite passes all 143 backend tests; live multi-service outage testing, httpOnly-cookie migration, and attachment encryption remain explicitly deferred.
+The latest pass completes Phase 4 P0 hardening for the three High verification findings. RabbitMQ membership topology is now a versioned projection of current PostgreSQL authorization, WebSocket plaintext delivery refreshes on channel membership generations before decryption, `/sync` materializes no more than its global message limit, and protected downloads stream under a per-user concurrency lease. Live multi-worker broker/Redis outage testing, httpOnly-cookie migration, and attachment encryption remain explicitly deferred.
+
+## Security Hardening Phase 4 - 2026-08-10
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Broker authorization ordering | Fixed and deterministically verified | `broker_binding_states` generation/desired state; worker row lock and current DB authorization check; old-bind/new-unbind and inverse tests; duplicate/crash retry tests | No live multi-worker RabbitMQ ordering run; exhausted current reconcile rows still require reconnect, manual retry, or the global repair command | Add a live Rabbit outage/order scenario in a later integration phase |
+| WebSocket final delivery | Fixed with bounded cache | Channel `membership_generation` is copied to outbox events; newer/legacy events re-check PostgreSQL before decryption; missed-removal and active-member regressions pass | Matching/older queued events may use the cache for up to one second by default; Redis-loss test is simulated | Measure only if stricter zero-window treatment for pre-removal queued messages is required |
+| REST sync work | Fixed and verified | Per-channel `LIMIT remaining`; 10,000-row/limit-100 test materializes 100; 100-channel/limit-500 test materializes 500; deterministic ordering/cursor/auth tests | Up to 100 bounded message queries and channel metadata queries remain possible | Consider one global SQL/keyset query only if measured latency requires it |
+| Protected downloads | Fixed and verified | Starlette `FileResponse`; no `read_bytes`; multi-chunk body; authorization-before-stream; per-user lease; cancellation cleanup | Concurrency is per backend process; proxy bandwidth/IP/timeout policy is external | Add reverse-proxy limits in a production profile |
+| Migration | Passed | Fresh upgrade through `0019`; upgrade from 0018 with active and removed historical pairs retained old/current keys and enqueued current reconciliation | Unknown legacy Rabbit bindings with no membership or historical outbox evidence cannot be enumerated through AMQP | Keep the documented one-time legacy queue recreate/reset procedure |
+| Validation | Passed | Phase 4 `15 passed`; Phase 3 `19 passed`; Phase 1 `27 passed`; complete backend `158 passed, 1 warning`; fresh and Phase-3-to-Phase-4 migrations passed | Existing passlib/argon2 warning remains; frontend unchanged | Run the live Docker demo/verifiers before supervisor presentation |
 
 ## Security Hardening Phase 3 - 2026-08-10
 
