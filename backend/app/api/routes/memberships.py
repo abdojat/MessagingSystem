@@ -234,7 +234,13 @@ async def list_invites(
                 created_by_user_id=i.created_by_user_id,
                 created_at=i.created_at,
                 expires_at=i.expires_at,
-                accepted_at=i.accepted_at,
+                # Reusable generic links are never globally consumed; their
+                # individual uses are represented by invite.accepted events.
+                accepted_at=(
+                    None
+                    if i.invited_user_id is None and i.invited_email is None
+                    else i.accepted_at
+                ),
                 revoked_at=i.revoked_at,
             )
             for i in invites

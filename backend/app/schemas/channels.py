@@ -175,7 +175,9 @@ class InviteListItem(BaseModel):
     created_by_user_id: UUID
     created_at: datetime
     expires_at: datetime
-    accepted_at: datetime | None
+    accepted_at: datetime | None = Field(
+        description="Consumption time for a one-use targeted invite; always null for reusable generic links"
+    )
     revoked_at: datetime | None
 
 

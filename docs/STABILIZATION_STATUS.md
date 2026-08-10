@@ -4,7 +4,17 @@ Last updated: 2026-08-10
 
 ## Summary
 
-The latest pass completes Phase 4 P0 hardening for the three High verification findings. RabbitMQ membership topology is now a versioned projection of current PostgreSQL authorization, WebSocket plaintext delivery refreshes on channel membership generations before decryption, `/sync` materializes no more than its global message limit, and protected downloads stream under a per-user concurrency lease. Live multi-worker broker/Redis outage testing, httpOnly-cookie migration, and attachment encryption remain explicitly deferred.
+The latest pass completes Phase 5 hardening for AV-04 through AV-07. Established WebSockets now have repository-controlled frame, weighted command, total history, duplicate-subscribe, and one-command-at-a-time bounds; channel-derived attachment access stops while a channel is deleted; targeted/generic invite lifecycles have locked, documented semantics; and Redis limiting uses an atomic script plus non-evicting fail-safe outage saturation. Live multi-backend WebSocket/Redis load testing, AV-09 through AV-11, httpOnly-cookie migration, and attachment encryption remain explicitly deferred.
+
+## Security Hardening Phase 5 - 2026-08-10
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Established WebSocket abuse control (AV-04) | Fixed and deterministically verified | 16 KiB Uvicorn/application bound; weighted per-socket command bucket; total 100-row command cap; 300-row history bucket; duplicate-subscribe suppression; one dispatch lock; cleanup/isolation regressions | Budgets and five-socket quota are per backend process/socket; no live five-socket multi-backend load run | Add live load/metrics only if deployment scale requires it |
+| Deleted-channel attachments (AV-05) | Fixed and PostgreSQL-verified | Channel-derived query now requires `Channel.deleted_at IS NULL`; tests cover owner/admin/member/pending/removed/outsider/superadmin, delete/restore, upload owner, route denial, and deleted message | Upload owner intentionally retains their own upload; AV-09 relation consistency remains separate and open | Preserve the explicit lifecycle; address AV-09 separately |
+| Invite lifecycle (AV-06) | Fixed and two-session verified | Channel-then-invite row locks; targeted one-use; reusable generic links; accept/revoke winner tests; concurrent generic accepts; expiry/deletion/revoke denial; frontend wording synchronized | Channel-row serialization is intentionally conservative; no schema migration or separate invite-redemption table | Keep audit events as the generic redemption record for this MVP |
+| Redis limiter failure architecture (AV-07) | Fixed and deterministically verified | One Lua `INCR`/TTL operation; bounded dict+expiry heap; no active eviction; new sensitive keys denied at saturation; churn/recovery/low-risk regressions | Fallback remains per process and live Redis outage/recovery was not induced | Add multi-instance outage/load testing and metrics later |
+| Validation | Passed | Phase 5 `18 passed`; Phase 1–4 security `80 passed`; complete backend `176 passed, 1 warning` against disposable PostgreSQL 16 | Existing passlib/argon2 warning; Redis/WebSocket outage/load behavior is simulated | Run Docker config, frontend typecheck, diff checks, and live demo before supervisor presentation |
 
 ## Security Hardening Phase 4 - 2026-08-10
 

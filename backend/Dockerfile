@@ -17,4 +17,4 @@ COPY scripts /app/scripts
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["sh", "-c", "alembic upgrade head && python -m app.db.bootstrap_schema && python -m app.db.bootstrap_superadmin && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "alembic upgrade head && python -m app.db.bootstrap_schema && python -m app.db.bootstrap_superadmin && uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size ${WS_MAX_INBOUND_MESSAGE_BYTES:-16384}"]

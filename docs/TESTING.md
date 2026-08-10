@@ -95,6 +95,24 @@ Verified on 2026-08-10 against isolated PostgreSQL 16: `15 passed, 1 warning`; t
 
 The broker-ordering and missed-Redis-notification tests are deterministic simulations. No live multi-worker RabbitMQ ordering or live Redis-loss test is claimed. Download concurrency is per backend process; proxy bandwidth limits are outside the application test boundary.
 
+## Security Hardening Phase 5
+
+`backend/tests/security/test_phase5_medium_hardening.py` contains 18 focused regressions covering:
+
+- normal weighted WebSocket commands, flood rejection, repeated resume/history depletion, one total 100-row history cap across channels, unchanged subscribe/cursor suppression, oversized frame closure, per-socket isolation, and disconnect cleanup;
+- active/deleted/restored channel attachment access for upload owner, channel owner, admin, member, pending, removed, outsider, and superadmin identities, plus deleted-message behavior;
+- targeted one-use acceptance, second-use rejection, expiry/deletion denial, reusable generic-link semantics, per-accept audit events, deterministic accept-versus-revoke winners, concurrent generic accepts, and later revoke denial;
+- one-call Redis counter/TTL behavior, non-extending windows, Redis outage fallback, adversarial key churn, bounded memory, fail-safe saturation, low-risk availability, and clean Redis recovery.
+
+Run:
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_phase5_medium_hardening.py
+```
+
+Verified on 2026-08-10 against disposable PostgreSQL 16: `18 passed, 1 warning`. Phase 1–4 security suites passed `80 passed, 1 warning`, and the complete backend suite passed `176 passed, 1 warning`. Invite concurrency tests use two independent PostgreSQL sessions with explicit row-lock barriers. Redis Lua and WebSocket flood/work behavior are deterministic application-level harnesses, not a live Redis outage or multi-backend socket load test. No database migration was added.
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`

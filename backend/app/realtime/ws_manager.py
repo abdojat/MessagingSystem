@@ -33,6 +33,7 @@ from app.realtime.protocol import (
 )
 from app.realtime.auth_control import AuthControlEvent, auth_control_channel
 from app.realtime.redis_pubsub import mark_user_offline, mark_user_online, user_pubsub_channel
+from app.realtime.ws_abuse_control import WebSocketWorkBudget
 from app.schemas.messages import SeenRequest
 from app.services.message_service import MessageService
 
@@ -53,6 +54,9 @@ class WSManager:
         self._session_connections: dict[UUID, dict[int, WebSocket]] = {}
         self._socket_sessions: dict[int, UUID] = {}
         self._closing_sockets: set[int] = set()
+        self._socket_work_budgets: dict[int, WebSocketWorkBudget] = {}
+        self._command_locks: dict[int, asyncio.Lock] = {}
+        self._last_subscribe_history_requests: dict[int, tuple[tuple[str, ...], int | None]] = {}
         self._control_task: asyncio.Task[None] | None = None
         self._connection_lock = asyncio.Lock()
 
@@ -86,6 +90,7 @@ class WSManager:
             # Reserve the slot before the first await so simultaneous handshakes
             # cannot all pass the quota check.
             self._connections.setdefault(user_id, {})[id(websocket)] = websocket
+            self._initialize_socket_controls(websocket)
         try:
             if not pre_accepted:
                 await websocket.accept()
@@ -105,6 +110,7 @@ class WSManager:
             sockets.pop(id(websocket), None)
             if not sockets:
                 self._connections.pop(user_id, None)
+            self._cleanup_socket_controls(websocket)
             raise
         self._session_connections.setdefault(session_id, {})[id(websocket)] = websocket
         self._socket_sessions[id(websocket)] = session_id
@@ -113,6 +119,7 @@ class WSManager:
         self._subscriptions.pop(id(websocket), None)
         self._subscription_generations.pop(id(websocket), None)
         self._subscription_checked_at.pop(id(websocket), None)
+        self._cleanup_socket_controls(websocket)
         getattr(self, "_closing_sockets", set()).discard(id(websocket))
         for user_id, sockets in list(self._connections.items()):
             sockets.pop(id(websocket), None)
@@ -125,6 +132,68 @@ class WSManager:
             if not session_sockets:
                 self._session_connections.pop(session_id, None)
         await mark_user_offline(self._redis, username)
+
+    def _initialize_socket_controls(self, websocket: WebSocket) -> None:
+        socket_id = id(websocket)
+        settings = get_settings()
+        self._socket_work_budgets[socket_id] = WebSocketWorkBudget(
+            command_capacity=settings.ws_command_budget_capacity,
+            command_refill_per_second=settings.ws_command_budget_refill_per_second,
+            history_capacity=settings.ws_history_budget_capacity,
+            history_refill_per_second=settings.ws_history_budget_refill_per_second,
+        )
+        self._command_locks[socket_id] = asyncio.Lock()
+
+    def _cleanup_socket_controls(self, websocket: WebSocket) -> None:
+        socket_id = id(websocket)
+        self._socket_work_budgets.pop(socket_id, None)
+        self._command_locks.pop(socket_id, None)
+        self._last_subscribe_history_requests.pop(socket_id, None)
+
+    def _socket_controls(self, websocket: WebSocket) -> tuple[WebSocketWorkBudget, asyncio.Lock]:
+        socket_id = id(websocket)
+        if socket_id not in self._socket_work_budgets:
+            # Direct unit-level handler calls do not pass through connect().
+            self._initialize_socket_controls(websocket)
+        return self._socket_work_budgets[socket_id], self._command_locks[socket_id]
+
+    async def _send_budget_error(
+        self,
+        websocket: WebSocket,
+        request_id: UUID | None,
+        *,
+        budget: str,
+        retry_after_seconds: int,
+    ) -> None:
+        await websocket.send_json(
+            build_error(
+                "WebSocket work budget exceeded",
+                "RATE_LIMITED",
+                request_id,
+                {
+                    "budget": budget,
+                    "retry_after_seconds": retry_after_seconds,
+                },
+            )
+        )
+
+    async def _reserve_history_work(
+        self,
+        websocket: WebSocket,
+        request_id: UUID | None,
+        maximum_rows: int,
+    ) -> bool:
+        budget, _ = self._socket_controls(websocket)
+        retry_after = budget.reserve_history_rows(maximum_rows)
+        if retry_after is None:
+            return True
+        await self._send_budget_error(
+            websocket,
+            request_id,
+            budget="history_rows",
+            retry_after_seconds=retry_after,
+        )
+        return False
 
     async def disconnect_user(self, user_id: UUID, reason: str = "account deactivated", code: int = 1008) -> int:
         sockets = list(self._connections.get(user_id, {}).values())
@@ -247,22 +316,29 @@ class WSManager:
         channel_ids: list[str],
         from_seq_id: int | None = None,
         request_id: UUID | None = None,
-    ) -> None:
+    ) -> int:
         # WebSocket history is intentionally small; the REST sync endpoint remains
         # the durable path for larger missed-message backfills.
         async with self._session_factory() as db:
             sync_items: list[dict[str, Any]] = []
             sender_cache: dict[UUID, User | None] = {}
+            settings = get_settings()
+            remaining = min(settings.ws_history_batch_limit, settings.ws_history_budget_capacity)
             for channel_id_raw in channel_ids:
+                if remaining <= 0:
+                    break
                 channel_id = UUID(channel_id_raw)
                 stmt = select(Message).where(Message.channel_id == channel_id, Message.deleted_at.is_(None))
                 if from_seq_id is not None:
                     stmt = stmt.where(Message.seq_id > from_seq_id)
-                stmt = stmt.order_by(Message.seq_id.asc()).limit(100)
+                stmt = stmt.order_by(Message.seq_id.asc()).limit(remaining)
                 rows = await db.execute(stmt)
                 items = rows.scalars().all()
                 for message in items:
                     sync_items.append(await self._message_payload(db, message, sender_cache))
+                    remaining -= 1
+                    if remaining <= 0:
+                        break
             await websocket.send_json(
                 build_envelope(
                     "sync",
@@ -275,6 +351,7 @@ class WSManager:
                     request_id=request_id,
                 )
             )
+            return len(sync_items)
 
     async def _message_payload(
         self,
@@ -332,41 +409,90 @@ class WSManager:
         # Receive client commands continuously until the WebSocket disconnects.
         while True:
             raw = await websocket.receive_text()
+            frame_limit = get_settings().ws_max_inbound_message_bytes
+            # The Docker Uvicorn command applies the same raw frame bound. This
+            # application check also protects alternate ASGI launch paths and
+            # avoids JSON parsing once the logical command boundary is crossed.
+            if len(raw) > frame_limit or len(raw.encode("utf-8")) > frame_limit:
+                await websocket.send_json(
+                    build_error(
+                        "WebSocket message exceeds the configured size limit",
+                        "MESSAGE_TOO_LARGE",
+                        details={"max_bytes": frame_limit},
+                    )
+                )
+                await websocket.close(code=1009, reason="WebSocket message too large")
+                return
             try:
                 envelope = parse_client_envelope(json.loads(raw))
             except Exception as exc:
-                await websocket.send_json(build_error("invalid envelope", "VALIDATION_ERROR", details={"error": str(exc)}))
+                budget, command_lock = self._socket_controls(websocket)
+                async with command_lock:
+                    retry_after = budget.charge_command("invalid")
+                    if retry_after is not None:
+                        await self._send_budget_error(
+                            websocket,
+                            None,
+                            budget="commands",
+                            retry_after_seconds=retry_after,
+                        )
+                    else:
+                        await websocket.send_json(
+                            build_error("invalid envelope", "VALIDATION_ERROR", details={"error": str(exc)})
+                        )
                 continue
 
             msg_type = envelope.type
             payload = envelope.payload or {}
-
-            # Keep the realtime protocol explicit so unsupported client commands
-            # return a structured validation error instead of being ignored.
-            if msg_type == "ping":
-                await websocket.send_json(build_envelope("pong", {}, request_id=envelope.request_id))
-            elif msg_type == "auth":
-                await websocket.send_json(
-                    build_envelope(
-                        "hello",
-                        {"user_id": str(user_id), "session_id": str(session_id)},
-                        request_id=envelope.request_id,
+            budget, command_lock = self._socket_controls(websocket)
+            # The receive loop already awaits each dispatch. The explicit lock
+            # makes the one-command-at-a-time backpressure invariant visible and
+            # keeps it intact if another caller is introduced later.
+            async with command_lock:
+                command_kind = msg_type if msg_type in {
+                    "ping", "auth", "subscribe", "unsubscribe", "resume", "sync", "seen"
+                } else "unsupported"
+                retry_after = budget.charge_command(command_kind)
+                if retry_after is not None:
+                    await self._send_budget_error(
+                        websocket,
+                        envelope.request_id,
+                        budget="commands",
+                        retry_after_seconds=retry_after,
                     )
-                )
-            elif msg_type == "subscribe":
-                await self._handle_subscribe(websocket, user_id, payload, envelope.request_id)
-            elif msg_type == "unsubscribe":
-                await self._handle_unsubscribe(websocket, payload, envelope.request_id)
-            elif msg_type == "resume":
-                await self._handle_resume(websocket, user_id, payload, envelope.request_id)
-            elif msg_type == "sync":
-                await self._handle_sync_request(websocket, payload, envelope.request_id)
-            elif msg_type == "seen":
-                await self._handle_seen(websocket, user_id, payload, envelope.request_id)
-            else:
-                await websocket.send_json(
-                    build_error("unsupported message type", "VALIDATION_ERROR", envelope.request_id, details={"type": msg_type})
-                )
+                    continue
+
+                # Keep the realtime protocol explicit so unsupported client commands
+                # return a structured validation error instead of being ignored.
+                if msg_type == "ping":
+                    await websocket.send_json(build_envelope("pong", {}, request_id=envelope.request_id))
+                elif msg_type == "auth":
+                    await websocket.send_json(
+                        build_envelope(
+                            "hello",
+                            {"user_id": str(user_id), "session_id": str(session_id)},
+                            request_id=envelope.request_id,
+                        )
+                    )
+                elif msg_type == "subscribe":
+                    await self._handle_subscribe(websocket, user_id, payload, envelope.request_id)
+                elif msg_type == "unsubscribe":
+                    await self._handle_unsubscribe(websocket, payload, envelope.request_id)
+                elif msg_type == "resume":
+                    await self._handle_resume(websocket, user_id, payload, envelope.request_id)
+                elif msg_type == "sync":
+                    await self._handle_sync_request(websocket, payload, envelope.request_id)
+                elif msg_type == "seen":
+                    await self._handle_seen(websocket, user_id, payload, envelope.request_id)
+                else:
+                    await websocket.send_json(
+                        build_error(
+                            "unsupported message type",
+                            "VALIDATION_ERROR",
+                            envelope.request_id,
+                            details={"type": msg_type},
+                        )
+                    )
 
     async def _handle_sync_request(self, websocket: WebSocket, payload: dict[str, Any], request_id: UUID | None) -> None:
         try:
@@ -439,19 +565,48 @@ class WSManager:
         except Exception as exc:
             await websocket.send_json(build_error("invalid subscribe payload", "VALIDATION_ERROR", request_id, {"error": str(exc)}))
             return
+        wanted = {str(cid) for cid in req.channel_ids}
+        history_signature = (tuple(sorted(wanted)), req.from_seq_id)
+        socket_id = id(websocket)
+        if (
+            self._subscriptions.get(socket_id, set()) == wanted
+            and self._last_subscribe_history_requests.get(socket_id) == history_signature
+        ):
+            # Repeating an unchanged subscription/cursor is an acknowledgement,
+            # not a request to decrypt and serialize the same history again.
+            await websocket.send_json(
+                build_envelope(
+                    "sync",
+                    {
+                        "server_time": utcnow().isoformat(),
+                        "channel_updates": [],
+                        "membership_updates": [],
+                        "messages": [],
+                    },
+                    request_id=request_id,
+                )
+            )
+            return
+        settings = get_settings()
+        history_limit = min(settings.ws_history_batch_limit, settings.ws_history_budget_capacity) if wanted else 0
+        if not await self._reserve_history_work(websocket, request_id, history_limit):
+            return
         allowed_states = await self._member_channel_states(user_id)
         allowed = set(allowed_states)
-        wanted = {str(cid) for cid in req.channel_ids}
         # A client may ask for any channel id, but realtime subscriptions are
         # intersected with current membership before history is returned.
         granted = sorted(list(wanted & allowed))
-        self._subscriptions[id(websocket)] = set(granted)
-        self._subscription_generations[id(websocket)] = {
+        self._subscriptions[socket_id] = set(granted)
+        self._subscription_generations[socket_id] = {
             channel_id: allowed_states[channel_id] for channel_id in granted
         }
         checked_at = time.monotonic()
-        self._subscription_checked_at[id(websocket)] = {channel_id: checked_at for channel_id in granted}
+        self._subscription_checked_at[socket_id] = {channel_id: checked_at for channel_id in granted}
         await self._send_history(websocket, user_id, granted, from_seq_id=req.from_seq_id, request_id=request_id)
+        if set(granted) == wanted:
+            self._last_subscribe_history_requests[socket_id] = history_signature
+        else:
+            self._last_subscribe_history_requests.pop(socket_id, None)
 
     async def _handle_unsubscribe(self, websocket: WebSocket, payload: dict[str, Any], request_id: UUID | None) -> None:
         try:
@@ -468,6 +623,7 @@ class WSManager:
             generations.pop(channel_id_raw, None)
             checked.pop(channel_id_raw, None)
         self._subscriptions[id(websocket)] = current
+        getattr(self, "_last_subscribe_history_requests", {}).pop(id(websocket), None)
         await websocket.send_json(
             build_envelope(
                 "sync",
@@ -487,7 +643,17 @@ class WSManager:
         except Exception as exc:
             await websocket.send_json(build_error("invalid resume payload", "VALIDATION_ERROR", request_id, {"error": str(exc)}))
             return
-        limit = max(1, min(int(req.limit or 200), 500))
+        settings = get_settings()
+        limit = max(
+            1,
+            min(
+                int(req.limit or 200),
+                settings.ws_history_batch_limit,
+                settings.ws_history_budget_capacity,
+            ),
+        )
+        if not await self._reserve_history_work(websocket, request_id, limit):
+            return
         allowed = set(await self._member_channel_ids(user_id))
         # Resume uses per-channel cursors so a reconnect can replay only messages
         # newer than the client's last seen sequence.
@@ -601,6 +767,7 @@ class WSManager:
                 subs.discard(channel_id)
                 self._subscription_generations.get(id(websocket), {}).pop(channel_id, None)
                 self._subscription_checked_at.get(id(websocket), {}).pop(channel_id, None)
+                getattr(self, "_last_subscribe_history_requests", {}).pop(id(websocket), None)
         elif channel_id:
             # Empty means no ordinary channel subscriptions, not a wildcard.
             if channel_id not in subs:

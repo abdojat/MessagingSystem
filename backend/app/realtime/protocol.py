@@ -17,7 +17,7 @@ class WSEnvelope(BaseModel):
 
 class WSSubscribePayload(BaseModel):
     channel_ids: list[UUID] = Field(max_length=PROTOCOL_CHANNEL_ARRAY_MAX)
-    from_seq_id: int | None = None
+    from_seq_id: int | None = Field(default=None, ge=0)
 
 
 class WSUnsubscribePayload(BaseModel):
@@ -26,7 +26,7 @@ class WSUnsubscribePayload(BaseModel):
 
 class WSResumeCursor(BaseModel):
     channel_id: UUID
-    last_seen_seq_id: int | None = None
+    last_seen_seq_id: int | None = Field(default=None, ge=0)
 
 
 class WSResumePayload(BaseModel):
@@ -37,7 +37,7 @@ class WSResumePayload(BaseModel):
 
 class WSSyncState(BaseModel):
     channel_id: UUID
-    last_seen_seq_id: int | None = None
+    last_seen_seq_id: int | None = Field(default=None, ge=0)
     last_seen_at: datetime | None = None
 
 
@@ -47,7 +47,7 @@ class WSSyncPayload(BaseModel):
 
 class WSSeenPayload(BaseModel):
     channel_id: UUID
-    last_seen_seq_id: int | None = None
+    last_seen_seq_id: int | None = Field(default=None, ge=0)
     last_seen_at: datetime | None = None
 
 

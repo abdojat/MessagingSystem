@@ -4,6 +4,7 @@
 - Environment-bootstrapped global superadmin with platform-wide audit visibility, account/session controls, channel suspension/restoration, and global delivery recovery; private message content is not implicitly exposed.
 - User authentication with password hashing, session-bound JWT access/refresh tokens, idle and absolute expiry, refresh replay detection, one-time WebSocket tickets, and local/distributed session revocation.
 - Channel/topic creation, listing, updates, joins, leaves, invites, approvals, role changes, and member removal.
+- Targeted invites are one-use and atomically ordered against revocation/deletion; generic invite links are reusable until revoked, expired, or their channel is deleted.
 - Publish/subscribe message persistence with PostgreSQL as the source of truth.
 - Event logging for the key channel, membership, message, and security flows.
 - Tamper-evident audit log integrity for new events through a per-scope SHA-256 hash chain.
@@ -21,6 +22,9 @@
 - REST membership-event sync is channel-scoped while retaining self-targeted removal notifications; empty WebSocket subscriptions do not act as wildcards; pending memberships do not gain private read-derived privileges.
 - RabbitMQ membership topology uses versioned PostgreSQL desired state; stale opposite commands are rejected, obsolete slug keys are removed, and reconnect/global reconciliation covers desired bindings and stale undesired bindings.
 - Realtime message events carry membership generations and are authorized before WebSocket decryption; `/sync` message materialization is bounded by its global page limit.
+- Established WebSockets have explicit inbound size, weighted command, total history-row, duplicate-subscribe, and one-command-at-a-time work bounds.
+- Protected channel attachment access follows active-channel/non-deleted-message/current-membership lifecycle, while upload owners retain explicit access to their own uploads.
+- Redis fixed-window increments and TTL installation are atomic; the bounded outage fallback preserves active blocked keys and denies unseen sensitive keys at saturation instead of evicting security state.
 - Docker Compose run path for PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend.
 - Backend P0 regression tests for the main security and demo-flow behavior.
 - Verified during Delivery Reliability Upgrade v1: Docker-backed backend tests passed, frontend typecheck passed, Docker Compose config passed, and a temporary-database Alembic upgrade to head passed.
@@ -36,6 +40,7 @@
 - Verified during Phase 2 authentication hardening on 2026-08-10: migration `0017_auth_session_hardening` applied on fresh PostgreSQL 16 and preserved/backfilled an existing session in a downgrade/upgrade check; the focused Phase 2 suite passed (`19 passed`), relevant Phase 1/superadmin coverage passed (`36 passed`), the full backend suite passed (`124 passed`), and frontend typecheck passed. One existing passlib/argon2 deprecation warning remains.
 - Verified during Phase 3 abuse/reliability hardening on 2026-08-10: migration `0018_phase3_abuse_hardening` applied on fresh PostgreSQL 16 and backfilled a historical attachment relation from a pre-Phase-3 row; the focused Phase 3 suite passed (`19 passed`) and the full backend suite passed (`143 passed`). Rate-limit fallback, payload/protocol bounds, idempotent state changes, fixed reaction query counts, indexed upload authorization, quotas, bounded queue arguments, durable membership-binding commands, and Redis fanout backoff have regression coverage. One existing passlib/argon2 deprecation warning remains; live broker/Redis outage integration remains future work.
 - Verified during Phase 4 P0 hardening on 2026-08-10: migration `0019_phase4_p0_hardening` passed on a fresh database and an upgrade from 0018 with active/removed historical binding rows; the focused Phase 4 suite passed (`15 passed`) and the complete backend suite passed (`158 passed, 1 warning`). Deterministic tests cover stale opposite generations, duplicate/crash retries, missed membership signals, bounded sync rows/cursors/authorization, and streaming/concurrency/cancellation. Live multi-worker RabbitMQ/Redis loss remains future work.
+- Verified during Phase 5 medium hardening on 2026-08-10 against disposable PostgreSQL 16: the focused Phase 5 suite passed (`18 passed, 1 warning`), Phase 1–4 security suites passed (`80 passed, 1 warning`), and the complete backend suite passed (`176 passed, 1 warning`). Invite races used two independent database sessions; Redis/WebSocket abuse and outage behavior used deterministic application-level harnesses rather than a live multi-backend outage/load run. No migration was required.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 - Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.
@@ -76,6 +81,7 @@
 
 ## Future Work
 - Dedicated broker/WebSocket integration tests in CI.
+- Live multi-backend WebSocket flood and Redis outage/recovery load tests; current command/fallback proofs are deterministic component tests and per-process limits remain explicit.
 - Full RabbitMQ outage/DLQ integration tests in CI.
 - Frontend automated smoke coverage.
 - Stronger production session handling with httpOnly cookies and CSRF-aware flows.

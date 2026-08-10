@@ -624,7 +624,7 @@
       "signInBeforeUpload": "You need to be signed in before uploading a channel image."
     },
     "eventLogDescription": "Review recent security and system events for this channel.",
-    "inviteLinkDescription": "Create a one-time invite link for this channel. It is available for every visibility and join policy.",
+    "inviteLinkDescription": "Create a reusable invite link for this channel. It remains valid until revoked or expired and is available for every visibility and join policy.",
     "fields": {
       "avatarHint": "Choose an image file to update the channel avatar.",
       "avatarPreviewAlt": "Selected channel avatar preview",
@@ -671,7 +671,7 @@
       "adminDemotedTitle": "Admin demoted",
       "approveFailedTitle": "Could not approve request",
       "avatarUploadFailedTitle": "Could not upload avatar",
-      "inviteCopiedDescription": "A fresh one-time channel invite link is now in your clipboard.",
+      "inviteCopiedDescription": "A reusable channel invite link is now in your clipboard. It remains valid until revoked or expired.",
       "inviteCopiedTitle": "Invite link copied",
       "inviteCopyFailedDescription": "Copy the displayed link manually or allow clipboard access, then try again.",
       "inviteCopyFailedTitle": "Could not copy invite link",

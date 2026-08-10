@@ -62,6 +62,26 @@ logger = logging.getLogger(__name__)
 class ChannelService:
     """Coordinates channel state, membership rules, broker bindings, and audit events."""
 
+    @staticmethod
+    def _is_generic_invite(invite: ChannelInvite) -> bool:
+        return invite.invited_user_id is None and invite.invited_email is None
+
+    @staticmethod
+    def _generic_invite_clause():
+        return and_(ChannelInvite.invited_user_id.is_(None), ChannelInvite.invited_email.is_(None))
+
+    @staticmethod
+    def _targeted_invite_clause():
+        return or_(ChannelInvite.invited_user_id.is_not(None), ChannelInvite.invited_email.is_not(None))
+
+    @staticmethod
+    async def _get_channel_for_update(db: AsyncSession, channel_id: UUID) -> Channel:
+        row = await db.execute(select(Channel).where(Channel.id == channel_id).with_for_update())
+        channel = row.scalar_one_or_none()
+        if channel is None or channel.deleted_at is not None:
+            raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
+        return channel
+
     # Converts a channel name into a broker-safe slug; channel creation uses it when
     # the client does not provide an explicit routing identifier.
     @staticmethod
@@ -628,7 +648,10 @@ class ChannelService:
         actor_user_id: UUID,
         amqp: aio_pika.RobustConnection,
     ) -> None:
-        channel = await ChannelService.get_channel_or_404(db, channel_id)
+        # Invite acceptance locks the same channel row before its invite row.
+        # Whichever transaction obtains this lock first defines whether the
+        # acceptance precedes deletion or observes an inactive channel.
+        channel = await ChannelService._get_channel_for_update(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         actor = await db.get(User, actor_user_id)
         is_superadmin_override = bool(actor and actor.is_superadmin)
@@ -669,7 +692,7 @@ class ChannelService:
         user_id: UUID,
         req: JoinRequest,
     ) -> tuple[str, ChannelMembership | None, str]:
-        channel = await ChannelService.get_channel_or_404(db, channel_id)
+        channel = await ChannelService._get_channel_for_update(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, user_id)
         if membership:
             return ("already_member", membership, "user already has membership")
@@ -680,7 +703,8 @@ class ChannelService:
             if not req.invite_token:
                 return ("requires_invite", None, "invite token required for invite_only channels")
             invite = await ChannelService._validate_invite(db, channel_id, req.invite_token, user_id)
-            invite.accepted_at = utcnow()
+            if not ChannelService._is_generic_invite(invite):
+                invite.accepted_at = utcnow()
             membership = ChannelMembership(
                 channel_id=channel_id,
                 user_id=user_id,
@@ -748,9 +772,12 @@ class ChannelService:
         active_invites = await db.scalar(
             select(func.count(ChannelInvite.id)).where(
                 ChannelInvite.created_by_user_id == actor_user_id,
-                ChannelInvite.accepted_at.is_(None),
                 ChannelInvite.revoked_at.is_(None),
                 ChannelInvite.expires_at > utcnow(),
+                or_(
+                    ChannelService._generic_invite_clause(),
+                    ChannelInvite.accepted_at.is_(None),
+                ),
             )
         )
         if int(active_invites or 0) >= get_settings().max_active_invites_per_user:
@@ -800,13 +827,25 @@ class ChannelService:
         # Status filters are mutually exclusive so each tab in the management UI
         # maps to one clear invite state.
         if status == "active":
-            stmt = stmt.where(ChannelInvite.revoked_at.is_(None), ChannelInvite.accepted_at.is_(None), ChannelInvite.expires_at >= now)
+            stmt = stmt.where(
+                ChannelInvite.revoked_at.is_(None),
+                ChannelInvite.expires_at > now,
+                or_(ChannelService._generic_invite_clause(), ChannelInvite.accepted_at.is_(None)),
+            )
         elif status == "revoked":
             stmt = stmt.where(ChannelInvite.revoked_at.is_not(None))
         elif status == "accepted":
-            stmt = stmt.where(ChannelInvite.accepted_at.is_not(None))
+            stmt = stmt.where(
+                ChannelService._targeted_invite_clause(),
+                ChannelInvite.accepted_at.is_not(None),
+                ChannelInvite.revoked_at.is_(None),
+            )
         elif status == "expired":
-            stmt = stmt.where(ChannelInvite.expires_at < now, ChannelInvite.revoked_at.is_(None), ChannelInvite.accepted_at.is_(None))
+            stmt = stmt.where(
+                ChannelInvite.expires_at <= now,
+                ChannelInvite.revoked_at.is_(None),
+                or_(ChannelService._generic_invite_clause(), ChannelInvite.accepted_at.is_(None)),
+            )
         elif status is not None:
             raise AppError("invalid invite status", 400, code="VALIDATION_ERROR")
         stmt = stmt.order_by(ChannelInvite.created_at.desc(), ChannelInvite.id.desc())
@@ -830,13 +869,22 @@ class ChannelService:
 
     @staticmethod
     async def revoke_invite(db: AsyncSession, channel_id: UUID, invite_id: UUID, actor_user_id: UUID) -> ChannelInvite:
-        await ChannelService.get_channel_or_404(db, channel_id)
+        await ChannelService._get_channel_for_update(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not membership or not can_invite(membership.role, membership.admin_permissions):
             raise AppError("forbidden", 403, code="FORBIDDEN")
-        invite = await db.get(ChannelInvite, invite_id)
+        invite_row = await db.execute(
+            select(ChannelInvite).where(ChannelInvite.id == invite_id).with_for_update()
+        )
+        invite = invite_row.scalar_one_or_none()
         if not invite or invite.channel_id != channel_id:
             raise AppError("invite not found", 404, code="INVITE_INVALID")
+        if (
+            not ChannelService._is_generic_invite(invite)
+            and invite.accepted_at is not None
+            and invite.revoked_at is None
+        ):
+            raise AppError("invite already accepted", 409, code="INVITE_ALREADY_ACCEPTED")
         if invite.revoked_at is None:
             invite.revoked_at = utcnow()
             await log_event(
@@ -867,9 +915,9 @@ class ChannelService:
         now = utcnow()
         if invite.revoked_at is not None:
             return {"is_valid": False, "reason": "revoked"}
-        if invite.accepted_at is not None:
+        if not ChannelService._is_generic_invite(invite) and invite.accepted_at is not None:
             return {"is_valid": False, "reason": "accepted"}
-        if invite.expires_at < now:
+        if invite.expires_at <= now:
             return {"is_valid": False, "reason": "expired"}
         return {
             "is_valid": True,
@@ -890,32 +938,21 @@ class ChannelService:
         user = await db.get(User, user_id)
         if not user:
             raise AppError("user not found", 404)
-        result = await db.execute(
-            select(ChannelInvite, Channel)
-            .join(Channel, Channel.id == ChannelInvite.channel_id)
-            .where(ChannelInvite.token_hash == token_hash)
+        channel_id = await db.scalar(
+            select(ChannelInvite.channel_id).where(ChannelInvite.token_hash == token_hash)
         )
-        data = result.first()
-        if not data:
+        if channel_id is None:
             raise AppError("invite not found", 404, code="INVITE_INVALID")
-        invite, channel = data
-        if channel.deleted_at is not None:
-            raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
-        if invite.revoked_at:
-            raise AppError("invite revoked", 400, code="INVITE_REVOKED")
-        if invite.expires_at < utcnow():
-            raise AppError("invite expired", 400, code="INVITE_EXPIRED")
-        if invite.accepted_at:
-            existing = await ChannelService.get_membership(db, invite.channel_id, user_id)
-            if existing and existing.role in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member}:
-                return existing
-            raise AppError("invite already accepted", 409, code="INVITE_ALREADY_ACCEPTED")
-        if invite.invited_user_id and invite.invited_user_id != user_id:
-            raise AppError("invite not for user", 403, code="FORBIDDEN")
-        if invite.invited_email and user.email != invite.invited_email:
-            raise AppError("invite email mismatch", 403, code="FORBIDDEN")
+        await ChannelService._get_channel_for_update(db, channel_id)
+        invite = await ChannelService._validate_invite(db, channel_id, token, user_id)
 
         membership = await ChannelService.get_membership(db, invite.channel_id, user_id)
+        if (
+            ChannelService._is_generic_invite(invite)
+            and membership
+            and membership.role in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member}
+        ):
+            return membership
         if membership:
             membership.role = MembershipRole.member
             membership.admin_permissions = None
@@ -931,7 +968,8 @@ class ChannelService:
             )
             db.add(membership)
 
-        invite.accepted_at = utcnow()
+        if not ChannelService._is_generic_invite(invite):
+            invite.accepted_at = utcnow()
         await log_event(
             db,
             "invite.accepted",
@@ -1332,7 +1370,9 @@ class ChannelService:
         if not user:
             raise AppError("invalid invite", 404, code="INVITE_INVALID")
         row = await db.execute(
-            select(ChannelInvite).where(ChannelInvite.channel_id == channel_id, ChannelInvite.token_hash == token_hash)
+            select(ChannelInvite)
+            .where(ChannelInvite.channel_id == channel_id, ChannelInvite.token_hash == token_hash)
+            .with_for_update()
         )
         invite = row.scalar_one_or_none()
         if not invite:
@@ -1341,9 +1381,9 @@ class ChannelService:
         # or revoked invites fail consistently regardless of who presents them.
         if invite.revoked_at:
             raise AppError("invite revoked", 400, code="INVITE_REVOKED")
-        if invite.accepted_at:
+        if not ChannelService._is_generic_invite(invite) and invite.accepted_at:
             raise AppError("invite already accepted", 409, code="INVITE_ALREADY_ACCEPTED")
-        if invite.expires_at < utcnow():
+        if invite.expires_at <= utcnow():
             raise AppError("invite expired", 400, code="INVITE_EXPIRED")
         # Targeted invites remain bound to the intended account or email; only
         # generic invites skip these checks.

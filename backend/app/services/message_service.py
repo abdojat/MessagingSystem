@@ -1244,7 +1244,12 @@ class MessageService:
                 ),
             )
             .join(Message, Message.id == MessageAttachment.message_id)
-            .where(MessageAttachment.upload_id == file_id, Message.deleted_at.is_(None))
+            .join(Channel, Channel.id == MessageAttachment.channel_id)
+            .where(
+                MessageAttachment.upload_id == file_id,
+                Message.deleted_at.is_(None),
+                Channel.deleted_at.is_(None),
+            )
             .limit(1)
         )
         return access_row.scalar_one_or_none() is not None

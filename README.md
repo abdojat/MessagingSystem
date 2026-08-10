@@ -10,7 +10,7 @@ University final-year project implementing a secure distributed channel messagin
 - Realtime: Redis + WebSocket
 - Frontend: Next.js (`frontend/`)
 - Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
-- Abuse resistance: grouped Redis/local-fallback rate limits, message/protocol bounds, account quotas, bounded RabbitMQ user queues, and paced Redis fanout retries
+- Abuse resistance: atomic Redis/local-fallback rate limits, WebSocket frame/command/history budgets, message/protocol bounds, account quotas, bounded RabbitMQ user queues, and paced Redis fanout retries
 - Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
 - Platform administration: environment-bootstrapped superadmin, global audit view, user/session controls, channel suspension/restoration, and global delivery recovery
 
@@ -44,11 +44,13 @@ Important:
 - `JWT_SECRET` (replace the development default; production/prod/staging require at least 32 non-placeholder characters)
 - `JWT_ACCESS_TTL_MIN` (default `30`), `JWT_REFRESH_TTL_DAYS` (idle lifetime, default `14`), and `SESSION_ABSOLUTE_TTL_DAYS` (non-sliding maximum, default `30`)
 - `WS_TICKET_TTL_SECONDS` (single-use Redis-backed WebSocket ticket lifetime, default `30` seconds)
+- `WS_MAX_INBOUND_MESSAGE_BYTES` (default `16384`; enforced by Docker Uvicorn and again before application JSON parsing)
+- `WS_COMMAND_BUDGET_CAPACITY`, `WS_COMMAND_BUDGET_REFILL_PER_SECOND`, `WS_HISTORY_BUDGET_CAPACITY`, `WS_HISTORY_BUDGET_REFILL_PER_SECOND`, and `WS_HISTORY_BATCH_LIMIT` (per-socket weighted work and history-row bounds)
 - `MESSAGE_ENCRYPTION_ENABLED=true`
 - `MESSAGE_ENCRYPTION_KEY` (Fernet key)
 - `UPLOAD_MAX_SIZE_BYTES` (defaults to 25 MiB; upload bodies are streamed and bounded by this value)
 - `MESSAGE_TEXT_MAX_BYTES`, `MESSAGE_JSON_MAX_BYTES`, `MESSAGE_JSON_MAX_DEPTH` (validated before encryption/outbox work)
-- `RATE_LIMIT_*` grouped auth/search/message/media/channel/WebSocket/sync/admin limits; sensitive groups use a small per-process fallback if Redis is unavailable
+- `RATE_LIMIT_*` grouped auth/search/message/media/channel/WebSocket/sync/admin limits; `RATE_LIMIT_LOCAL_MAX_KEYS` bounds the fail-closed per-process sensitive fallback used when Redis is unavailable
 - `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, `MAX_WEBSOCKET_CONNECTIONS_PER_USER`, `MAX_CONCURRENT_DOWNLOADS_PER_USER`
 - `WS_MEMBERSHIP_AUTH_CACHE_TTL_SECONDS` (default `1.0`; short fallback window for matching/older realtime membership generations)
 - `RABBIT_USER_QUEUE_EXPIRES_MS`, `RABBIT_USER_QUEUE_MESSAGE_TTL_MS`, `RABBIT_USER_QUEUE_MAX_LENGTH`; PostgreSQL/REST sync remains authoritative after realtime queue expiry/eviction
@@ -66,6 +68,8 @@ Development note:
 - For `production`, `prod`, and `staging`, startup rejects missing/default/weak JWT secrets and rejects a missing or invalid Fernet key while message encryption is enabled.
 - Access JWTs are bound to their database session. Logout, explicit revocation, logout-all, replay detection, absolute expiry, and account deactivation invalidate later HTTP authentication immediately.
 - WebSocket clients obtain a short-lived, one-time opaque ticket with `POST /auth/ws-ticket`; long-lived access JWTs are not accepted in WebSocket URLs. Redis control events close matching sockets across backend instances when Redis is available.
+- Established sockets use per-socket weighted command and history-row token buckets. Subscribe/resume history is capped globally per command, identical subscribe/cursor requests do not refetch history, and inbound dispatch remains one command at a time. These budgets are per backend process/socket, not a distributed global quota.
+- Generic invite links are reusable until revoked, expired, or their channel is deleted. Targeted user/email invites are one-use, and accept/revoke/delete ordering is serialized through PostgreSQL row locks.
 - Membership topology is stored as versioned desired state in PostgreSQL and snapshotted through the outbox. The worker locks the user/channel state, rejects stale generations, re-derives current authorization, removes obsolete slug bindings, and retries a complete idempotent projection. Run `python -m app.db.reconcile_broker_bindings` in the backend environment to enqueue a full repair from PostgreSQL.
 - RabbitMQ user queues are bounded realtime buffers (expiry, message TTL, maximum length). Missed or evicted events are recovered through PostgreSQL-backed REST sync.
 - Generate one with:

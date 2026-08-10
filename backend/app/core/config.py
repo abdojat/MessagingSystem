@@ -41,7 +41,12 @@ class Settings(BaseSettings):
     outbox_retry_backoff_multiplier: float = 2.0
     outbox_max_retry_delay_seconds: int = 300
     worker_online_scan_interval: float = 3.0
-    ws_history_batch_limit: int = 100
+    ws_history_batch_limit: int = Field(default=100, ge=1, le=500)
+    ws_max_inbound_message_bytes: int = Field(default=16 * 1024, ge=1024, le=1024 * 1024)
+    ws_command_budget_capacity: int = Field(default=60, ge=10, le=10_000)
+    ws_command_budget_refill_per_second: float = Field(default=1.0, gt=0, le=1_000)
+    ws_history_budget_capacity: int = Field(default=300, ge=1, le=100_000)
+    ws_history_budget_refill_per_second: float = Field(default=5.0, gt=0, le=10_000)
 
     # Phase 3 abuse-control groups. Sensitive operations use an in-process
     # emergency limiter when Redis is unavailable; ordinary reads remain
@@ -56,6 +61,7 @@ class Settings(BaseSettings):
     rate_limit_websocket_per_minute: int = Field(default=30, gt=0)
     rate_limit_sync_per_minute: int = Field(default=60, gt=0)
     rate_limit_admin_per_minute: int = Field(default=60, gt=0)
+    rate_limit_local_max_keys: int = Field(default=10_000, ge=1, le=1_000_000)
 
     message_text_max_bytes: int = Field(default=64 * 1024, ge=1024)
     message_json_max_bytes: int = Field(default=64 * 1024, ge=1024)

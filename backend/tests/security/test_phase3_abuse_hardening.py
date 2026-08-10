@@ -60,6 +60,13 @@ class _MemoryRateRedis:
         self.fail = fail
         self.counts: dict[str, int] = {}
 
+    async def eval(self, script: str, numkeys: int, key: str, window_seconds: int):
+        if self.fail:
+            raise ConnectionError("redis unavailable")
+        assert numkeys == 1
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return [self.counts[key], window_seconds]
+
     async def incr(self, key: str) -> int:
         if self.fail:
             raise ConnectionError("redis unavailable")
