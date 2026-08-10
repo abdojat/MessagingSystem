@@ -8,6 +8,7 @@
 - WebSocket connections use a short-lived access token in the connection URL for the demo flow and verifier.
 - WebSocket membership refresh is demo-grade but explicit: after a user joins or receives a membership update, the frontend sends a subscribe/resync message so the open socket follows the latest authorized channel set.
 - Targeted `membership_update` events are forwarded to the authenticated user even when the affected channel is not yet in that socket's subscription set. This supports approval-required joins without exposing message payloads to unauthorized users.
+- An empty WebSocket subscription set receives no ordinary channel events. A membership change bypasses that filter only when its `user_id` targets the authenticated user; removal/leave updates also clear the affected channel from the socket's local subscription set.
 
 ## Authorization
 - Channel reads and writes check membership/role permissions.
@@ -15,12 +16,16 @@
 - Channel list search treats `%`, `_`, and `\` as literal text instead of SQL wildcards, and `#channel-slug` search is resolved against the safe stored slug.
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
 - The upload route allows content only to the owner, and the download route only allows the owner or a user who is a member of a channel that references the upload.
+- Upload request bodies are streamed in bounded chunks to a same-directory temporary file while size and SHA-256 are checked incrementally. Failed, interrupted, oversized, short, or checksum-mismatched uploads are cleaned up and remain pending.
+- Successful upload storage is immutable. The existing protected `public_url` is the persisted pending/stored lifecycle marker, the upload row is locked during finalization, and a second PUT returns `409 Conflict` without replacing historical bytes.
 - Message media attachments use the same protected upload route. A message can reference uploaded photo, video, or audio content only after the uploader has stored the bytes; subscribers fetch/play that media through authenticated requests.
 - Publish requests accept only attachment `file_id` references from clients. Filename, content type, size, and protected URL are derived from trusted upload records by the backend before the message is stored.
 - Upload content types are normalized before storage. SVG image uploads are rejected because they are not needed for the multimedia demo and are riskier to render than ordinary photo/video/audio files.
 - Profile avatar, profile wallpaper, and channel avatar uploads stay behind the same authenticated upload route. Stored image URLs are validated to allow only `http`, `https`, or protected upload-content paths; internal uploads must be owned by the updater, already stored, and be non-SVG images.
 - Avatar and wallpaper upload downloads have explicit access rules: profile avatars are visible to authenticated users, profile wallpapers are visible to the owning user, public channel avatars are visible to authenticated users, and private channel avatars are visible only to approved channel members or the upload owner.
 - Unauthorized publish/read attempts are logged as security events.
+- `/sync` membership backfill is limited to approved channels the caller can currently read, plus membership events whose `user_id`/`target_user_id` is the caller. This preserves a removed user's own removal notification without exposing unrelated channel membership activity.
+- Pending membership rows do not grant private history, seen/unread state, sync/WS resume, or private-channel statistics; approved readers remain `owner`, `admin`, and `member`.
 - Unauthorized upload download attempts are logged as `security.unauthorized_upload_access`.
 - Upload creation, successful content storage, successful content access, and size/checksum store failures are logged as `upload.created`, `upload.content_stored`, `upload.accessed`, and `upload.store_failed`.
 - Delivery monitoring endpoints under `/v1/admin/delivery/*` require authentication and are scoped to channels where the caller is an owner or an admin with management permissions.
@@ -54,6 +59,7 @@
 - The repository keeps `.env.example` as documentation for required settings.
 - A local `.env` file may be used for development, but it should remain untracked.
 - In the current repository state, `git ls-files` does not show any tracked `.env` file.
+- In `production`, `prod`, and `staging`, configuration validation refuses startup when `JWT_SECRET` is absent, is a known development placeholder, is shorter than 32 characters, or is obviously low-diversity. When message encryption is enabled, a valid explicit Fernet `MESSAGE_ENCRYPTION_KEY` is also mandatory, so the deterministic development fallback cannot be used.
 - Treat `SUPERADMIN_PASSWORD` as a bootstrap secret. Keep it only in the local/untracked environment and remove or rotate it after initial creation when practical.
 
 ## Routing-Key and Path Safety
@@ -87,5 +93,6 @@ This protects against accidental or unauthorized event modification, insertion, 
 - The verifier does not prove tail deletion unless the previous last hash was stored or witnessed outside the database.
 - Successful upload access logging is best-effort so a temporary audit-log failure does not break protected media playback; unauthorized access logging still blocks the request with `403 Forbidden`.
 - Protected upload-backed avatars, wallpapers, and message media are fetched by the frontend with the bearer token and rendered through temporary object URLs. This is suitable for the local demo, but it is not a production CDN/media pipeline.
+- Upload attachments are protected and immutable after storage, but their file bytes are not encrypted by the message-body Fernet layer; attachment encryption remains future work.
 - Superadmin activity is application-audited but does not replace external administrator monitoring, MFA, a hardware-backed secret store, or separation-of-duties controls.
 - In a future multi-backend deployment, immediate socket termination would need a shared Redis control message so every backend instance disconnects the user; durable token/account rejection already applies on the next authenticated request or reconnect.

@@ -1578,8 +1578,10 @@ class ChannelService:
         channel = await ChannelService.get_channel_or_404(db, channel_id)
         membership = await ChannelService.get_membership(db, channel_id, user_id)
         # Public stats may be viewed by anyone who can discover the channel, but
-        # private channel stats require membership.
-        if channel.visibility == ChannelVisibility.private and membership is None:
+        # private statistics are read-derived metadata and require an approved
+        # reader role. A pending request is not an active subscription.
+        role = membership.role if membership else None
+        if channel.visibility == ChannelVisibility.private and not can_read(role):
             raise AppError("forbidden", 403, code="FORBIDDEN")
         member_count_result = await db.execute(
             select(func.count(ChannelMembership.user_id)).where(
@@ -1609,4 +1611,3 @@ class ChannelService:
             "message_count": int(message_count_result.scalar_one() or 0),
             "last_message_at": last_message_result.scalar_one_or_none(),
         }
-

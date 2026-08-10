@@ -1,10 +1,21 @@
 # Stabilization Status
 
-Last updated: 2026-08-04
+Last updated: 2026-08-10
 
 ## Summary
 
-The latest pass restores sidebar reliability when historical message previews cannot be decrypted: owned and joined channels remain visible, unreadable optional previews are omitted without exposing ciphertext, and the underlying key-rotation limitation remains explicit. Channel scope/search behavior, pagination, and the legacy owner-membership repair remain in place.
+The latest pass completes Phase 1 security hardening for sync membership isolation, immutable streamed upload storage, production secret validation, empty WebSocket subscription filtering, and pending-member read authorization. The isolated PostgreSQL-backed suite passes all 105 backend tests; browser token/session design and attachment encryption remain explicitly deferred.
+
+## Security Hardening Phase 1 - 2026-08-10
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| `/sync` membership privacy | Fixed and verified | `MessageService.sync` limits event backfill to approved current channels or events targeting the caller; regressions cover cross-channel denial, outsider denial, and removed-user notification | Event payload targeting remains an application convention that future membership event types must preserve | Keep new membership event payloads on `user_id` or `target_user_id` and extend the regression mapping when adding event types |
+| Upload storage | Fixed and verified | PUT now streams bounded chunks, hashes incrementally, uses temp-file cleanup plus atomic create-only finalization, locks the upload row, and returns `409` after finalization; size/checksum/interruption/attachment regressions pass | Attachment bytes remain server-readable and are not encrypted by message-body Fernet | Consider attachment encryption and storage abstraction only in a later phase |
+| Production secrets | Fixed and verified | `Settings` rejects missing/default/weak JWT secrets and missing/invalid Fernet keys in production/prod/staging; `.env.example` now uses the 25 MiB upload limit and explicit generation guidance | No KMS, rotation, or centralized secret store | Add deployment secret management/key rotation in a later production-oriented phase |
+| WebSocket subscriptions | Fixed and verified | Empty subscription sets deny ordinary channel events and untargeted membership changes; self-targeted removal still arrives and drops local access | Full RabbitMQ -> Redis -> WebSocket integration is still script/manual coverage rather than CI | Add one real broker-path CI integration scenario |
+| Pending-member RBAC | Fixed and verified | Pending users are denied seen state and private statistics; history, sync, and WebSocket resume/subscription remain approved-role-only | Public discovery metadata remains intentionally visible for public channels | Keep `can_read` as the source of truth for any new read-derived endpoint |
+| Validation | Passed | Phase 1 file: `27 passed`; focused legacy upload/sync group: `29 passed`; full backend: `105 passed`; `docker compose config --quiet` and `git diff --check` passed | Ruff/mypy/pyright are not installed; one existing passlib/argon2 deprecation warning remains | Add a lightweight configured linter/type checker in CI if desired |
 
 ## Sidebar Channel Visibility Fix - 2026-08-04
 

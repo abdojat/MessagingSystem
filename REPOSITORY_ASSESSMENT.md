@@ -4,7 +4,7 @@ Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
 
-This report is evidence-based and references the current codebase. Last updated after the superadmin console hardening pass on 2026-06-19.
+This report is evidence-based and references the current codebase. Last updated after Phase 1 security hardening on 2026-08-10.
 
 ## 1. Executive Summary
 
@@ -402,6 +402,10 @@ flowchart LR
 - Unauthorized publish/read events are logged.
 - Upload downloads are authenticated and authorized; owners and members of the attached channel can access content.
 - Upload creation, content storage, content access, and size/checksum store failures are logged; attachment publish requests only accept upload IDs and derive metadata server-side.
+- Upload PUT bodies are streamed with bounded size/checksum validation, failure cleanup, row-locked finalization, and immutable stored bytes.
+- REST `/sync` membership updates are scoped to approved channels plus self-targeted membership changes, including post-removal notification.
+- Empty WebSocket subscription sets reject ordinary channel traffic while self-targeted membership removal remains deliverable.
+- Pending members are denied private read-derived state, and production/prod/staging reject unsafe JWT or encryption-key configuration at startup.
 - SVG uploads are rejected to keep protected media rendering focused on ordinary photo/video/audio content.
 - Event audit rows are tamper-evident through a per-scope SHA-256 hash chain with an authorized verification endpoint.
 
@@ -414,7 +418,7 @@ flowchart LR
 
 ### Missing / Limited Security
 
-- No strong secret-management strategy.
+- No centralized secret store, KMS integration, or automated key rotation; production-like startup validation now rejects unsafe local secret configuration.
 - No httpOnly cookie auth flow.
 - No explicit CSRF strategy.
 - No key rotation or KMS integration.
@@ -534,6 +538,7 @@ The frontend is real and fairly complete.
 - Backend tests: [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py)
 - Delivery reliability tests: [`backend/tests/test_delivery_reliability.py`](backend/tests/test_delivery_reliability.py)
 - Event integrity tests: [`backend/tests/test_event_integrity.py`](backend/tests/test_event_integrity.py)
+- Phase 1 security regression tests: [`backend/tests/security/test_phase1_hardening.py`](backend/tests/security/test_phase1_hardening.py)
 - Demo verifier: [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py)
 - WebSocket helper: [`scripts/ws_client.py`](scripts/ws_client.py)
 
@@ -541,7 +546,7 @@ The frontend is real and fairly complete.
 
 - No frontend test suite.
 - No real broker failure/DLQ integration test suite.
-- No WebSocket integration test suite beyond helper scripts.
+- WebSocket subscription filtering has focused manager-level regressions, but there is still no automated real RabbitMQ -> Redis -> WebSocket integration suite.
 - No load/stress tests.
 - No CI workflow visible in the repository.
 
@@ -552,6 +557,7 @@ The frontend is real and fairly complete.
 - `docker compose config` passed.
 - `scripts/verify_demo_flow.py` and `scripts/verify_approval_flow.py` are the current supervisor-facing WebSocket verifiers; rerun them against a live Docker stack before final review.
 - The new migration is `0013_event_integrity`; a live Alembic upgrade was not separately run in this pass, but `docker compose config` passed and backend tests validated the model-level schema path.
+- On 2026-08-10, Phase 1 security regressions passed `27` tests, the existing upload/sync-focused group passed `29`, and the complete backend suite passed `105` tests against a dedicated PostgreSQL 16 container; `docker compose config --quiet` and `git diff --check` also passed. One existing passlib/argon2 deprecation warning remains.
 
 ### Practical Testing Plan
 

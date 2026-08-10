@@ -40,9 +40,10 @@ Important:
 - `DATABASE_URL`
 - `RABBITMQ_URL`
 - `REDIS_URL`
-- `JWT_SECRET` (replace development default)
+- `JWT_SECRET` (replace the development default; production/prod/staging require at least 32 non-placeholder characters)
 - `MESSAGE_ENCRYPTION_ENABLED=true`
 - `MESSAGE_ENCRYPTION_KEY` (Fernet key)
+- `UPLOAD_MAX_SIZE_BYTES` (defaults to 25 MiB; upload bodies are streamed and bounded by this value)
 - `OUTBOX_MAX_ATTEMPTS`
 - `OUTBOX_INITIAL_RETRY_DELAY_SECONDS`
 - `OUTBOX_RETRY_BACKOFF_MULTIPLIER`
@@ -53,7 +54,7 @@ Important:
 
 Development note:
 - In `dev/test/local`, empty `MESSAGE_ENCRYPTION_KEY` uses a fallback key.
-- For demo/prod-like runs, set a real key explicitly.
+- For `production`, `prod`, and `staging`, startup rejects missing/default/weak JWT secrets and rejects a missing or invalid Fernet key while message encryption is enabled.
 - Generate one with:
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

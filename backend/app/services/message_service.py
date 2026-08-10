@@ -1,6 +1,8 @@
+from collections.abc import AsyncIterable, AsyncIterator
 from pathlib import Path
 import hashlib
 import logging
+import os
 from uuid import UUID, uuid4
 
 from sqlalchemy import and_, delete, func, or_, select
@@ -396,14 +398,12 @@ class MessageService:
 
     @staticmethod
     async def mark_seen(db: AsyncSession, channel_id: UUID, user_id: UUID, req: SeenRequest) -> UserChannelState:
+        # Seen/unread state is derived from private message history, so it uses
+        # the same approved-reader check as history, sync, and WebSocket resume.
+        await MessageService._assert_can_read(db, channel_id, user_id)
         channel = await db.get(Channel, channel_id)
-        if not channel or channel.deleted_at is not None:
+        if channel is None:  # Defensive; _assert_can_read already checks this.
             raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
-
-        membership = await db.get(ChannelMembership, {"channel_id": channel_id, "user_id": user_id})
-        role = membership.role if membership else None
-        if role not in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member, MembershipRole.pending}:
-            raise AppError("forbidden", 403, code="FORBIDDEN")
 
         state = await db.get(UserChannelState, {"channel_id": channel_id, "user_id": user_id})
         if not state:
@@ -854,6 +854,13 @@ class MessageService:
 
         membership_updates: list[dict] = []
         if req.since is not None:
+            actor_user_id_raw = str(actor_user_id)
+            event_visibility = [
+                Event.payload["user_id"].as_string() == actor_user_id_raw,
+                Event.payload["target_user_id"].as_string() == actor_user_id_raw,
+            ]
+            if membership_map:
+                event_visibility.append(Event.channel_id.in_(list(membership_map.keys())))
             membership_event_rows = await db.execute(
                 select(Event)
                 .where(
@@ -863,6 +870,7 @@ class MessageService:
                         Event.event_type.like("member.%"),
                         Event.event_type == "invite.accepted",
                     ),
+                    or_(*event_visibility),
                 )
                 .order_by(Event.created_at.asc())
                 .limit(max(1, req.limit))
@@ -870,15 +878,24 @@ class MessageService:
             for event in membership_event_rows.scalars().all():
                 payload = event.payload or {}
                 channel_id_raw = payload.get("channel_id") or event.channel_id
-                user_id_raw = payload.get("user_id") or event.actor_user_id
+                user_id_raw = payload.get("user_id") or payload.get("target_user_id")
                 if not channel_id_raw or not user_id_raw:
                     continue
-                new_role = str(payload.get("new_role") or "none")
+                try:
+                    channel_id_value = UUID(str(channel_id_raw))
+                    target_user_id = UUID(str(user_id_raw))
+                except (TypeError, ValueError):
+                    continue
+                # Keep this post-query authorization check as defense in depth
+                # for legacy or malformed event payloads.
+                if channel_id_value not in membership_map and target_user_id != actor_user_id:
+                    continue
+                new_role = MessageService._membership_event_new_role(event.event_type, payload)
                 membership_updates.append(
                     {
-                        "channel_id": channel_id_raw,
-                        "user_id": user_id_raw,
-                        "new_role": new_role if new_role in {"owner", "admin", "member", "pending", "none"} else "none",
+                        "channel_id": channel_id_value,
+                        "user_id": target_user_id,
+                        "new_role": new_role,
                         "reason": str(payload.get("reason") or event.event_type),
                         "updated_at": event.created_at,
                     }
@@ -896,65 +913,161 @@ class MessageService:
         db: AsyncSession,
         actor_user_id: UUID,
         file_id: UUID,
-        content: bytes,
+        content: AsyncIterable[bytes] | bytes | bytearray | memoryview,
     ) -> Upload:
         settings = get_settings()
-        upload = await db.get(Upload, file_id)
+        upload_result = await db.execute(select(Upload).where(Upload.id == file_id).with_for_update())
+        upload = upload_result.scalar_one_or_none()
         # A user may only provide bytes for an upload record they created; later
         # reads are authorized through ownership or message/channel membership.
         if not upload or upload.owner_user_id != actor_user_id:
             raise AppError("upload not found", 404, code="NOT_FOUND")
-        if len(content) != upload.size_bytes:
-            await MessageService._safe_log_event(
-                db,
-                "upload.store_failed",
-                {
-                    "upload_id": str(file_id),
-                    "reason": "size_mismatch",
-                    "expected_size_bytes": int(upload.size_bytes),
-                    "actual_size_bytes": len(content),
-                },
-                actor_user_id=actor_user_id,
-                commit=True,
-            )
-            raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
-        if upload.checksum:
-            # Optional checksums let the frontend or verifier prove the stored
-            # bytes are exactly the bytes that were intended at upload creation.
-            digest = hashlib.sha256(content).hexdigest()
-            if digest != upload.checksum:
-                await MessageService._safe_log_event(
-                    db,
-                    "upload.store_failed",
-                    {
-                        "upload_id": str(file_id),
-                        "reason": "checksum_mismatch",
-                    },
-                    actor_user_id=actor_user_id,
-                    commit=True,
-                )
-                raise AppError("checksum mismatch", 400, code="VALIDATION_ERROR")
 
         full_path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
         # The upload path resolver enforces containment; creating parents here is
         # only for the generated storage layout, not user-controlled directories.
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_bytes(content)
-        upload.public_url = f"/v1/uploads/{upload.id}/content"
-        await log_event(
-            db,
-            "upload.content_stored",
-            {
-                "upload_id": str(upload.id),
-                "filename": upload.filename,
-                "content_type": upload.content_type,
-                "size_bytes": int(upload.size_bytes),
-            },
-            actor_user_id=actor_user_id,
-        )
-        await db.commit()
+        temp_path = full_path.with_name(f".{full_path.name}.{uuid4()}.uploading")
+        expected_size = int(upload.size_bytes)
+        configured_max = max(1, int(settings.upload_max_size_bytes))
+        total_size = 0
+        digest = hashlib.sha256()
+        finalized_here = False
+        failure_reason = "storage_error"
+
+        try:
+            # public_url is the existing persisted lifecycle marker: None means
+            # pending and a protected content URL means successfully finalized.
+            if upload.public_url or full_path.exists():
+                failure_reason = "already_stored"
+                raise AppError("upload content is already stored", 409, code="UPLOAD_IMMUTABLE")
+            if expected_size > configured_max:
+                failure_reason = "configured_size_exceeded"
+                raise AppError("file too large", 413, code="PAYLOAD_TOO_LARGE")
+
+            with temp_path.open("xb") as destination:
+                async for received in MessageService._iter_upload_chunks(content):
+                    if not isinstance(received, (bytes, bytearray, memoryview)):
+                        failure_reason = "invalid_stream_chunk"
+                        raise AppError("invalid upload stream", 400, code="VALIDATION_ERROR")
+                    # Keep write/hash operations bounded even if an ASGI server
+                    # supplies an unusually large receive chunk.
+                    view = memoryview(received)
+                    for offset in range(0, len(view), 64 * 1024):
+                        chunk = view[offset : offset + 64 * 1024]
+                        next_total = total_size + len(chunk)
+                        if next_total > configured_max:
+                            failure_reason = "configured_size_exceeded"
+                            raise AppError("file too large", 413, code="PAYLOAD_TOO_LARGE")
+                        if next_total > expected_size:
+                            failure_reason = "size_mismatch"
+                            raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
+                        destination.write(chunk)
+                        digest.update(chunk)
+                        total_size = next_total
+                destination.flush()
+                os.fsync(destination.fileno())
+
+            if total_size != expected_size:
+                failure_reason = "size_mismatch"
+                raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
+            if upload.checksum and digest.hexdigest().lower() != upload.checksum.strip().lower():
+                failure_reason = "checksum_mismatch"
+                raise AppError("checksum mismatch", 400, code="VALIDATION_ERROR")
+
+            # A same-directory hard link atomically exposes only the complete
+            # file and fails rather than overwriting an existing finalized path.
+            try:
+                os.link(temp_path, full_path)
+            except FileExistsError as exc:
+                failure_reason = "already_stored"
+                raise AppError("upload content is already stored", 409, code="UPLOAD_IMMUTABLE") from exc
+            finalized_here = True
+            temp_path.unlink()
+
+            upload.public_url = f"/v1/uploads/{upload.id}/content"
+            await log_event(
+                db,
+                "upload.content_stored",
+                {
+                    "upload_id": str(upload.id),
+                    "filename": upload.filename,
+                    "content_type": upload.content_type,
+                    "size_bytes": int(upload.size_bytes),
+                },
+                actor_user_id=actor_user_id,
+            )
+            await db.commit()
+        except AppError:
+            if finalized_here:
+                full_path.unlink(missing_ok=True)
+            # Discard any pending lifecycle mutation before the failure event is
+            # written in a fresh transaction.
+            await db.rollback()
+            await MessageService._safe_log_event(
+                db,
+                "upload.store_failed",
+                {
+                    "upload_id": str(file_id),
+                    "reason": failure_reason,
+                    "expected_size_bytes": expected_size,
+                    "actual_size_bytes": total_size,
+                },
+                actor_user_id=actor_user_id,
+                commit=True,
+            )
+            raise
+        except Exception as exc:
+            if finalized_here:
+                full_path.unlink(missing_ok=True)
+            await db.rollback()
+            await MessageService._safe_log_event(
+                db,
+                "upload.store_failed",
+                {
+                    "upload_id": str(file_id),
+                    "reason": failure_reason,
+                    "expected_size_bytes": expected_size,
+                    "actual_size_bytes": total_size,
+                },
+                actor_user_id=actor_user_id,
+                commit=True,
+            )
+            raise AppError("failed to store upload", 500, code="UPLOAD_STORE_FAILED") from exc
+        finally:
+            temp_path.unlink(missing_ok=True)
+
         await db.refresh(upload)
         return upload
+
+    @staticmethod
+    async def _iter_upload_chunks(
+        content: AsyncIterable[bytes] | bytes | bytearray | memoryview,
+    ) -> AsyncIterator[bytes | bytearray | memoryview]:
+        if isinstance(content, (bytes, bytearray, memoryview)):
+            view = memoryview(content)
+            for offset in range(0, len(view), 64 * 1024):
+                yield view[offset : offset + 64 * 1024]
+            return
+        async for chunk in content:
+            yield chunk
+
+    @staticmethod
+    def _membership_event_new_role(event_type: str, payload: dict) -> str:
+        explicit_role = str(payload.get("new_role") or payload.get("role") or "").lower()
+        if explicit_role in {"owner", "admin", "member", "pending", "none"}:
+            return explicit_role
+        inferred_roles = {
+            "invite.accepted": "member",
+            "membership.added": "member",
+            "membership.approved": "member",
+            "member.promoted": "admin",
+            "member.demoted": "member",
+            "member.permissions.updated": "admin",
+            "member.removed": "none",
+            "membership.left": "none",
+        }
+        return inferred_roles.get(event_type, "none")
 
     @staticmethod
     async def validate_profile_image_upload_reference(

@@ -1,9 +1,22 @@
 from functools import lru_cache
+import base64
 import json
 from typing import Any
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+PRODUCTION_ENVIRONMENTS = {"prod", "production", "staging"}
+INSECURE_JWT_SECRETS = {
+    "change-me",
+    "change-this-jwt-secret",
+    "dev-only-change-this-jwt-secret",
+    "changeme",
+    "jwt-secret",
+    "secret",
+    "your-jwt-secret",
+}
 
 
 class Settings(BaseSettings):
@@ -59,6 +72,36 @@ class Settings(BaseSettings):
                     pass
             return [part.strip() for part in raw.split(",") if part.strip()]
         return ["http://localhost:3000", "http://localhost:5173"]
+
+    @model_validator(mode="after")
+    def _validate_production_secrets(self) -> "Settings":
+        environment = self.environment.strip().lower()
+        if environment not in PRODUCTION_ENVIRONMENTS:
+            return self
+
+        jwt_secret = self.jwt_secret.strip()
+        if not jwt_secret:
+            raise ValueError("JWT_SECRET is required in production-like environments")
+        if jwt_secret.lower() in INSECURE_JWT_SECRETS:
+            raise ValueError("JWT_SECRET cannot use a known development placeholder in production-like environments")
+        # HS256 accepts arbitrary strings, so enforce a conservative minimum
+        # length and basic diversity to reject short or obviously predictable
+        # deployment secrets before the application starts.
+        if len(jwt_secret) < 32 or len(set(jwt_secret)) < 8:
+            raise ValueError("JWT_SECRET must be at least 32 characters with reasonable entropy")
+
+        if self.message_encryption_enabled:
+            encryption_key = self.message_encryption_key.strip()
+            if not encryption_key:
+                raise ValueError("MESSAGE_ENCRYPTION_KEY is required when encryption is enabled")
+            try:
+                decoded_key = base64.b64decode(encryption_key.encode("ascii"), altchars=b"-_", validate=True)
+            except (ValueError, UnicodeEncodeError) as exc:
+                raise ValueError("MESSAGE_ENCRYPTION_KEY must be a valid Fernet key") from exc
+            if len(decoded_key) != 32:
+                raise ValueError("MESSAGE_ENCRYPTION_KEY must be a valid Fernet key")
+
+        return self
 
 
 @lru_cache

@@ -82,7 +82,7 @@ class WSManager:
             )
         )
 
-        redis_task = asyncio.create_task(self._redis_forward_loop(websocket, username))
+        redis_task = asyncio.create_task(self._redis_forward_loop(websocket, username, user_id))
         inbound_task = asyncio.create_task(self._inbound_loop(websocket, user_id))
         # The socket is alive while both loops are alive; if either side exits,
         # cancel the other side and let the route perform disconnect cleanup.
@@ -399,7 +399,7 @@ class WSManager:
                 )
             )
 
-    async def _redis_forward_loop(self, websocket: WebSocket, username: str) -> None:
+    async def _redis_forward_loop(self, websocket: WebSocket, username: str, user_id: UUID) -> None:
         channel_name = user_pubsub_channel(username)
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(channel_name)
@@ -425,17 +425,31 @@ class WSManager:
                 except AppError as exc:
                     logger.warning("failed to decrypt realtime event: %s", exc.code)
                     continue
-                channel_id = str(event.get("channel_id") or "")
-                event_type = str(event.get("type") or "event")
-                subs = self._subscriptions.get(id(websocket), set())
-                # Membership updates are delivered even when the channel was just
-                # unsubscribed, because they tell the client why access changed.
-                if event_type != "membership_update" and channel_id and subs and channel_id not in subs:
-                    continue
-                await websocket.send_json(build_envelope(event_type, event))
+                await self._forward_event(websocket, user_id, event)
         finally:
             await pubsub.unsubscribe(channel_name)
             await pubsub.close()
+
+    async def _forward_event(self, websocket: WebSocket, user_id: UUID, event: dict[str, Any]) -> bool:
+        channel_id = str(event.get("channel_id") or "")
+        event_type = str(event.get("type") or "event")
+        subs = self._subscriptions.get(id(websocket), set())
+        is_targeted_membership_update = (
+            event_type == "membership_update" and str(event.get("user_id") or "") == str(user_id)
+        )
+
+        if is_targeted_membership_update:
+            # A removal/leave notification must reach the affected user even
+            # after access is revoked. Also drop the local subscription before
+            # any later ordinary channel event can be forwarded.
+            if channel_id and str(event.get("new_role") or "none") not in {"owner", "admin", "member"}:
+                subs.discard(channel_id)
+        elif channel_id and channel_id not in subs:
+            # Empty means no ordinary channel subscriptions, not a wildcard.
+            return False
+
+        await websocket.send_json(build_envelope(event_type, event))
+        return True
 
     def _decrypt_event_payload(self, event: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(event, dict):

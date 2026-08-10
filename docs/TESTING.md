@@ -1,5 +1,24 @@
 # Testing
 
+## Phase 1 Security Regression Tests
+
+`backend/tests/security/test_phase1_hardening.py` contains 27 focused regressions covering:
+
+- `/sync` isolation between channels, outsider denial, and self-targeted removal backfill;
+- streamed upload handling without `request.body()`, configured/declared size bounds, checksum validation, interruption cleanup, immutable second PUT behavior, original-byte preservation, and continued attachment use;
+- production-like JWT/encryption-secret validation while development/test convenience remains available;
+- WebSocket delivery for subscribed channels, denial for unsubscribed/empty sets (including other users' membership updates), final-channel unsubscribe, and self-targeted removal delivery;
+- pending-member denial for private seen state, history, statistics, sync, and WebSocket subscription membership.
+
+Focused command:
+
+```bash
+cd backend
+python -m pytest -q tests/security/test_phase1_hardening.py
+```
+
+Verified on 2026-08-10 against a dedicated PostgreSQL 16 test container: `27 passed, 1 warning`. The warning is the existing `passlib` access to deprecated `argon2.__version__` metadata.
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`
@@ -85,7 +104,7 @@ Focused superadmin run:
 ```bash
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest tests/test_superadmin.py -q"
 ```
-The earlier 2026-06-19 isolated PostgreSQL run passed all seven original focused tests. After console hardening, the complete suite passed `68` tests against a disposable PostgreSQL 16 container; frontend typecheck and production build also passed. Use a dedicated test database because the shared fixture truncates its configured database between cases.
+The earlier 2026-06-19 isolated PostgreSQL run passed all seven original focused tests. After console hardening, the complete suite passed `68` tests against a disposable PostgreSQL 16 container; frontend typecheck and production build also passed. After Phase 1 security hardening on 2026-08-10, the broad backend suite passed `105` tests with one existing dependency deprecation warning against an isolated PostgreSQL 16 container. Use a dedicated test database because the shared fixture truncates its configured database between cases.
 
 Legacy event backfill check:
 ```bash

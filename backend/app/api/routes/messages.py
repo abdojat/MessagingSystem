@@ -369,8 +369,7 @@ async def create_upload(req: UploadCreateRequest, db: DBDep, user: CurrentUserDe
 @router.put("/uploads/{file_id}/content")
 async def put_upload_content(file_id: UUID, request: Request, db: DBDep, user: CurrentUserDep) -> dict:
     try:
-        body = await request.body()
-        upload = await MessageService.store_upload_content(db, user.id, file_id, body)
+        upload = await MessageService.store_upload_content(db, user.id, file_id, request.stream())
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return {"file_id": str(upload.id), "public_url": upload.public_url}

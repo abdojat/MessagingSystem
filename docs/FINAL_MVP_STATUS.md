@@ -9,12 +9,15 @@
 - Tamper-evident audit log integrity for new events through a per-scope SHA-256 hash chain.
 - Message encryption at rest on the server side.
 - Private upload download protection with authentication and authorization checks.
+- Uploaded content is streamed with bounded size/checksum validation and becomes immutable after the first successful store.
 - Message attachments support protected photo, video, and audio publishing, including attachment-only messages.
 - Attachment publish requests accept only upload `file_id` references, with trusted attachment metadata generated server-side.
 - Upload create/store/access and upload store failure events are logged for audit visibility.
 - Profile and channel avatar uploads use validated image references and protected-media access rules.
 - Profile chat wallpaper uploads are stored through the backend upload API and saved on the current user's profile.
 - Safe identifier validation for usernames, channel slugs, and broker-facing routing identifiers.
+- Production/prod/staging startup rejects missing, placeholder, weak, or invalid JWT/message-encryption secrets.
+- REST membership-event sync is channel-scoped while retaining self-targeted removal notifications; empty WebSocket subscriptions do not act as wildcards; pending memberships do not gain private read-derived privileges.
 - Docker Compose run path for PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend.
 - Backend P0 regression tests for the main security and demo-flow behavior.
 - Verified during Delivery Reliability Upgrade v1: Docker-backed backend tests passed, frontend typecheck passed, Docker Compose config passed, and a temporary-database Alembic upgrade to head passed.
@@ -26,6 +29,7 @@
 - Verified during avatar/image audit on 2026-06-15: backend tests passed (`31 passed, 20 skipped`) and frontend typecheck passed after hardening avatar URL validation, protected avatar upload access, and authenticated image rendering.
 - Verified during multimedia publishing audit on 2026-06-16: backend P0 tests passed (`33 passed, 13 skipped`) and frontend typecheck passed after tightening attachment references, upload error handling, SVG rejection, upload audit events, and refreshed-token PUT uploads.
 - Verified during profile wallpaper upload pass on 2026-06-17: backend P0 tests passed (`33 passed, 14 skipped`), frontend typecheck passed, locale key alignment passed, Docker Compose rebuilt and started successfully, Alembic applied `0014_user_wallpaper_url`, and `git diff --check` reported only line-ending warnings.
+- Verified during Phase 1 security hardening on 2026-08-10: the focused security suite passed (`27 passed`), existing upload/sync-focused tests passed (`29 passed`), the full backend suite passed (`105 passed`) against isolated PostgreSQL 16, and `docker compose config --quiet` plus `git diff --check` passed. One existing passlib/argon2 deprecation warning remains.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 - Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.
