@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request
 
 from app.api.deps import AMQPDep, CurrentUserDep, DBDep, RedisDep
+from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.db.models import MembershipRole
@@ -268,7 +269,7 @@ async def revoke_invite(
 
 @router.get("/invites/{token}", response_model=InvitePreviewResponse)
 async def preview_invite(token: str, db: DBDep, request: Request, redis: RedisDep) -> InvitePreviewResponse:
-    ip = request.client.host if request.client else "unknown"
+    ip = get_client_ip(request)
     await enforce_rate_limit(
         redis,
         f"rl:channel-management:invite-preview:{ip}",

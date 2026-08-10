@@ -28,6 +28,10 @@ Global administration is modeled independently from channel membership. `users.i
   - User workflows: auth, channels, join/leave, publish/read, event logs.
   - Delivery Monitor for channel owners/admins to inspect and retry failed outbox delivery.
   - Event Log integrity check for channel owners/admins.
+- Nginx (recommended hardened Compose path)
+  - Is the only published service in `docker-compose.hardened.yml`.
+  - Overwrites the single forwarded client address and applies body/header,
+    connection, buffering, and inactivity bounds before proxying REST/WebSocket/UI traffic.
 
 ## High-Level Architecture
 ```mermaid
@@ -44,6 +48,24 @@ flowchart LR
   WK -->|Mirror dead letters| DLQ[(RabbitMQ DLQ)]
   WK -->|Redis fanout support| REDIS
 ```
+
+## Direct development and proxy-bounded deployment
+
+`docker-compose.yml` remains the convenient local development/demo topology with
+direct published service ports. `docker-compose.hardened.yml` is the recommended
+HTTP resource-protection path: only Nginx publishes port 8080, while backend,
+frontend, PostgreSQL, RabbitMQ, and Redis stay on an internal Docker network.
+The proxy has a fixed private address and the backend trusts only that `/32` for
+a single overwritten `X-Forwarded-For` value. Direct mode has an empty trusted
+proxy list and ignores arbitrary forwarding headers.
+
+Nginx buffers ordinary upstream responses, so a slow downstream reader does not
+necessarily hold the FastAPI stream for the entire client duration. Per-IP and
+server connection zones bound admitted proxy work, and `send_timeout` closes
+connections that make no write progress for the configured interval. This is
+not a minimum-throughput guarantee; sustained trickle clients within the limits,
+OS file-descriptor/socket tuning, TLS, and multi-replica coordination remain
+operator/deployment responsibilities.
 
 ## Message Lifecycle
 ```mermaid
@@ -117,9 +139,9 @@ This is a practical hash-chain integrity layer, not a blockchain and not externa
 - Channel membership generations are serialized on the channel row and copied into realtime outbox events. Before decrypting a channel message, the WebSocket layer compares the event generation with its short-lived authorization cache and refreshes PostgreSQL immediately for newer or legacy events. A missed Redis removal signal therefore cannot authorize a newly published post-removal message.
 - Established WebSockets have a repository-controlled 16 KiB inbound frame/message ceiling at both Docker Uvicorn and application parsing. Each socket owns fixed-cardinality command/history token buckets and one dispatch lock. Subscribe/resume history shares one total per-command row cap rather than multiplying it per channel; a repeated identical subscribe/cursor returns an empty acknowledgement without repeating history work. Socket budget/cache state is removed on disconnect.
 - REST `/sync` preserves `(channel UUID, sequence)` ordering and uses `LIMIT remaining` per channel under one global page budget. It performs at most 100 bounded message queries and materializes at most the requested limit (maximum 500), rather than loading all missed history.
-- Protected upload GET responses authorize and finish database work first, then stream with Starlette `FileResponse`. A race-safe per-process/per-user lease bounds concurrent protected downloads and is released on completion, send failure, or cancellation.
+- Protected upload GET responses authorize and finish database work first, then stream with Starlette `FileResponse`. One per-process atomic admission decision reserves user, trusted client-IP, and backend-global capacity; its idempotent lease releases every dimension on completion, cancellation, file/stat failure, ASGI send failure, or response construction failure. Active-key maps are bounded by the process-global cap because zero-count entries are removed.
 - Message-attachment reads inherit channel lifecycle: channel-derived authorization requires an active channel, non-deleted message, and approved current membership. Upload ownership remains an independent authorization source across channel/message deletion; superadmin status alone is not a private-media read grant.
-- Targeted invites are one-use; generic invite links are reusable until revoke, expiry, or channel deletion. Acceptance/revocation/deletion lock the channel before the invite row, establishing one database ordering. Generic acceptances are audited per effective membership transition and do not consume global `accepted_at` state.
+- Targeted invites are one-use; generic invite links are reusable until revoke, expiry, or channel deletion. Acceptance/revocation/deletion lock the channel before the invite row, establishing one database ordering. An email target that belongs to an existing account is resolved at issuance and stores authoritative immutable `invited_user_id` plus a normalized email snapshot. An unresolved/pre-registration email target can be accepted only by an account whose exact normalized current email has non-null `email_verified_at`; profile email changes clear that timestamp. Generic acceptances are audited per effective membership transition and do not consume global `accepted_at` state.
 - Per-user RabbitMQ queues are bounded realtime buffers: default unused expiry is seven days, message TTL is 24 hours, and maximum length is 10,000 with oldest-message eviction. PostgreSQL message history and REST `/sync` recover anything missed or evicted.
 - RabbitMQ-to-Redis forwarding retries Redis with exponential delay, then delays again before NACK/requeue. A Redis outage therefore produces paced retries rather than an immediate hot requeue loop.
 - API fixed-window rate counters use one Redis Lua operation for increment plus first-hit TTL. During Redis failure, the per-process fallback never evicts an active key for churn; it reclaims expired windows and denies unseen sensitive keys at its configured capacity. Low-risk allow-policy reads remain independent of fallback saturation.

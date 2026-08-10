@@ -4,14 +4,14 @@
 - Environment-bootstrapped global superadmin with platform-wide audit visibility, account/session controls, channel suspension/restoration, and global delivery recovery; private message content is not implicitly exposed.
 - User authentication with password hashing, session-bound JWT access/refresh tokens, idle and absolute expiry, refresh replay detection, one-time WebSocket tickets, and local/distributed session revocation.
 - Channel/topic creation, listing, updates, joins, leaves, invites, approvals, role changes, and member removal.
-- Targeted invites are one-use and atomically ordered against revocation/deletion; generic invite links are reusable until revoked, expired, or their channel is deleted.
+- Targeted invites are one-use and atomically ordered against revocation/deletion; generic invite links are reusable until revoked, expired, or their channel is deleted. Existing-account email targets bind to immutable user IDs, unresolved email targets require explicit verification, and changing an email clears verification.
 - Publish/subscribe message persistence with PostgreSQL as the source of truth.
 - Event logging for the key channel, membership, message, and security flows.
 - Tamper-evident audit log integrity for new events through a per-scope SHA-256 hash chain.
 - Message encryption at rest on the server side.
 - Private upload download protection with authentication and authorization checks.
 - Uploaded content is streamed with bounded size/checksum validation and becomes immutable after the first successful store.
-- Authorized upload downloads are streamed with backpressure and a configurable per-user/per-backend concurrency boundary; authorization and audit DB work finishes before the file transfer.
+- Authorized upload downloads are streamed with backpressure and one atomic per-user/per-client-IP/process-global boundary in each backend; authorization and audit DB work finishes before the file transfer.
 - Message attachments support protected photo, video, and audio publishing, including attachment-only messages.
 - Attachment publish requests accept only upload `file_id` references, with trusted attachment metadata generated server-side.
 - Upload create/store/access and upload store failure events are logged for audit visibility.
@@ -25,7 +25,7 @@
 - Established WebSockets have explicit inbound size, weighted command, total history-row, duplicate-subscribe, and one-command-at-a-time work bounds.
 - Protected channel attachment access follows active-channel/non-deleted-message/current-membership lifecycle, while upload owners retain explicit access to their own uploads.
 - Redis fixed-window increments and TTL installation are atomic; the bounded outage fallback preserves active blocked keys and denies unseen sensitive keys at saturation instead of evicting security state.
-- Docker Compose run path for PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend.
+- Docker Compose development path for PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend, plus a separate Nginx-fronted hardened path where only port 8080 is published.
 - Backend P0 regression tests for the main security and demo-flow behavior.
 - Verified during Delivery Reliability Upgrade v1: Docker-backed backend tests passed, frontend typecheck passed, Docker Compose config passed, and a temporary-database Alembic upgrade to head passed.
 - Verified during Stabilization Pass on 2026-06-10: Docker Compose config passed, Docker stack rebuilt and was healthy, Docker-backed backend tests passed, frontend typecheck passed, Docker frontend build passed, upgraded demo verifier passed, and Docker-network event-integrity dry-run passed.
@@ -41,6 +41,7 @@
 - Verified during Phase 3 abuse/reliability hardening on 2026-08-10: migration `0018_phase3_abuse_hardening` applied on fresh PostgreSQL 16 and backfilled a historical attachment relation from a pre-Phase-3 row; the focused Phase 3 suite passed (`19 passed`) and the full backend suite passed (`143 passed`). Rate-limit fallback, payload/protocol bounds, idempotent state changes, fixed reaction query counts, indexed upload authorization, quotas, bounded queue arguments, durable membership-binding commands, and Redis fanout backoff have regression coverage. One existing passlib/argon2 deprecation warning remains; live broker/Redis outage integration remains future work.
 - Verified during Phase 4 P0 hardening on 2026-08-10: migration `0019_phase4_p0_hardening` passed on a fresh database and an upgrade from 0018 with active/removed historical binding rows; the focused Phase 4 suite passed (`15 passed`) and the complete backend suite passed (`158 passed, 1 warning`). Deterministic tests cover stale opposite generations, duplicate/crash retries, missed membership signals, bounded sync rows/cursors/authorization, and streaming/concurrency/cancellation. Live multi-worker RabbitMQ/Redis loss remains future work.
 - Verified during Phase 5 medium hardening on 2026-08-10 against disposable PostgreSQL 16: the focused Phase 5 suite passed (`18 passed, 1 warning`), Phase 1–4 security suites passed (`80 passed, 1 warning`), and the complete backend suite passed (`176 passed, 1 warning`). Invite races used two independent database sessions; Redis/WebSocket abuse and outage behavior used deterministic application-level harnesses rather than a live multi-backend outage/load run. No migration was required.
+- Verified during Phase 6 medium hardening on 2026-08-10 against disposable PostgreSQL 16: the focused Phase 6 suite passed (`19 passed, 1 warning`), Phase 1–5 security suites passed (`98 passed, 1 warning`), and the complete backend suite passed (`195 passed, 1 warning`). Migration `0020_phase6_invite_identity` passed on a fresh database and on an upgrade from 0019 containing existing-user email, unresolved email, user-ID, and generic invitations. Frontend typecheck, direct/hardened Compose rendering, and containerized Nginx syntax validation passed. Email verification completion was simulated at the trusted database boundary; proxy slow-reader behavior was not load-tested.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 - Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.
@@ -72,6 +73,8 @@
 - The DLQ mirror depends on RabbitMQ being available at the time of dead-letter handling.
 - Event integrity is tamper-evident but not externally notarized. A fully privileged database operator could recompute hashes after rewriting rows unless hashes are anchored outside PostgreSQL.
 - Legacy rows need explicit backfill before the verifier can report them as initialized.
+- Email verification delivery/token issuance is not implemented; unresolved pre-registration email invitations remain unusable until a deployment supplies trusted mailbox verification.
+- Protected-download limits are per backend process and proxy instance. Nginx bounds connection counts and write inactivity but this configuration does not guarantee a minimum client throughput or coordinate multiple replicas.
 
 ## What Is Demo-Grade
 - Browser-managed access/refresh token storage remains demo-grade. WebSocket transport now uses one-time opaque tickets, but the broader browser session design has not migrated to httpOnly cookies and CSRF-aware flows.
@@ -82,6 +85,8 @@
 ## Future Work
 - Dedicated broker/WebSocket integration tests in CI.
 - Live multi-backend WebSocket flood and Redis outage/recovery load tests; current command/fallback proofs are deterministic component tests and per-process limits remain explicit.
+- Controlled multi-account slow-reader/TCP tests and coordinated multi-replica download admission/ingress controls.
+- A real email-verification delivery and completion flow for pre-registration email invites.
 - Full RabbitMQ outage/DLQ integration tests in CI.
 - Frontend automated smoke coverage.
 - Stronger production session handling with httpOnly cookies and CSRF-aware flows.

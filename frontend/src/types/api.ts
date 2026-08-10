@@ -7,6 +7,7 @@ export interface User {
 
 export interface MeResponse extends User {
   email?: string | null;
+  email_verified_at?: string | null;
   wallpaper_url?: string | null;
   bio?: string | null;
   created_at?: string;

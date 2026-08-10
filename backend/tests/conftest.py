@@ -51,6 +51,13 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at timestamptz"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_by_user_id uuid"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at timestamptz"))
+            await conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_normalized "
+                    "ON users (lower(btrim(email))) WHERE email IS NOT NULL"
+                )
+            )
             await conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS absolute_expires_at timestamptz"))
             await conn.execute(
                 text(

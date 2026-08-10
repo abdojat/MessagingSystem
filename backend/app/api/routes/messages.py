@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 
 from app.api.deps import CurrentUserDep, DBDep, RedisDep
+from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.db.models import Upload, User
@@ -444,7 +445,13 @@ async def put_upload_content(
 
 
 @router.get("/uploads/{file_id}/content")
-async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep, redis: RedisDep) -> Response:
+async def get_upload_content(
+    file_id: UUID,
+    request: Request,
+    db: DBDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
+) -> Response:
     await _enforce_media(redis, user.id, "get")
     # Upload bytes are private by default. Access is inherited from ownership or
     # from a message/channel that references the upload.
@@ -468,7 +475,10 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep, red
         raise to_http_exception(AppError("upload content not found", 404, code="NOT_FOUND"))
     lease = await protected_download_limiter.try_acquire(
         user.id,
-        get_settings().max_concurrent_downloads_per_user,
+        get_client_ip(request),
+        per_user_limit=settings.max_concurrent_downloads_per_user,
+        per_ip_limit=settings.max_concurrent_downloads_per_ip,
+        global_limit=settings.max_concurrent_downloads_global,
     )
     if lease is None:
         raise to_http_exception(
@@ -496,7 +506,13 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep, red
     except BaseException:
         await lease.release()
         raise
-    return LeasedFileResponse(path, lease, media_type=upload.content_type)
+    try:
+        return LeasedFileResponse(path, lease, media_type=upload.content_type)
+    except BaseException:
+        # Constructor/header failures occur before ASGI invokes the response's
+        # finally block, so release the complete multi-dimensional lease here.
+        await lease.release()
+        raise
 
 
 @router.post(

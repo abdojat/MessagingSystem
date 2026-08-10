@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 
 from app.api.deps import CurrentAuthDep, CurrentUserDep, DBDep, RedisDep
+from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.schemas.auth import (
@@ -43,7 +44,7 @@ async def _enforce_auth_rate_limits(redis: RedisDep, scope: str, ip: str, identi
 
 @router.post("/register", status_code=201)
 async def register(req: RegisterRequest, db: DBDep, request: Request, redis: RedisDep) -> dict:
-    ip = request.client.host if request.client else "unknown"
+    ip = get_client_ip(request)
     await _enforce_auth_rate_limits(redis, "register", ip, req.username)
     try:
         user = await AuthService.register(db, req)
@@ -55,14 +56,14 @@ async def register(req: RegisterRequest, db: DBDep, request: Request, redis: Red
 @router.post("/login", response_model=TokenPair)
 async def login(req: LoginRequest, db: DBDep, request: Request, redis: RedisDep) -> TokenPair:
     settings = get_settings()
-    ip = request.client.host if request.client else "unknown"
+    ip = get_client_ip(request)
     await _enforce_auth_rate_limits(redis, "login", ip, req.username_or_email)
     try:
         return await AuthService.login(
             db,
             req,
             user_agent=request.headers.get("user-agent"),
-            ip=request.client.host if request.client else None,
+            ip=ip,
             refresh_ttl_days=settings.jwt_refresh_ttl_days,
             absolute_ttl_days=settings.session_absolute_ttl_days,
         )
@@ -85,14 +86,14 @@ async def login(req: LoginRequest, db: DBDep, request: Request, redis: RedisDep)
 @router.post("/refresh", response_model=TokenPair)
 async def refresh(req: RefreshRequest, db: DBDep, request: Request, redis: RedisDep) -> TokenPair:
     settings = get_settings()
-    ip = request.client.host if request.client else "unknown"
+    ip = get_client_ip(request)
     await _enforce_auth_rate_limits(redis, "refresh", ip, ip)
     try:
         return await AuthService.refresh(
             db,
             req.refresh_token,
             user_agent=request.headers.get("user-agent"),
-            ip=request.client.host if request.client else None,
+            ip=ip,
             refresh_ttl_days=settings.jwt_refresh_ttl_days,
         )
     except RefreshTokenReplayError as exc:

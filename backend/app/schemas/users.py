@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.core.email_identity import normalize_email
 from app.core.identifiers import normalize_avatar_url, normalize_wallpaper_url
 
 
@@ -63,5 +64,5 @@ class UpdateMeRequest(BaseModel):
     def normalize_optional_email(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        normalized = value.strip()
+        normalized = normalize_email(value)
         return normalized or None

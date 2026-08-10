@@ -3,6 +3,13 @@
 ## Authentication
 - API routes that expose user, channel, message, event, and upload data require JWT-based authentication.
 - Passwords are hashed with a strong password hashing algorithm in the backend.
+- Emails are trimmed and lowercased consistently at registration, profile update,
+  invite issuance/acceptance, login lookup, and superadmin bootstrap. No
+  provider-specific rewriting such as Gmail dot removal is performed.
+- `users.email_verified_at` is explicit proof state for the exact current email.
+  Registration and profile mutation never set it. Changing to a different
+  normalized email clears it; updating only case/whitespace around the same
+  canonical address preserves the existing proof.
 - Access JWTs contain a stable `sid` and every protected request resolves the user and that `UserSession` together. Missing, malformed, nonexistent, revoked, idle-expired, or absolute-expired sessions are rejected.
 - Refresh tokens are stored server-side as hashes, not plain text. Rotation adds a unique `jti`; reuse of a signed stale token revokes that session/family and logs `security.refresh_replay_detected`.
 - Sessions have both a sliding idle deadline (`JWT_REFRESH_TTL_DAYS`, default 14 days) and a non-sliding absolute deadline (`SESSION_ABSOLUTE_TTL_DAYS`, default 30 days).
@@ -22,7 +29,7 @@
 - Channel list/detail payloads withhold decrypted last-message previews, seen markers, and unread counts unless the caller has an approved readable membership (`owner`, `admin`, or `member`). Public discovery can still expose basic channel metadata and last-activity time.
 - Channel list search treats `%`, `_`, and `\` as literal text instead of SQL wildcards, and `#channel-slug` search is resolved against the safe stored slug.
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
-- Authorized upload bytes are served with chunked `FileResponse` streaming after database authorization/audit work is complete. `MAX_CONCURRENT_DOWNLOADS_PER_USER` (default 3) bounds active protected downloads per user in each backend process, and the lease is released on completion, cancellation, or send failure.
+- Authorized upload bytes are served with chunked `FileResponse` streaming after database authorization/audit work is complete. One atomic lease checks and reserves `MAX_CONCURRENT_DOWNLOADS_PER_USER` (3), `MAX_CONCURRENT_DOWNLOADS_PER_IP` (12), and `MAX_CONCURRENT_DOWNLOADS_GLOBAL` (100) in each backend process. Failed admission changes no counter. Idempotent cleanup releases every dimension on completion, cancellation, file/stat failure, ASGI send failure, and response construction failure.
 - The upload route allows content only to the owner. The download route always permits the upload owner; ordinary message-attachment access requires an active channel, a non-deleted message, and a current approved owner/admin/member membership. Soft-deleting a channel suspends channel-derived attachment access, and restoring it restores access only for current approved members. Pending, removed, outsider, and superadmin identities have no implicit channel-media bypass. Message attachment authorization uses the indexed `message_attachments(upload_id, channel_id, message_id)` relation rather than scanning message-history JSON; migration `0018_phase3_abuse_hardening` backfills historical attachment references.
 - Upload request bodies are streamed in bounded chunks to a same-directory temporary file while size and SHA-256 are checked incrementally. Failed, interrupted, oversized, short, or checksum-mismatched uploads are cleaned up and remain pending.
 - Successful upload storage is immutable. The existing protected `public_url` is the persisted pending/stored lifecycle marker, the upload row is locked during finalization, and a second PUT returns `409 Conflict` without replacing historical bytes.
@@ -39,6 +46,19 @@
 - Delivery monitoring endpoints under `/v1/admin/delivery/*` require authentication and are scoped to channels where the caller is an owner or an admin with management permissions.
 - Manual delivery retry is authorized through the same scoped channel-manager rule.
 - Targeted user/email invites are one-use. Generic links are reusable until revoked, expired, or their channel is deleted. Acceptance, revocation, and channel deletion lock the channel before the invite row; this supplies one PostgreSQL linearization order. If revocation wins, later membership creation is rejected; if targeted acceptance wins, the accepted state and membership commit together and later revocation reports that the invite was already accepted. Generic acceptances remain independently visible through `invite.accepted` or membership audit events rather than consuming one global `accepted_at` value.
+- Email is not an immutable authorization identity. At invite issuance, an existing
+  normalized email owner is resolved once into authoritative `invited_user_id`;
+  the email remains only a display/audit snapshot. Later email reassignment
+  cannot transfer that invite, and the originally targeted user may accept after
+  changing email. If no account exists at issuance, acceptance requires both an
+  exact normalized current email and non-null `email_verified_at`. Token possession
+  plus an unverified profile value is denied with `EMAIL_VERIFICATION_REQUIRED`.
+  Migration `0020_phase6_invite_identity` normalizes historical values and binds
+  unambiguous existing-account invites without marking any historical email verified.
+- The repository does not send verification email or expose a shortcut that marks
+  arbitrary addresses verified. A deployment/product email-verification flow must
+  establish `email_verified_at` after mailbox proof before unresolved
+  pre-registration invites become usable.
 
 ### Global superadmin
 - `users.is_superadmin` is a separate platform privilege; it is not a channel membership role and cannot be requested through registration or profile APIs.
@@ -95,6 +115,18 @@
 - Seen state is monotonic and idempotent. Equal or lower sequence markers do not update timestamps/unread counts or emit another outbox event; only initial state and forward progress are persisted/broadcast.
 - Reaction values must be short supported Unicode emoji, and each message defaults to at most 20 distinct emoji values. Duplicate add and nonexistent remove operations return the current summary without another outbox event. Message-list reaction counts and caller reactions are loaded in two batch queries rather than per message.
 - Default account quotas limit active owned channels (50), active invites (100), daily upload records (100), pending uploads (10), reserved upload bytes (1 GiB), and concurrent WebSockets per backend instance (5). Boundaries return `RESOURCE_QUOTA_EXCEEDED` or `WEBSOCKET_QUOTA_EXCEEDED`.
+- Protected-download request rate and active-resource admission are independent.
+  Media rate limiting remains enabled, while active user/IP/global stream counts
+  are reserved together under one process lock. Only active keys are retained,
+  so limiter dictionary cardinality is bounded by the process-global stream cap.
+- Client-IP resolution ignores arbitrary forwarding headers in direct mode. A
+  forwarded address is accepted only when the immediate peer is inside an
+  explicit `TRUSTED_PROXY_CIDRS` range and the header contains one valid address.
+  The repository Nginx path overwrites that header and uses a fixed trusted `/32`.
+- `docker-compose.hardened.yml` publishes only Nginx. Its configuration limits
+  body/header sizes and active per-IP/server connections, buffers ordinary
+  upstream responses, and applies header/body/upstream/write-inactivity timeouts.
+  `send_timeout` is an inactivity bound, not a minimum-bandwidth guarantee.
 
 ## Broker and Redis Outage Semantics
 - Membership/topology transactions update a monotonically versioned `broker_binding_states` row and enqueue a `broker_binding.reconcile` snapshot. The worker locks that row, rejects old generations, checks current membership and channel deletion state, removes obsolete routing keys, and applies the current projection idempotently. Duplicate execution and a crash after Rabbit success but before PostgreSQL acknowledgement are safe. Slug update and superadmin restore use the same path.
@@ -126,7 +158,19 @@ This protects against accidental or unauthorized event modification, insertion, 
 - Cross-instance socket termination is best-effort realtime control. If Redis is unavailable during revocation, the database revocation still commits and blocks subsequent HTTP authentication, refresh, ticket validation, and reconnects, but a socket on another instance may remain until its captured authentication expiry.
 - Emergency rate limiting and concurrent WebSocket quotas are per backend process when Redis/distributed coordination is unavailable; they are high-value MVP controls, not a billing-grade global quota service.
 - Established-socket command/history budgets are also per socket and per backend process. The five-socket default and ticket/connection limits bound multiplication and reconnect resets, but the implementation does not claim one globally shared WebSocket budget across replicas.
-- Protected-download concurrency is also per backend process. Reverse-proxy connection, bandwidth, timeout, and IP policies remain required for production.
+- Protected-download user/IP/global counters are per backend process, not shared
+  across replicas. The repository proxy bounds each proxy instance, but a
+  multi-replica deployment still needs coordinated ingress limits and operator
+  file-descriptor/socket limits.
+- No live many-account slow-reader load test was run. The application-level
+  admission and cleanup invariants are deterministic tests; Nginx syntax was
+  validated, but slow-client behavior was configuration-reviewed rather than
+  exercised under TCP load. Stock Nginx does not enforce a guaranteed minimum
+  downstream throughput in this configuration.
+- Email verification delivery/issuance is intentionally not implemented. Tests
+  simulate the trusted external completion boundary by persisting
+  `email_verified_at`; unresolved pre-registration invitations remain denied
+  until a real deployment flow supplies that proof.
 - A matching/older queued realtime event can use a cached authorization decision for at most one second by default. Newly committed post-membership-change events carry the newer generation and force immediate PostgreSQL revalidation before decryption.
 - Broker ordering and Redis-loss scenarios are covered deterministically with fake Rabbit/Redis components, not a live multi-worker outage run.
 - Existing RabbitMQ user queues created before Phase 3 have immutable declaration arguments. An upgraded environment must recreate those legacy queues (or reset the demo RabbitMQ volume) once so the new expiry/TTL/length arguments can be declared; PostgreSQL/REST sync protects message recovery, but operators should plan this transition rather than discovering a queue precondition error during the demo.

@@ -1,0 +1,120 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: channels
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d channels"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [hardened_internal]
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    volumes:
+      - rabbit_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [hardened_internal]
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [hardened_internal]
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      TRUSTED_PROXY_CIDRS: '["172.31.240.10/32"]'
+      CORS_ORIGINS: '["http://localhost:8080","http://127.0.0.1:8080"]'
+    volumes:
+      - uploads_data:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [hardened_internal]
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks: [hardened_internal]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /v1
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: /v1
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [hardened_internal]
+
+  proxy:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      hardened_internal:
+        ipv4_address: 172.31.240.10
+
+networks:
+  hardened_internal:
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+
+volumes:
+  pg_data:
+  rabbit_data:
+  uploads_data:

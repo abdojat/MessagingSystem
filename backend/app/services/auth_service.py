@@ -7,6 +7,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.email_identity import normalize_email
 from app.core.errors import AppError
 from app.core.identifiers import normalize_username
 from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
@@ -52,7 +53,7 @@ class AuthService:
     @staticmethod
     async def register(db: AsyncSession, req: RegisterRequest) -> User:
         username = normalize_username(req.username)
-        email = req.email.strip().lower() if req.email is not None else None
+        email = normalize_email(req.email) if req.email is not None else None
 
         existing_username = await db.execute(select(User.id).where(User.username == username))
         if existing_username.scalar_one_or_none() is not None:
@@ -89,7 +90,7 @@ class AuthService:
         absolute_ttl_days: int | None = None,
     ) -> TokenPair:
         identity = req.username_or_email.strip()
-        normalized_identity = identity.lower()
+        normalized_identity = normalize_email(identity)
         result = await db.execute(
             select(User).where(or_(User.username == identity, func.lower(User.email) == normalized_identity))
         )

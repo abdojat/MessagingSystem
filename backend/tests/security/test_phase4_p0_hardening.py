@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -167,7 +168,7 @@ async def _insert_messages(db: AsyncSession, channel_id: UUID, sender_id: UUID, 
     await db.commit()
 
 
-def _http_scope() -> dict:
+def _http_scope(client_ip: str = "127.0.0.1") -> dict:
     return {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.4"},
@@ -178,7 +179,7 @@ def _http_scope() -> dict:
         "raw_path": b"/v1/uploads/content",
         "query_string": b"",
         "headers": [],
-        "client": ("127.0.0.1", 1234),
+        "client": (client_ip, 1234),
         "server": ("test", 80),
         "extensions": {},
     }
@@ -552,7 +553,7 @@ async def test_protected_download_uses_chunked_file_response_without_read_bytes(
         raise AssertionError("full-file Path.read_bytes buffering must not be used")
 
     monkeypatch.setattr(Path, "read_bytes", forbidden_read_bytes)
-    response = await get_upload_content(upload.id, db_session, owner, _RateRedis())
+    response = await get_upload_content(upload.id, Request(_http_scope()), db_session, owner, _RateRedis())
     assert isinstance(response, LeasedFileResponse)
     sent: list[dict] = []
 
@@ -612,7 +613,7 @@ async def test_protected_download_authorization_blocks_pending_removed_and_outsi
 
     for actor in (pending, removed, outsider):
         with pytest.raises(HTTPException) as exc_info:
-            await get_upload_content(upload.id, db_session, actor, _RateRedis())
+            await get_upload_content(upload.id, Request(_http_scope()), db_session, actor, _RateRedis())
         assert exc_info.value.status_code == 403
         assert await protected_download_limiter.active_for(actor.id) == 0
 
@@ -621,15 +622,16 @@ async def test_protected_download_authorization_blocks_pending_removed_and_outsi
 async def test_download_concurrency_limit_allows_boundary_and_rejects_one_above() -> None:
     limiter = DownloadConcurrencyLimiter()
     user_id = uuid4()
-    first = await limiter.try_acquire(user_id, 2)
-    second = await limiter.try_acquire(user_id, 2)
-    third = await limiter.try_acquire(user_id, 2)
+    limits = {"per_user_limit": 2, "per_ip_limit": 10, "global_limit": 10}
+    first = await limiter.try_acquire(user_id, "127.0.0.1", **limits)
+    second = await limiter.try_acquire(user_id, "127.0.0.1", **limits)
+    third = await limiter.try_acquire(user_id, "127.0.0.1", **limits)
     assert first is not None
     assert second is not None
     assert third is None
     assert await limiter.active_for(user_id) == 2
     await first.release()
-    replacement = await limiter.try_acquire(user_id, 2)
+    replacement = await limiter.try_acquire(user_id, "127.0.0.1", **limits)
     assert replacement is not None
     await second.release()
     await replacement.release()
@@ -642,7 +644,8 @@ async def test_aborted_stream_releases_download_slot(tmp_path) -> None:
     path.write_bytes(b"x" * 200_000)
     limiter = DownloadConcurrencyLimiter()
     user_id = uuid4()
-    lease = await limiter.try_acquire(user_id, 1)
+    limits = {"per_user_limit": 1, "per_ip_limit": 10, "global_limit": 10}
+    lease = await limiter.try_acquire(user_id, "127.0.0.1", **limits)
     assert lease is not None
     response = LeasedFileResponse(path, lease, media_type="application/octet-stream")
 
@@ -653,6 +656,6 @@ async def test_aborted_stream_releases_download_slot(tmp_path) -> None:
     with pytest.raises(asyncio.CancelledError):
         await response(_http_scope(), _receive_request, abort_on_body)
     assert await limiter.active_for(user_id) == 0
-    replacement = await limiter.try_acquire(user_id, 1)
+    replacement = await limiter.try_acquire(user_id, "127.0.0.1", **limits)
     assert replacement is not None
     await replacement.release()

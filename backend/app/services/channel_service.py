@@ -9,6 +9,7 @@ import aio_pika
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.email_identity import normalize_email
 from app.core.errors import AppError
 from app.core.config import get_settings
 from app.core.identifiers import SAFE_IDENTIFIER_MAX_LENGTH, normalize_channel_slug, normalize_username
@@ -783,14 +784,24 @@ class ChannelService:
         if int(active_invites or 0) >= get_settings().max_active_invites_per_user:
             raise AppError("active invite quota exceeded", 429, code="RESOURCE_QUOTA_EXCEEDED")
 
+        invited_email = normalize_email(req.invited_email) if req.invited_email is not None else None
+        invited_user_id = req.invited_user_id
+        if invited_email is not None:
+            # Resolve a known mailbox exactly once. The immutable user id is
+            # authoritative after issuance; invited_email remains an audit/UI
+            # snapshot and does not follow later address reassignment.
+            invited_user_id = await db.scalar(
+                select(User.id).where(func.lower(func.btrim(User.email)) == invited_email)
+            )
+
         token = make_invite_token()
         # Store only a hash plus a short mask so leaked database rows cannot be
         # used as invite links, while the UI can still show recognizable tokens.
         token_hash = sha256_hex(token)
         invite = ChannelInvite(
             channel_id=channel_id,
-            invited_user_id=req.invited_user_id,
-            invited_email=req.invited_email,
+            invited_user_id=invited_user_id,
+            invited_email=invited_email,
             token_hash=token_hash,
             token_mask_prefix=token[:4],
             token_mask_suffix=token[-4:],
@@ -1385,12 +1396,20 @@ class ChannelService:
             raise AppError("invite already accepted", 409, code="INVITE_ALREADY_ACCEPTED")
         if invite.expires_at <= utcnow():
             raise AppError("invite expired", 400, code="INVITE_EXPIRED")
-        # Targeted invites remain bound to the intended account or email; only
-        # generic invites skip these checks.
-        if invite.invited_user_id and invite.invited_user_id != user_id:
-            raise AppError("invite is not for this user", 403, code="FORBIDDEN")
-        if invite.invited_email and invite.invited_email != user.email:
-            raise AppError("invite is not for this email", 403, code="FORBIDDEN")
+        # Immutable account identity is authoritative when issuance resolved a
+        # known target. The email snapshot must not make this an AND check after
+        # that user's legitimate address changes.
+        if invite.invited_user_id is not None:
+            if invite.invited_user_id != user_id:
+                raise AppError("invite is not for this user", 403, code="FORBIDDEN")
+        elif invite.invited_email is not None:
+            # Historical/unresolved pre-registration invites have no immutable
+            # target yet. Matching a mutable profile value is insufficient;
+            # explicit verification of that exact current value is required.
+            user_email = normalize_email(user.email) if user.email is not None else None
+            invited_email = normalize_email(invite.invited_email)
+            if user_email != invited_email or user.email_verified_at is None:
+                raise AppError("verified invited email required", 403, code="EMAIL_VERIFICATION_REQUIRED")
         return invite
 
     @staticmethod

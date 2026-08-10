@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUserDep, DBDep, RedisDep
 from app.core.config import get_settings
+from app.core.email_identity import normalize_email
 from app.core.errors import AppError, to_http_exception
 from app.db.models import User
 from app.schemas.auth import MeResponse
@@ -23,6 +24,7 @@ async def me(user: CurrentUserDep) -> MeResponse:
         id=user.id,
         username=user.username,
         email=user.email,
+        email_verified_at=user.email_verified_at,
         display_name=user.display_name,
         avatar_url=user.avatar_url,
         wallpaper_url=user.wallpaper_url,
@@ -54,6 +56,15 @@ async def update_me(req: UpdateMeRequest, db: DBDep, user: CurrentUserDep) -> Me
             )
     except AppError as exc:
         raise to_http_exception(exc) from exc
+
+    if "email" in payload:
+        new_email = normalize_email(payload["email"]) if payload["email"] is not None else None
+        old_email = normalize_email(user.email) if user.email is not None else None
+        payload["email"] = new_email
+        if new_email != old_email:
+            # Verification belongs to the exact mailbox value. A mutable
+            # profile field must never inherit the prior address's proof.
+            user.email_verified_at = None
 
     for field, value in payload.items():
         setattr(user, field, value)

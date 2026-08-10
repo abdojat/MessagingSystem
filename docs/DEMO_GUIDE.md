@@ -24,6 +24,17 @@ docker compose up -d --build
 docker compose ps -a
 ```
 
+Optional recommended proxy-bounded path (use this instead of the commands above,
+not at the same time with the same project volumes):
+
+```bash
+docker compose -f docker-compose.hardened.yml config
+docker compose -f docker-compose.hardened.yml up -d --build
+```
+
+Open `http://localhost:8080`; only Nginx is published in this topology. The
+direct Compose path remains easier for showing RabbitMQ management locally.
+
 Run backend and frontend checks:
 ```bash
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
@@ -98,7 +109,7 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
 4. Register/login User B (incognito or second browser profile).
 5. Register/login User C in a third window or separate profile.
 6. User A creates a channel.
-7. User A opens Channel Details and clicks **Create and copy invite link**. The generic link is reusable until revoked or expired and is available to the owner for public/private channels with any join policy; targeted user/email invites remain one-use.
+7. User A opens Channel Details and clicks **Create and copy invite link**. The generic link is reusable until revoked or expired and is available to the owner for public/private channels with any join policy; targeted invites remain one-use. Existing-account email targets bind to that account ID. Pre-registration email targets require verified ownership, but this repository does not implement email delivery/completion, so use generic or user-ID targets for the supervisor UI flow.
 8. User B opens the copied link and accepts the invitation (or joins/subscribes through the configured join flow).
 9. User A publishes a text message.
 10. User A uses the paperclip composer button to attach and publish a small photo, video, or audio file; caption text is optional.

@@ -113,6 +113,42 @@ python -B -m pytest -q tests/security/test_phase5_medium_hardening.py
 
 Verified on 2026-08-10 against disposable PostgreSQL 16: `18 passed, 1 warning`. Phase 1–4 security suites passed `80 passed, 1 warning`, and the complete backend suite passed `176 passed, 1 warning`. Invite concurrency tests use two independent PostgreSQL sessions with explicit row-lock barriers. Redis Lua and WebSocket flood/work behavior are deterministic application-level harnesses, not a live Redis outage or multi-backend socket load test. No database migration was added.
 
+## Security Hardening Phase 6
+
+`backend/tests/security/test_phase6_medium_hardening.py` contains 19 focused cases covering:
+
+- normalized existing-account email invite resolution to immutable user ID;
+- the issuance-to-email-change-to-attacker-reclaim attack, including the original target accepting after changing email;
+- verification clearing on a real email change and preservation for the same canonical address;
+- unresolved pre-registration denial before verification and acceptance after a simulated trusted verification completion;
+- token plus unverified profile-email denial, explicit user-ID compatibility, and reusable generic-link compatibility;
+- independent-session concurrent email claims under the normalized unique index, with no invite transfer;
+- per-user, same-IP/many-user, and many-IP/global protected-download boundaries;
+- concurrent atomic admission without oversubscription, no partial-capacity leak on rejection, and bounded active-state maps;
+- exact-once release after cancellation, ASGI send failure, missing file/stat failure, and response-construction failure;
+- database-session closure before streaming starts; and
+- direct-mode forwarding-header rejection plus explicit trusted-proxy client-IP resolution.
+
+Run:
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_phase6_medium_hardening.py
+```
+
+Verified on 2026-08-10 against disposable PostgreSQL 16: `19 passed, 1 warning`. Phase 1–5 security suites passed `98 passed, 1 warning`; the complete backend suite passed `195 passed, 1 warning`. Fresh migration and a representative 0019→0020 upgrade passed. The upgrade fixture contained an existing-user email invite, unresolved email invite, user-ID invite, and generic invite. Frontend typecheck, both Compose render checks, and containerized Nginx syntax validation passed.
+
+The test suite sets `email_verified_at` directly to model the trusted completion boundary; no email is sent and no production verification delivery is claimed. Download concurrency tests exercise the application/ASGI boundary, not a live many-account TCP slow-reader load. Nginx slow-client controls were syntax/configuration-validated rather than load-tested.
+
+Proxy validation:
+
+```bash
+docker run --rm --add-host backend:127.0.0.1 --add-host frontend:127.0.0.1 \
+  -v "${PWD}/deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+  nginx:1.27-alpine nginx -t
+docker compose -f docker-compose.hardened.yml config --quiet
+```
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
+from starlette.requests import Request
 from pydantic import ValidationError
 from sqlalchemy import select
 
@@ -52,6 +53,22 @@ class _AllowRateRedis:
 
     async def ttl(self, key: str) -> int:
         return 60
+
+
+def _download_request(client_ip: str = "127.0.0.1") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/v1/uploads/content",
+            "raw_path": b"/v1/uploads/content",
+            "query_string": b"",
+            "headers": [],
+            "client": (client_ip, 1234),
+            "server": ("test", 80),
+        }
+    )
 
 
 async def _streamed_response_body(response) -> bytes:
@@ -716,10 +733,10 @@ async def test_upload_download_requires_channel_membership(db_session, monkeypat
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await get_upload_content(upload.id, db_session, outsider, _AllowRateRedis())
+        await get_upload_content(upload.id, _download_request(), db_session, outsider, _AllowRateRedis())
     assert exc_info.value.status_code == 403
 
-    owner_response = await get_upload_content(upload.id, db_session, owner, _AllowRateRedis())
+    owner_response = await get_upload_content(upload.id, _download_request(), db_session, owner, _AllowRateRedis())
     assert await _streamed_response_body(owner_response) == b"hello world"
 
     unauthorized_events = (

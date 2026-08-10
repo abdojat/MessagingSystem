@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.core.email_identity import normalize_email
 from app.core.identifiers import validate_username as validate_username_value
 
 
@@ -15,6 +16,14 @@ class RegisterRequest(BaseModel):
     @classmethod
     def validate_username_no_spaces(cls, value: str) -> str:
         return validate_username_value(value)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_registration_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = normalize_email(value)
+        return normalized or None
 
 
 class LoginRequest(BaseModel):
@@ -45,6 +54,7 @@ class MeResponse(BaseModel):
     id: UUID
     username: str
     email: EmailStr | None
+    email_verified_at: datetime | None = None
     display_name: str | None = None
     avatar_url: str | None = None
     wallpaper_url: str | None = None

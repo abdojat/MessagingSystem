@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException, WebSocketDisconnect
+from starlette.requests import Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -114,6 +115,22 @@ class _SignallingSession:
 
     def __getattr__(self, name: str):
         return getattr(self._session, name)
+
+
+def _request(client_ip: str = "127.0.0.1") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/v1/uploads/content",
+            "raw_path": b"/v1/uploads/content",
+            "query_string": b"",
+            "headers": [],
+            "client": (client_ip, 1234),
+            "server": ("test", 80),
+        }
+    )
 
 
 def _client_frame(message_type: str, payload: dict[str, Any] | None = None) -> str:
@@ -392,7 +409,7 @@ async def test_attachment_access_follows_active_channel_lifecycle_and_explicit_o
     assert await MessageService.can_access_upload(db_session, admin.id, upload.id) is False
     assert await MessageService.can_access_upload(db_session, member.id, upload.id) is False
     with pytest.raises(HTTPException) as denied:
-        await get_upload_content(upload.id, db_session, member, _LuaRateRedis())
+        await get_upload_content(upload.id, _request(), db_session, member, _LuaRateRedis())
     assert denied.value.status_code == 403
 
     channel.deleted_at = None

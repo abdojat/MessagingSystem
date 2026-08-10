@@ -1,5 +1,6 @@
 from functools import lru_cache
 import base64
+from ipaddress import ip_network
 import json
 from typing import Any
 
@@ -75,6 +76,11 @@ class Settings(BaseSettings):
     max_stored_upload_bytes_per_user: int = Field(default=1024 * 1024 * 1024, ge=1)
     max_websocket_connections_per_user: int = Field(default=5, ge=1, le=100)
     max_concurrent_downloads_per_user: int = Field(default=3, ge=1, le=100)
+    max_concurrent_downloads_per_ip: int = Field(default=12, ge=1, le=10_000)
+    max_concurrent_downloads_global: int = Field(default=100, ge=1, le=100_000)
+    # Empty in direct-development mode. The hardened Compose network sets one
+    # private CIDR and its proxy overwrites X-Forwarded-For with one client IP.
+    trusted_proxy_cidrs: list[str] = Field(default_factory=list)
     # Matching membership generations avoid a database lookup for each normal
     # realtime message. The short TTL bounds legacy/pre-removal queued events
     # that do not force an immediate generation refresh.
@@ -118,6 +124,28 @@ class Settings(BaseSettings):
                     pass
             return [part.strip() for part in raw.split(",") if part.strip()]
         return ["http://localhost:3000", "http://localhost:5173"]
+
+    @field_validator("trusted_proxy_cidrs", mode="before")
+    @classmethod
+    def _parse_trusted_proxy_cidrs(cls, value: Any) -> list[str]:
+        if isinstance(value, list):
+            values = [str(item).strip() for item in value if str(item).strip()]
+        elif isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
+            if raw.startswith("["):
+                parsed = json.loads(raw)
+                if not isinstance(parsed, list):
+                    raise ValueError("TRUSTED_PROXY_CIDRS must be a JSON list or comma-separated CIDRs")
+                values = [str(item).strip() for item in parsed if str(item).strip()]
+            else:
+                values = [part.strip() for part in raw.split(",") if part.strip()]
+        else:
+            raise ValueError("TRUSTED_PROXY_CIDRS must be a list or string")
+        for value_item in values:
+            ip_network(value_item, strict=False)
+        return values
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

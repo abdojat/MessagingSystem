@@ -9,6 +9,7 @@ University final-year project implementing a secure distributed channel messagin
 - Broker: RabbitMQ
 - Realtime: Redis + WebSocket
 - Frontend: Next.js (`frontend/`)
+- Recommended hardened HTTP path: Nginx (`docker-compose.hardened.yml`) in front of the unexposed backend/frontend
 - Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
 - Abuse resistance: atomic Redis/local-fallback rate limits, WebSocket frame/command/history budgets, message/protocol bounds, account quotas, bounded RabbitMQ user queues, and paced Redis fanout retries
 - Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
@@ -35,6 +36,19 @@ docker compose ps -a
 
 For the deterministic supervisor sequence, use the [Golden Demo Path](docs/DEMO_GUIDE.md#golden-demo-path).
 
+The command above remains the convenient direct-port development path. For the
+repository's recommended proxy-bounded path, expose only Nginx on port 8080:
+
+```bash
+docker compose -f docker-compose.hardened.yml config
+docker compose -f docker-compose.hardened.yml up -d --build
+```
+
+Open `http://localhost:8080`. This separate path keeps PostgreSQL, RabbitMQ,
+Redis, backend, and frontend ports inside the Docker network. It adds request
+body/header bounds, connection limits, buffering, and inactivity timeouts; it
+does not add TLS or make the full deployment production-ready.
+
 ## Environment Variables
 See `.env.example`.
 Important:
@@ -51,7 +65,9 @@ Important:
 - `UPLOAD_MAX_SIZE_BYTES` (defaults to 25 MiB; upload bodies are streamed and bounded by this value)
 - `MESSAGE_TEXT_MAX_BYTES`, `MESSAGE_JSON_MAX_BYTES`, `MESSAGE_JSON_MAX_DEPTH` (validated before encryption/outbox work)
 - `RATE_LIMIT_*` grouped auth/search/message/media/channel/WebSocket/sync/admin limits; `RATE_LIMIT_LOCAL_MAX_KEYS` bounds the fail-closed per-process sensitive fallback used when Redis is unavailable
-- `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, `MAX_WEBSOCKET_CONNECTIONS_PER_USER`, `MAX_CONCURRENT_DOWNLOADS_PER_USER`
+- `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, and `MAX_WEBSOCKET_CONNECTIONS_PER_USER`
+- `MAX_CONCURRENT_DOWNLOADS_PER_USER` (3), `MAX_CONCURRENT_DOWNLOADS_PER_IP` (12), and `MAX_CONCURRENT_DOWNLOADS_GLOBAL` (100) atomically bound protected streams in each backend process
+- `TRUSTED_PROXY_CIDRS` is empty in direct mode; set it only to explicit proxy peers that overwrite `X-Forwarded-For` (the hardened Compose file supplies its fixed proxy `/32`)
 - `WS_MEMBERSHIP_AUTH_CACHE_TTL_SECONDS` (default `1.0`; short fallback window for matching/older realtime membership generations)
 - `RABBIT_USER_QUEUE_EXPIRES_MS`, `RABBIT_USER_QUEUE_MESSAGE_TTL_MS`, `RABBIT_USER_QUEUE_MAX_LENGTH`; PostgreSQL/REST sync remains authoritative after realtime queue expiry/eviction
 - `REDIS_FANOUT_MAX_ATTEMPTS`, `REDIS_FANOUT_INITIAL_RETRY_DELAY_SECONDS`, `REDIS_FANOUT_MAX_RETRY_DELAY_SECONDS`
@@ -69,7 +85,7 @@ Development note:
 - Access JWTs are bound to their database session. Logout, explicit revocation, logout-all, replay detection, absolute expiry, and account deactivation invalidate later HTTP authentication immediately.
 - WebSocket clients obtain a short-lived, one-time opaque ticket with `POST /auth/ws-ticket`; long-lived access JWTs are not accepted in WebSocket URLs. Redis control events close matching sockets across backend instances when Redis is available.
 - Established sockets use per-socket weighted command and history-row token buckets. Subscribe/resume history is capped globally per command, identical subscribe/cursor requests do not refetch history, and inbound dispatch remains one command at a time. These budgets are per backend process/socket, not a distributed global quota.
-- Generic invite links are reusable until revoked, expired, or their channel is deleted. Targeted user/email invites are one-use, and accept/revoke/delete ordering is serialized through PostgreSQL row locks.
+- Generic invite links are reusable until revoked, expired, or their channel is deleted. Targeted invites are one-use and accept/revoke/delete ordering is serialized through PostgreSQL row locks. Existing-account email targets resolve once to immutable `user_id`; unresolved pre-registration email targets require verified ownership of the normalized email. Changing an account email clears verification. The repository intentionally does not implement email delivery/verification issuance, so a deployment must supply that trusted completion flow before unresolved email invites can be accepted.
 - Membership topology is stored as versioned desired state in PostgreSQL and snapshotted through the outbox. The worker locks the user/channel state, rejects stale generations, re-derives current authorization, removes obsolete slug bindings, and retries a complete idempotent projection. Run `python -m app.db.reconcile_broker_bindings` in the backend environment to enqueue a full repair from PostgreSQL.
 - RabbitMQ user queues are bounded realtime buffers (expiry, message TTL, maximum length). Missed or evicted events are recovered through PostgreSQL-backed REST sync.
 - Generate one with:
@@ -186,7 +202,7 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Membership/permission authorization checks.
 - Message encryption at rest (Fernet).
 - Private uploads require authentication and channel/ownership checks before download.
-- Protected downloads use chunked `FileResponse` streaming and a configurable per-user/per-backend concurrency lease; production proxy bandwidth/connection limits remain necessary.
+- Protected downloads use chunked `FileResponse` streaming and one atomic per-user/per-client-IP/process-global lease. `docker-compose.hardened.yml` adds Nginx connection, body/header, buffering, and inactivity bounds; application counters remain per backend replica and stock Nginx does not guarantee a minimum downstream throughput.
 - Message attachments support protected photo, video, and audio publishing through the existing upload API.
 - Profile/channel avatar uploads and profile chat wallpaper uploads use validated image references and protected authenticated media loading.
 - Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.

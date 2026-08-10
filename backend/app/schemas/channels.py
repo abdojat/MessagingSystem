@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from app.core.email_identity import normalize_email
 from app.core.identifiers import normalize_avatar_url, validate_channel_slug as validate_channel_slug_value
 from app.db.models import ChannelJoinMode, ChannelVisibility, MembershipRole
 from app.schemas.messages import MessageResponse
@@ -141,6 +142,14 @@ class InviteRequest(BaseModel):
     invited_email: EmailStr | None = None
     is_generic: bool = False
     expires_in_hours: int = Field(default=72, ge=1, le=720)
+
+    @field_validator("invited_email", mode="before")
+    @classmethod
+    def normalize_invited_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = normalize_email(value)
+        return normalized or None
 
     @model_validator(mode="after")
     def validate_target_mode(self) -> "InviteRequest":

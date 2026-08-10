@@ -65,6 +65,9 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    # Email is a mutable contact attribute. Only this explicit timestamp proves
+    # ownership for unresolved/pre-registration email-targeted invitations.
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     password_hash: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -81,6 +84,12 @@ class User(Base):
 
     __table_args__ = (
         CheckConstraint(f"username ~ '{SAFE_IDENTIFIER_PATTERN}'", name="ck_users_username_safe_identifier"),
+        Index(
+            "uq_users_email_normalized",
+            func.lower(func.btrim(email)),
+            unique=True,
+            postgresql_where=text("email IS NOT NULL"),
+        ),
     )
 
 
