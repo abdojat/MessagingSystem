@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from worker_app.core.config import Settings, get_settings
 from worker_app.db.session import SessionLocal
-from worker_app.mq.topology import DEAD_LETTER_EXCHANGE_NAME, EXCHANGE_NAME
+from worker_app.mq.topology import DEAD_LETTER_EXCHANGE_NAME, EXCHANGE_NAME, declare_user_queue
+from worker_app.redis_fanout import SAFE_IDENTIFIER_RE
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,10 @@ async def process_outbox_batch(
         await _mark_publishing(db, rec["id"])
         body = _payload_to_body(rec["payload"])
         try:
-            await _publish_to_exchange(exchange, rec["routing_key"], body)
+            if rec["aggregate_type"] == "broker_binding":
+                await _apply_broker_binding(exchange, rec["payload"], settings)
+            else:
+                await _publish_to_exchange(exchange, rec["routing_key"], body)
             await _mark_published(db, rec["id"])
         except Exception as exc:
             await _handle_publish_failure(db, dead_letter_exchange, rec, body, exc, settings)
@@ -169,6 +173,26 @@ async def _publish_to_exchange(exchange: aio_pika.abc.AbstractExchange, routing_
         ),
         routing_key=routing_key,
     )
+
+
+async def _apply_broker_binding(
+    exchange: aio_pika.abc.AbstractExchange,
+    payload: dict[str, Any],
+    settings: Settings,
+) -> None:
+    action = str(payload.get("action") or "")
+    username = str(payload.get("username") or "").strip()
+    channel_slug = str(payload.get("channel_slug") or "").strip()
+    if action not in {"bind", "unbind"}:
+        raise ValueError("invalid broker binding action")
+    if not SAFE_IDENTIFIER_RE.fullmatch(username) or not SAFE_IDENTIFIER_RE.fullmatch(channel_slug):
+        raise ValueError("unsafe broker binding identifier")
+    queue, _ = await declare_user_queue(exchange.channel, username, settings)
+    routing_key = f"channel.{channel_slug}"
+    if action == "bind":
+        await queue.bind(exchange, routing_key=routing_key)
+    else:
+        await queue.unbind(exchange, routing_key=routing_key)
 
 
 async def _publish_to_dead_letter_exchange(

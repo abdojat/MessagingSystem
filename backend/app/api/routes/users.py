@@ -5,12 +5,14 @@ from fastapi import APIRouter, Query
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import CurrentUserDep, DBDep
+from app.api.deps import CurrentUserDep, DBDep, RedisDep
+from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.db.models import User
 from app.schemas.auth import MeResponse
 from app.schemas.users import UpdateMeRequest, UserPublicProfile, UserSearchItem, UserSearchResponse
 from app.services.message_service import MessageService
+from app.services.rate_limit_service import enforce_rate_limit
 
 router = APIRouter(tags=["users"])
 
@@ -86,11 +88,18 @@ def _decode_cursor(cursor: str) -> tuple[str, UUID]:
 @router.get("/users/search", response_model=UserSearchResponse)
 async def search_users(
     db: DBDep,
-    _: CurrentUserDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
     q: str = Query(min_length=1, max_length=255),
     cursor: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> UserSearchResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:search:users:{user.id}",
+        limit=get_settings().rate_limit_search_per_minute,
+        window_seconds=60,
+    )
     if not isinstance(q, str):
         raise to_http_exception(AppError("q cannot be empty", 400, code="VALIDATION_ERROR"))
     q_raw = q.strip()

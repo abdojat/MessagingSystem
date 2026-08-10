@@ -43,6 +43,39 @@ class Settings(BaseSettings):
     worker_online_scan_interval: float = 3.0
     ws_history_batch_limit: int = 100
 
+    # Phase 3 abuse-control groups. Sensitive operations use an in-process
+    # emergency limiter when Redis is unavailable; ordinary reads remain
+    # available and are bounded by pagination instead.
+    rate_limit_auth_ip_per_minute: int = Field(default=30, gt=0)
+    rate_limit_auth_identity_per_minute: int = Field(default=20, gt=0)
+    rate_limit_search_per_minute: int = Field(default=60, gt=0)
+    rate_limit_message_write_per_10_seconds: int = Field(default=200, gt=0)
+    rate_limit_message_write_burst_per_second: int = Field(default=40, gt=0)
+    rate_limit_media_per_minute: int = Field(default=60, gt=0)
+    rate_limit_channel_management_per_minute: int = Field(default=30, gt=0)
+    rate_limit_websocket_per_minute: int = Field(default=30, gt=0)
+    rate_limit_sync_per_minute: int = Field(default=60, gt=0)
+    rate_limit_admin_per_minute: int = Field(default=60, gt=0)
+
+    message_text_max_bytes: int = Field(default=64 * 1024, ge=1024)
+    message_json_max_bytes: int = Field(default=64 * 1024, ge=1024)
+    message_json_max_depth: int = Field(default=20, ge=2, le=100)
+    max_distinct_reactions_per_message: int = Field(default=20, ge=1, le=100)
+
+    max_channels_owned_per_user: int = Field(default=50, ge=1)
+    max_active_invites_per_user: int = Field(default=100, ge=1)
+    max_uploads_per_user_per_day: int = Field(default=100, ge=1)
+    max_pending_uploads_per_user: int = Field(default=10, ge=1)
+    max_stored_upload_bytes_per_user: int = Field(default=1024 * 1024 * 1024, ge=1)
+    max_websocket_connections_per_user: int = Field(default=5, ge=1, le=100)
+
+    rabbit_user_queue_expires_ms: int = Field(default=7 * 24 * 60 * 60 * 1000, ge=60_000)
+    rabbit_user_queue_message_ttl_ms: int = Field(default=24 * 60 * 60 * 1000, ge=1_000)
+    rabbit_user_queue_max_length: int = Field(default=10_000, ge=1)
+    redis_fanout_max_attempts: int = Field(default=3, ge=1, le=10)
+    redis_fanout_initial_retry_delay_seconds: float = Field(default=0.5, ge=0.05, le=60)
+    redis_fanout_max_retry_delay_seconds: float = Field(default=5.0, ge=0.05, le=300)
+
     log_level: str = "INFO"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
     upload_max_size_bytes: int = 25 * 1024 * 1024

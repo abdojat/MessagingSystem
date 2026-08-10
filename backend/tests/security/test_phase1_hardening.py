@@ -61,6 +61,17 @@ class _StreamingOnlyRequest:
         return self._stream()
 
 
+class _AllowRateRedis:
+    async def incr(self, key: str) -> int:
+        return 1
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        return True
+
+    async def ttl(self, key: str) -> int:
+        return 60
+
+
 async def _chunks(*values: bytes):
     for value in values:
         yield value
@@ -169,7 +180,7 @@ async def test_upload_route_streams_request_without_calling_body(monkeypatch) ->
 
     monkeypatch.setattr(MessageService, "store_upload_content", _store)
 
-    response = await put_upload_content(file_id, request, object(), user)
+    response = await put_upload_content(file_id, request, object(), user, _AllowRateRedis())
 
     assert request.body_called is False
     assert bytes(received) == b"firstsecond"

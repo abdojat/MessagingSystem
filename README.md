@@ -10,6 +10,7 @@ University final-year project implementing a secure distributed channel messagin
 - Realtime: Redis + WebSocket
 - Frontend: Next.js (`frontend/`)
 - Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
+- Abuse resistance: grouped Redis/local-fallback rate limits, message/protocol bounds, account quotas, bounded RabbitMQ user queues, and paced Redis fanout retries
 - Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
 - Platform administration: environment-bootstrapped superadmin, global audit view, user/session controls, channel suspension/restoration, and global delivery recovery
 
@@ -46,6 +47,11 @@ Important:
 - `MESSAGE_ENCRYPTION_ENABLED=true`
 - `MESSAGE_ENCRYPTION_KEY` (Fernet key)
 - `UPLOAD_MAX_SIZE_BYTES` (defaults to 25 MiB; upload bodies are streamed and bounded by this value)
+- `MESSAGE_TEXT_MAX_BYTES`, `MESSAGE_JSON_MAX_BYTES`, `MESSAGE_JSON_MAX_DEPTH` (validated before encryption/outbox work)
+- `RATE_LIMIT_*` grouped auth/search/message/media/channel/WebSocket/sync/admin limits; sensitive groups use a small per-process fallback if Redis is unavailable
+- `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, `MAX_WEBSOCKET_CONNECTIONS_PER_USER`
+- `RABBIT_USER_QUEUE_EXPIRES_MS`, `RABBIT_USER_QUEUE_MESSAGE_TTL_MS`, `RABBIT_USER_QUEUE_MAX_LENGTH`; PostgreSQL/REST sync remains authoritative after realtime queue expiry/eviction
+- `REDIS_FANOUT_MAX_ATTEMPTS`, `REDIS_FANOUT_INITIAL_RETRY_DELAY_SECONDS`, `REDIS_FANOUT_MAX_RETRY_DELAY_SECONDS`
 - `OUTBOX_MAX_ATTEMPTS`
 - `OUTBOX_INITIAL_RETRY_DELAY_SECONDS`
 - `OUTBOX_RETRY_BACKOFF_MULTIPLIER`
@@ -59,6 +65,8 @@ Development note:
 - For `production`, `prod`, and `staging`, startup rejects missing/default/weak JWT secrets and rejects a missing or invalid Fernet key while message encryption is enabled.
 - Access JWTs are bound to their database session. Logout, explicit revocation, logout-all, replay detection, absolute expiry, and account deactivation invalidate later HTTP authentication immediately.
 - WebSocket clients obtain a short-lived, one-time opaque ticket with `POST /auth/ws-ticket`; long-lived access JWTs are not accepted in WebSocket URLs. Redis control events close matching sockets across backend instances when Redis is available.
+- Membership bind/unbind desired state is committed to the existing PostgreSQL outbox with the membership change. The worker applies idempotent broker commands and retries failures; it no longer relies on a one-shot post-commit RabbitMQ call.
+- RabbitMQ user queues are bounded realtime buffers (expiry, message TTL, maximum length). Missed or evicted events are recovered through PostgreSQL-backed REST sync.
 - Generate one with:
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -177,6 +185,8 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Profile/channel avatar uploads and profile chat wallpaper uploads use validated image references and protected authenticated media loading.
 - Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.
 - Unauthorized read/publish events logged.
+- Sensitive abuse-prone endpoints remain locally bounded during a Redis rate-limit outage; ordinary paginated reads stay available.
+- Message text/JSON, reaction values, REST sync arrays, and WebSocket subscribe/resume/sync arrays have explicit limits.
 - Event logs include tamper-evident hash-chain metadata for new events.
 - Do not commit real secrets.
 

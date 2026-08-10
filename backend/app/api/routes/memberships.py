@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
-from app.api.deps import AMQPDep, CurrentUserDep, DBDep
+from app.api.deps import AMQPDep, CurrentUserDep, DBDep, RedisDep
+from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.db.models import MembershipRole
 from app.schemas.channels import (
@@ -21,12 +22,30 @@ from app.schemas.channels import (
 )
 from app.services.channel_service import ChannelService
 from app.services.rbac import normalize_admin_permissions
+from app.services.rate_limit_service import enforce_rate_limit
 
 router = APIRouter(tags=["memberships"])
 
 
+async def _enforce_channel_management(redis: RedisDep, user_id: UUID) -> None:
+    await enforce_rate_limit(
+        redis,
+        f"rl:channel-management:{user_id}",
+        limit=get_settings().rate_limit_channel_management_per_minute,
+        window_seconds=60,
+    )
+
+
 @router.post("/channels/{channel_id}/join", response_model=JoinOutcomeResponse)
-async def join_channel(channel_id: UUID, req: JoinRequest, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> JoinOutcomeResponse:
+async def join_channel(
+    channel_id: UUID,
+    req: JoinRequest,
+    db: DBDep,
+    user: CurrentUserDep,
+    amqp: AMQPDep,
+    redis: RedisDep,
+) -> JoinOutcomeResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         status, membership, message = await ChannelService.join_channel(db, amqp, channel_id, user.id, req)
         channel_row = await ChannelService.get_channel_or_404(db, channel_id)
@@ -42,7 +61,14 @@ async def join_channel(channel_id: UUID, req: JoinRequest, db: DBDep, user: Curr
 
 
 @router.post("/channels/{channel_id}/leave")
-async def leave_channel(channel_id: UUID, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> dict:
+async def leave_channel(
+    channel_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    amqp: AMQPDep,
+    redis: RedisDep,
+) -> dict:
+    await _enforce_channel_management(redis, user.id)
     try:
         await ChannelService.leave_channel(db, amqp, channel_id, user.id)
     except AppError as exc:
@@ -152,7 +178,14 @@ async def list_pending_requests(
 
 
 @router.post("/channels/{channel_id}/invite", response_model=InviteResponse)
-async def create_invite(channel_id: UUID, req: InviteRequest, db: DBDep, user: CurrentUserDep) -> InviteResponse:
+async def create_invite(
+    channel_id: UUID,
+    req: InviteRequest,
+    db: DBDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
+) -> InviteResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         invite, token = await ChannelService.create_invite(db, channel_id, user.id, req)
     except AppError as exc:
@@ -212,7 +245,14 @@ async def list_invites(
 
 
 @router.post("/channels/{channel_id}/invites/{invite_id}/revoke")
-async def revoke_invite(channel_id: UUID, invite_id: UUID, db: DBDep, user: CurrentUserDep) -> dict:
+async def revoke_invite(
+    channel_id: UUID,
+    invite_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
+) -> dict:
+    await _enforce_channel_management(redis, user.id)
     try:
         await ChannelService.revoke_invite(db, channel_id, invite_id, user.id)
     except AppError as exc:
@@ -221,13 +261,27 @@ async def revoke_invite(channel_id: UUID, invite_id: UUID, db: DBDep, user: Curr
 
 
 @router.get("/invites/{token}", response_model=InvitePreviewResponse)
-async def preview_invite(token: str, db: DBDep) -> InvitePreviewResponse:
+async def preview_invite(token: str, db: DBDep, request: Request, redis: RedisDep) -> InvitePreviewResponse:
+    ip = request.client.host if request.client else "unknown"
+    await enforce_rate_limit(
+        redis,
+        f"rl:channel-management:invite-preview:{ip}",
+        limit=get_settings().rate_limit_channel_management_per_minute,
+        window_seconds=60,
+    )
     payload = await ChannelService.get_invite_preview(db, token)
     return InvitePreviewResponse.model_validate(payload)
 
 
 @router.post("/invites/{token}/accept", response_model=MembershipActionResponse)
-async def accept_invite(token: str, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> MembershipActionResponse:
+async def accept_invite(
+    token: str,
+    db: DBDep,
+    user: CurrentUserDep,
+    amqp: AMQPDep,
+    redis: RedisDep,
+) -> MembershipActionResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         membership = await ChannelService.accept_invite(db, amqp, token, user.id)
     except AppError as exc:
@@ -236,7 +290,15 @@ async def accept_invite(token: str, db: DBDep, user: CurrentUserDep, amqp: AMQPD
 
 
 @router.post("/channels/{channel_id}/members/{user_id}/approve", response_model=MembershipActionResponse)
-async def approve_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> MembershipActionResponse:
+async def approve_member(
+    channel_id: UUID,
+    user_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    amqp: AMQPDep,
+    redis: RedisDep,
+) -> MembershipActionResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         membership = await ChannelService.approve_member(db, amqp, channel_id, user.id, user_id)
     except AppError as exc:
@@ -245,7 +307,15 @@ async def approve_member(channel_id: UUID, user_id: UUID, db: DBDep, user: Curre
 
 
 @router.post("/channels/{channel_id}/members/{user_id}/add", response_model=MembershipActionResponse)
-async def add_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> MembershipActionResponse:
+async def add_member(
+    channel_id: UUID,
+    user_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    amqp: AMQPDep,
+    redis: RedisDep,
+) -> MembershipActionResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         membership = await ChannelService.add_member_direct(db, amqp, channel_id, user.id, user_id)
     except AppError as exc:
@@ -254,7 +324,14 @@ async def add_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUs
 
 
 @router.post("/channels/{channel_id}/members/{user_id}/promote", response_model=MembershipActionResponse)
-async def promote_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep) -> MembershipActionResponse:
+async def promote_member(
+    channel_id: UUID,
+    user_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
+) -> MembershipActionResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         membership = await ChannelService.promote_member(db, channel_id, user.id, user_id)
     except AppError as exc:
@@ -263,7 +340,14 @@ async def promote_member(channel_id: UUID, user_id: UUID, db: DBDep, user: Curre
 
 
 @router.post("/channels/{channel_id}/members/{user_id}/demote", response_model=MembershipActionResponse)
-async def demote_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep) -> MembershipActionResponse:
+async def demote_member(
+    channel_id: UUID,
+    user_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
+) -> MembershipActionResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         membership = await ChannelService.demote_member(db, channel_id, user.id, user_id)
     except AppError as exc:
@@ -278,7 +362,9 @@ async def update_admin_permissions(
     req: AdminPermissionsUpdateRequest,
     db: DBDep,
     user: CurrentUserDep,
+    redis: RedisDep,
 ) -> AdminPermissionsUpdateResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         membership = await ChannelService.update_admin_permissions(db, channel_id, user.id, user_id, req)
     except AppError as exc:
@@ -292,7 +378,15 @@ async def update_admin_permissions(
 
 
 @router.delete("/channels/{channel_id}/members/{user_id}")
-async def remove_member(channel_id: UUID, user_id: UUID, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> dict:
+async def remove_member(
+    channel_id: UUID,
+    user_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    amqp: AMQPDep,
+    redis: RedisDep,
+) -> dict:
+    await _enforce_channel_management(redis, user.id)
     try:
         await ChannelService.remove_member(db, amqp, channel_id, user.id, user_id)
     except AppError as exc:

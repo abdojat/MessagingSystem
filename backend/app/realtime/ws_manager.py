@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.errors import AppError
+from app.core.config import get_settings
 from app.core.encryption import decrypt_json_payload, decrypt_message
 from app.core.utils import utcnow
 from app.db.models import Channel, ChannelMembership, MembershipRole, Message, User
@@ -50,6 +51,7 @@ class WSManager:
         self._socket_sessions: dict[int, UUID] = {}
         self._closing_sockets: set[int] = set()
         self._control_task: asyncio.Task[None] | None = None
+        self._connection_lock = asyncio.Lock()
 
     async def start(self) -> None:
         if self._control_task is None or self._control_task.done():
@@ -71,14 +73,30 @@ class WSManager:
         session_id: UUID,
         pre_accepted: bool = False,
     ) -> None:
-        if not pre_accepted:
-            await websocket.accept()
-        await mark_user_online(self._redis, username)
-        # Refresh broker bindings on connect so users who were offline during a
-        # membership change still have the correct durable queues.
-        await self._ensure_user_bindings(user_id, username)
-        self._subscriptions[id(websocket)] = set(await self._member_channel_ids(user_id))
-        self._connections.setdefault(user_id, {})[id(websocket)] = websocket
+        async with self._connection_lock:
+            if len(self._connections.get(user_id, {})) >= get_settings().max_websocket_connections_per_user:
+                raise AppError(
+                    "concurrent WebSocket connection quota exceeded",
+                    429,
+                    code="WEBSOCKET_QUOTA_EXCEEDED",
+                )
+            # Reserve the slot before the first await so simultaneous handshakes
+            # cannot all pass the quota check.
+            self._connections.setdefault(user_id, {})[id(websocket)] = websocket
+        try:
+            if not pre_accepted:
+                await websocket.accept()
+            await mark_user_online(self._redis, username)
+            # Refresh broker bindings on connect so users who were offline during a
+            # membership change still have the correct durable queues.
+            await self._ensure_user_bindings(user_id, username)
+            self._subscriptions[id(websocket)] = set(await self._member_channel_ids(user_id))
+        except Exception:
+            sockets = self._connections.get(user_id, {})
+            sockets.pop(id(websocket), None)
+            if not sockets:
+                self._connections.pop(user_id, None)
+            raise
         self._session_connections.setdefault(session_id, {})[id(websocket)] = websocket
         self._socket_sessions[id(websocket)] = session_id
 

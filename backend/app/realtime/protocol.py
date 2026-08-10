@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.utils import utcnow
+from app.core.payload_limits import PROTOCOL_CHANNEL_ARRAY_MAX
 
 
 class WSEnvelope(BaseModel):
@@ -15,12 +16,12 @@ class WSEnvelope(BaseModel):
 
 
 class WSSubscribePayload(BaseModel):
-    channel_ids: list[UUID]
+    channel_ids: list[UUID] = Field(max_length=PROTOCOL_CHANNEL_ARRAY_MAX)
     from_seq_id: int | None = None
 
 
 class WSUnsubscribePayload(BaseModel):
-    channel_ids: list[UUID]
+    channel_ids: list[UUID] = Field(max_length=PROTOCOL_CHANNEL_ARRAY_MAX)
 
 
 class WSResumeCursor(BaseModel):
@@ -29,7 +30,7 @@ class WSResumeCursor(BaseModel):
 
 
 class WSResumePayload(BaseModel):
-    channels: list[WSResumeCursor] = Field(default_factory=list)
+    channels: list[WSResumeCursor] = Field(default_factory=list, max_length=PROTOCOL_CHANNEL_ARRAY_MAX)
     since: datetime | None = None
     limit: int = Field(default=200, ge=1, le=500)
 
@@ -41,7 +42,7 @@ class WSSyncState(BaseModel):
 
 
 class WSSyncPayload(BaseModel):
-    states: list[WSSyncState] = Field(default_factory=list)
+    states: list[WSSyncState] = Field(default_factory=list, max_length=PROTOCOL_CHANNEL_ARRAY_MAX)
 
 
 class WSSeenPayload(BaseModel):

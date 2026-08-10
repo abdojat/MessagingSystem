@@ -20,6 +20,7 @@ from app.realtime.ws_manager import WSManager
 from app.schemas.common import ErrorResponse
 from app.services.auth_service import AuthService
 from app.services.ws_ticket_service import WebSocketTicketService
+from app.services.rate_limit_service import RateLimitService
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,37 @@ async def websocket_endpoint_v1(websocket: WebSocket):
 async def _run_websocket(websocket: WebSocket) -> None:
     # Browsers present only a short-lived, single-use opaque ticket. Raw access
     # JWT query parameters, headers, and first-frame credentials are rejected.
+    websocket_client = getattr(websocket, "client", None)
+    client_ip = websocket_client.host if websocket_client else "unknown"
+    websocket_rate_key = f"rl:websocket:connect:{client_ip}"
+    app_redis = getattr(app.state, "redis", None)
+    if app_redis is None:
+        # This path is primarily useful for startup/unit contexts; a live app
+        # always sets Redis during lifespan. It retains the same local bound.
+        rate_result = await RateLimitService._hit_local(
+            websocket_rate_key,
+            get_settings().rate_limit_websocket_per_minute,
+            60,
+        )
+    else:
+        rate_result = await RateLimitService.hit(
+            app_redis,
+            websocket_rate_key,
+            limit=get_settings().rate_limit_websocket_per_minute,
+            window_seconds=60,
+        )
+    if rate_result.retry_after_seconds is not None:
+        await websocket.accept()
+        await websocket.send_json(
+            build_error(
+                "WebSocket connection rate limit exceeded",
+                code="RATE_LIMITED",
+                details={"retry_after_seconds": rate_result.retry_after_seconds},
+            )
+        )
+        await websocket.close(code=1013, reason="WebSocket rate limit exceeded")
+        return
+
     ticket = websocket.query_params.get("ticket")
     if not ticket:
         await websocket.accept()
@@ -157,7 +189,13 @@ async def _run_websocket(websocket: WebSocket) -> None:
             return
 
     manager: WSManager = app.state.ws_manager
-    await manager.connect(websocket, auth.user.id, auth.user.username, auth.session_id)
+    try:
+        await manager.connect(websocket, auth.user.id, auth.user.username, auth.session_id)
+    except AppError as exc:
+        await websocket.accept()
+        await websocket.send_json(build_error(exc.message, code=exc.code))
+        await websocket.close(code=1013, reason="WebSocket quota exceeded")
+        return
     try:
         await manager.run_socket(
             websocket,

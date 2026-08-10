@@ -19,7 +19,7 @@
 - Channel list/detail payloads withhold decrypted last-message previews, seen markers, and unread counts unless the caller has an approved readable membership (`owner`, `admin`, or `member`). Public discovery can still expose basic channel metadata and last-activity time.
 - Channel list search treats `%`, `_`, and `\` as literal text instead of SQL wildcards, and `#channel-slug` search is resolved against the safe stored slug.
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
-- The upload route allows content only to the owner, and the download route only allows the owner or a user who is a member of a channel that references the upload.
+- The upload route allows content only to the owner, and the download route only allows the owner or a user who is a member of a channel that references the upload. Message attachment authorization uses the indexed `message_attachments(upload_id, channel_id, message_id)` relation rather than scanning message-history JSON; migration `0018_phase3_abuse_hardening` backfills historical attachment references.
 - Upload request bodies are streamed in bounded chunks to a same-directory temporary file while size and SHA-256 are checked incrementally. Failed, interrupted, oversized, short, or checksum-mismatched uploads are cleaned up and remain pending.
 - Successful upload storage is immutable. The existing protected `public_url` is the persisted pending/stored lifecycle marker, the upload row is locked during finalization, and a second PUT returns `409 Conflict` without replacing historical bytes.
 - Message media attachments use the same protected upload route. A message can reference uploaded photo, video, or audio content only after the uploader has stored the bytes; subscribers fetch/play that media through authenticated requests.
@@ -78,6 +78,22 @@
 - Sanitization masks common token, password, secret, key, and AMQP credential patterns.
 - Error text is still operational data, so it should not be used to intentionally log secrets or full connection strings.
 
+## Abuse Resistance and Resource Bounds
+- Rate limits are grouped into auth, search, message-write, media, channel-management, WebSocket, sync, and administration policies. Defaults are configurable with `RATE_LIMIT_*` environment variables.
+- Login, registration, refresh, WebSocket ticket/connection attempts, search, message mutations, upload create/PUT/GET, channel/member/invite mutations, sync, and superadmin mutations are covered by the relevant group.
+- Redis is the normal distributed rate-limit store. If Redis fails, sensitive operations use a capped in-process fixed-window fallback instead of becoming unlimited. The fallback is bounded to 10,000 keys per API process. Ordinary paginated reads are not rate-limited and remain available during a Redis outage.
+- The emergency fallback is deliberately per-process: it prevents unlimited traffic to one instance but is weaker than healthy Redis across several backend replicas.
+- Message text defaults to 65,536 UTF-8 bytes. Structured JSON defaults to 65,536 serialized UTF-8 bytes and nesting depth 20. Validation happens at the request-schema boundary before Fernet encryption, PostgreSQL writes, outbox creation, RabbitMQ, Redis, or WebSocket amplification.
+- REST `/sync` channel cursors and WebSocket subscribe, unsubscribe, resume, and sync-state arrays accept at most 100 entries. Oversized WebSocket commands return a protocol validation error without querying membership state or crashing the connection manager.
+- Seen state is monotonic and idempotent. Equal or lower sequence markers do not update timestamps/unread counts or emit another outbox event; only initial state and forward progress are persisted/broadcast.
+- Reaction values must be short supported Unicode emoji, and each message defaults to at most 20 distinct emoji values. Duplicate add and nonexistent remove operations return the current summary without another outbox event. Message-list reaction counts and caller reactions are loaded in two batch queries rather than per message.
+- Default account quotas limit active owned channels (50), active invites (100), daily upload records (100), pending uploads (10), reserved upload bytes (1 GiB), and concurrent WebSockets per backend instance (5). Boundaries return `RESOURCE_QUOTA_EXCEEDED` or `WEBSOCKET_QUOTA_EXCEEDED`.
+
+## Broker and Redis Outage Semantics
+- Membership transactions now include an idempotent `broker_binding.bind` or `broker_binding.unbind` command in the existing PostgreSQL outbox. The worker applies the command and uses the normal retry/dead-letter lifecycle. A RabbitMQ outage therefore does not roll back authoritative membership state or lose the desired broker action.
+- Per-user RabbitMQ queues remain durable while present but are bounded by default to seven-day unused-queue expiry, 24-hour message TTL, and 10,000 messages with `drop-head` overflow. PostgreSQL message history plus REST sync is the durable recovery path; RabbitMQ is not the only message copy.
+- Redis fanout uses three bounded attempts with exponential delay by default. After exhaustion, the worker sleeps before RabbitMQ NACK/requeue, preventing a tight Redis-outage redelivery loop. It does not acknowledge/drop the event merely to hide the failure.
+
 ## Event Integrity / Tamper-Evident Audit Log
 - Event Integrity Upgrade v1 stores a SHA-256 hash chain on event rows.
 - Channel events are chained per `channel:<channel_id>` scope; non-channel events are chained under the `system` scope.
@@ -100,3 +116,5 @@ This protects against accidental or unauthorized event modification, insertion, 
 - Upload attachments are protected and immutable after storage, but their file bytes are not encrypted by the message-body Fernet layer; attachment encryption remains future work.
 - Superadmin activity is application-audited but does not replace external administrator monitoring, MFA, a hardware-backed secret store, or separation-of-duties controls.
 - Cross-instance socket termination is best-effort realtime control. If Redis is unavailable during revocation, the database revocation still commits and blocks subsequent HTTP authentication, refresh, ticket validation, and reconnects, but a socket on another instance may remain until its captured authentication expiry.
+- Emergency rate limiting and concurrent WebSocket quotas are per backend process when Redis/distributed coordination is unavailable; they are high-value MVP controls, not a billing-grade global quota service.
+- Existing RabbitMQ user queues created before Phase 3 have immutable declaration arguments. An upgraded environment must recreate those legacy queues (or reset the demo RabbitMQ volume) once so the new expiry/TTL/length arguments can be declared; PostgreSQL/REST sync protects message recovery, but operators should plan this transition rather than discovering a queue precondition error during the demo.

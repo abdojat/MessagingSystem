@@ -13,8 +13,9 @@ Global administration is modeled independently from channel membership. `users.i
 - Worker
   - Polls outbox entries.
   - Publishes routing events to RabbitMQ.
+  - Applies idempotent broker bind/unbind desired-state commands from the same transactional outbox.
   - Tracks delivery attempts, retry scheduling, and dead-letter transitions.
-  - Supports realtime fanout integration.
+  - Supports realtime fanout integration with bounded Redis retry/requeue backoff.
 - RabbitMQ
   - Broker for publish/subscribe routing across services.
   - Includes a durable dead-letter exchange/queue for operational visibility.
@@ -22,7 +23,7 @@ Global administration is modeled independently from channel membership. `users.i
   - Low-latency delivery path for active subscribers.
   - Targeted membership updates are allowed through the socket even when the new channel is not yet in the socket subscription set, so approval-after-connect can refresh and subscribe safely.
 - PostgreSQL
-  - Source of truth for users, channels, memberships, messages, outbox, and events.
+  - Source of truth for users, channels, memberships, messages, normalized message/upload attachment links, outbox, and events.
 - Frontend (Next.js)
   - User workflows: auth, channels, join/leave, publish/read, event logs.
   - Delivery Monitor for channel owners/admins to inspect and retry failed outbox delivery.
@@ -111,6 +112,9 @@ This is a practical hash-chain integrity layer, not a blockchain and not externa
 - Outbox records now track `pending`, `publishing`, `published`, `retry_scheduled`, `failed`, and `dead_lettered` states, along with attempts, max attempts, next retry time, last sanitized error, publish time, and dead-letter time.
 - The worker polls only due records (`pending` and due `retry_scheduled`) so failures are not hammered in a tight loop.
 - Failed publishes use exponential backoff with environment-controlled defaults (`OUTBOX_MAX_ATTEMPTS`, retry delay, multiplier, and cap).
+- Membership create/approve/add/remove/leave operations store broker binding desired state in the same transaction as membership/audit updates. The worker applies `bind`/`unbind` commands idempotently and leaves failures retryable in PostgreSQL.
+- Per-user RabbitMQ queues are bounded realtime buffers: default unused expiry is seven days, message TTL is 24 hours, and maximum length is 10,000 with oldest-message eviction. PostgreSQL message history and REST `/sync` recover anything missed or evicted.
+- RabbitMQ-to-Redis forwarding retries Redis with exponential delay, then delays again before NACK/requeue. A Redis outage therefore produces paced retries rather than an immediate hot requeue loop.
 - After max attempts, the worker marks the row `dead_lettered` in PostgreSQL and tries to mirror the payload to RabbitMQ `ex.channels.dlx` / `q.dead.messages`.
 - The admin delivery APIs and frontend Delivery Monitor are scoped to channels the current user manages.
 - The DLQ is operational evidence only; the database status is the authoritative record.

@@ -2,6 +2,19 @@ import aio_pika
 
 from app.core.identifiers import normalize_channel_slug, normalize_username
 from app.mq.topology import EXCHANGE_NAME
+from app.core.config import get_settings
+
+
+def user_queue_arguments() -> dict[str, int | str]:
+    settings = get_settings()
+    return {
+        "x-expires": settings.rabbit_user_queue_expires_ms,
+        "x-message-ttl": settings.rabbit_user_queue_message_ttl_ms,
+        "x-max-length": settings.rabbit_user_queue_max_length,
+        # PostgreSQL/REST sync is authoritative, so a bounded queue may evict
+        # its oldest realtime copy instead of growing without limit.
+        "x-overflow": "drop-head",
+    }
 
 
 async def ensure_user_queue(channel: aio_pika.abc.AbstractChannel, username: str) -> aio_pika.abc.AbstractQueue:
@@ -9,7 +22,13 @@ async def ensure_user_queue(channel: aio_pika.abc.AbstractChannel, username: str
 
     exchange = await channel.declare_exchange(EXCHANGE_NAME, aio_pika.ExchangeType.TOPIC, durable=True)
     safe_username = normalize_username(username)
-    queue = await channel.declare_queue(f"user.{safe_username}", durable=True, auto_delete=False, exclusive=False)
+    queue = await channel.declare_queue(
+        f"user.{safe_username}",
+        durable=True,
+        auto_delete=False,
+        exclusive=False,
+        arguments=user_queue_arguments(),
+    )
     await queue.bind(exchange, routing_key=f"user.{safe_username}")
     return queue
 

@@ -37,6 +37,33 @@ python -m pytest -q tests/security/test_phase2_auth_hardening.py
 
 Verified on 2026-08-10 against isolated PostgreSQL 16: `19 passed, 1 warning`. The complete backend suite then passed with `124 passed, 1 warning`.
 
+## Security Hardening Phase 3
+
+`backend/tests/security/test_phase3_abuse_hardening.py` contains 19 focused regressions covering:
+
+- normal Redis limiting, threshold enforcement, sensitive local fallback during Redis failure, and the documented low-risk allow policy;
+- text/edit UTF-8 byte limits, structured JSON serialized-size/depth limits, and ordinary-message compatibility;
+- 100-entry REST sync and WebSocket subscribe/unsubscribe/resume/sync-state boundaries, including safe oversized WebSocket rejection before database work;
+- monotonic/idempotent seen state with explicit outbox-row counts;
+- reaction value constraints, duplicate add/nonexistent delete idempotency, and outbox-row counts;
+- fixed-query reaction rendering: 25 messages use exactly two `message_reactions` queries plus one batched sender query;
+- normalized `message_attachments` authorization for owner/member/outsider and SQL evidence that lookup no longer scans message attachment JSON;
+- channel, active-invite, upload, and concurrent-WebSocket quota boundaries;
+- RabbitMQ queue expiry/TTL/max-length declaration parity between backend and worker;
+- durable bind/unbind outbox generation, broker failure retry state without membership rollback, and duplicate command safety;
+- bounded Redis fanout attempts, exponential retry delays, and capped pre-requeue delay.
+
+Run:
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_phase3_abuse_hardening.py
+```
+
+Verified on 2026-08-10 against isolated PostgreSQL 16: `19 passed, 1 warning`. Fresh Alembic migration through `0018_phase3_abuse_hardening` passed. A separate upgrade from revision 0017 with a historical JSON attachment produced the expected normalized `message_id|upload_id|channel_id` backfill row. The complete backend suite passed with `143 passed, 1 warning`.
+
+The broker-binding and Redis-outage tests are deterministic fake-broker/fake-Redis checks of retry state, arguments, and backoff. They are not claimed as a live RabbitMQ/Redis outage integration test.
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`

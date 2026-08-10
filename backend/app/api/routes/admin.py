@@ -2,7 +2,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Request, Response
 
-from app.api.deps import AMQPDep, DBDep, SuperadminDep
+from app.api.deps import AMQPDep, DBDep, RedisDep, SuperadminDep
+from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.realtime.auth_control import AuthControlEvent, dispatch_auth_control
 from app.schemas.admin import (
@@ -15,6 +16,7 @@ from app.schemas.admin import (
 )
 from app.services.admin_service import AdminService
 from app.services.channel_service import ChannelService
+from app.services.rate_limit_service import enforce_rate_limit
 
 router = APIRouter(prefix="/admin", tags=["superadmin"])
 
@@ -79,7 +81,14 @@ async def update_user_status(
     db: DBDep,
     superadmin: SuperadminDep,
     request: Request,
+    redis: RedisDep,
 ) -> AdminActionResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:admin:{superadmin.id}",
+        limit=get_settings().rate_limit_admin_per_minute,
+        window_seconds=60,
+    )
     try:
         count = await AdminService.set_user_active(db, superadmin, user_id, req.is_active)
         if not req.is_active:
@@ -99,7 +108,14 @@ async def revoke_user_sessions(
     db: DBDep,
     superadmin: SuperadminDep,
     request: Request,
+    redis: RedisDep,
 ) -> AdminActionResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:admin:{superadmin.id}",
+        limit=get_settings().rate_limit_admin_per_minute,
+        window_seconds=60,
+    )
     try:
         count = await AdminService.revoke_user_sessions(db, superadmin, user_id)
         await dispatch_auth_control(
@@ -143,7 +159,14 @@ async def deactivate_channel(
     db: DBDep,
     superadmin: SuperadminDep,
     amqp: AMQPDep,
+    redis: RedisDep,
 ) -> AdminActionResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:admin:{superadmin.id}",
+        limit=get_settings().rate_limit_admin_per_minute,
+        window_seconds=60,
+    )
     try:
         await ChannelService.delete_channel(db, channel_id, superadmin.id, amqp)
     except AppError as exc:
@@ -157,7 +180,14 @@ async def restore_channel(
     db: DBDep,
     superadmin: SuperadminDep,
     amqp: AMQPDep,
+    redis: RedisDep,
 ) -> AdminActionResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:admin:{superadmin.id}",
+        limit=get_settings().rate_limit_admin_per_minute,
+        window_seconds=60,
+    )
     try:
         await AdminService.restore_channel(db, amqp, superadmin, channel_id)
     except AppError as exc:

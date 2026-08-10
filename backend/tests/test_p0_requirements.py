@@ -43,6 +43,17 @@ class _FakeAmqpConnection:
         return _FakeAmqpChannel()
 
 
+class _AllowRateRedis:
+    async def incr(self, key: str) -> int:
+        return 1
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        return True
+
+    async def ttl(self, key: str) -> int:
+        return 60
+
+
 @pytest.mark.asyncio
 async def test_channel_creation_generates_slug_and_logs_event(db_session, monkeypatch):
     async def _noop_bind(*args, **kwargs):
@@ -673,10 +684,10 @@ async def test_upload_download_requires_channel_membership(db_session, monkeypat
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await get_upload_content(upload.id, db_session, outsider)
+        await get_upload_content(upload.id, db_session, outsider, _AllowRateRedis())
     assert exc_info.value.status_code == 403
 
-    owner_response = await get_upload_content(upload.id, db_session, owner)
+    owner_response = await get_upload_content(upload.id, db_session, owner, _AllowRateRedis())
     assert owner_response.body == b"hello world"
 
     unauthorized_events = (

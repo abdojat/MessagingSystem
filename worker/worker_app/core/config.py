@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -17,6 +18,12 @@ class Settings(BaseSettings):
     outbox_max_retry_delay_seconds: int = 300
     worker_online_scan_interval: float = 3.0
     log_level: str = "INFO"
+    rabbit_user_queue_expires_ms: int = Field(default=7 * 24 * 60 * 60 * 1000, ge=60_000)
+    rabbit_user_queue_message_ttl_ms: int = Field(default=24 * 60 * 60 * 1000, ge=1_000)
+    rabbit_user_queue_max_length: int = Field(default=10_000, ge=1)
+    redis_fanout_max_attempts: int = Field(default=3, ge=1, le=10)
+    redis_fanout_initial_retry_delay_seconds: float = Field(default=0.5, ge=0.05, le=60)
+    redis_fanout_max_retry_delay_seconds: float = Field(default=5.0, ge=0.05, le=300)
 
 
 @lru_cache

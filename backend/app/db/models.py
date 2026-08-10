@@ -212,6 +212,26 @@ class Message(Base):
     )
 
 
+class MessageAttachment(Base):
+    __tablename__ = "message_attachments"
+
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    upload_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("uploads.id", ondelete="CASCADE"), primary_key=True
+    )
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_message_attachments_upload_channel", "upload_id", "channel_id"),
+        Index("ix_message_attachments_channel_message", "channel_id", "message_id"),
+    )
+
+
 class MessageReaction(Base):
     __tablename__ = "message_reactions"
 

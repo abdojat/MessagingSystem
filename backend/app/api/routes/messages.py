@@ -1,7 +1,8 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
+from sqlalchemy import select
 
 from app.api.deps import CurrentUserDep, DBDep, RedisDep
 from app.core.config import get_settings
@@ -24,10 +25,37 @@ from app.schemas.messages import (
     UploadCreateResponse,
 )
 from app.services.message_service import MessageService
-from app.services.rate_limit_service import RateLimitService
+from app.services.rate_limit_service import enforce_rate_limit
 from app.services.event_service import log_event
 
 router = APIRouter(tags=["messages"])
+
+
+async def _enforce_message_write(redis: RedisDep, user_id: UUID, operation: str) -> None:
+    _ = operation
+    settings = get_settings()
+    await enforce_rate_limit(
+        redis,
+        f"rl:message-write:{user_id}:burst",
+        limit=settings.rate_limit_message_write_burst_per_second,
+        window_seconds=1,
+    )
+    await enforce_rate_limit(
+        redis,
+        f"rl:message-write:{user_id}:sustained",
+        limit=settings.rate_limit_message_write_per_10_seconds,
+        window_seconds=10,
+    )
+
+
+async def _enforce_media(redis: RedisDep, user_id: UUID, operation: str) -> None:
+    _ = operation
+    await enforce_rate_limit(
+        redis,
+        f"rl:media:{user_id}",
+        limit=get_settings().rate_limit_media_per_minute,
+        window_seconds=60,
+    )
 
 
 def _to_message_response(
@@ -105,6 +133,42 @@ async def _to_message_response_with_reactions(
     return response
 
 
+async def _to_message_responses_with_reactions(
+    db: DBDep,
+    user_id: UUID,
+    messages: list,
+) -> list[MessageResponse]:
+    if not messages:
+        return []
+    sender_ids = list({message.sender_user_id for message in messages})
+    sender_rows = await db.execute(select(User).where(User.id.in_(sender_ids)))
+    senders = {sender.id: sender for sender in sender_rows.scalars().all()}
+    summaries = await MessageService._reaction_summaries(db, [message.id for message in messages], user_id)
+    responses: list[MessageResponse] = []
+    for message in messages:
+        sender = senders.get(message.sender_user_id)
+        try:
+            response = _to_message_response(
+                message,
+                sender_username=sender.username if sender else None,
+                sender_display_name=sender.display_name if sender else None,
+                sender_avatar_url=sender.avatar_url if sender else None,
+            )
+        except AppError:
+            await log_event(
+                db,
+                "message.decryption_failed",
+                {"channel_id": str(message.channel_id), "message_id": str(message.id)},
+                channel_id=message.channel_id,
+                actor_user_id=user_id,
+            )
+            await db.commit()
+            raise
+        response.reactions_summary = summaries[message.id]
+        responses.append(response)
+    return responses
+
+
 @router.post("/channels/{channel_id}/messages", response_model=MessageResponse, status_code=201)
 async def publish_message(
     channel_id: UUID,
@@ -113,32 +177,7 @@ async def publish_message(
     user: CurrentUserDep,
     redis: RedisDep,
 ) -> MessageResponse:
-    # The one-second limit catches accidental client loops; the ten-second
-    # limit caps sustained bursts without making normal typing feel throttled.
-    burst_retry = await RateLimitService.hit(
-        redis,
-        f"rl:msg:{user.id}:{channel_id}:burst",
-        limit=40,
-        window_seconds=1,
-    )
-    if burst_retry is not None:
-        raise HTTPException(
-            status_code=429,
-            detail={"code": "RATE_LIMITED", "message": "rate limit exceeded", "details": {"retry_after_seconds": burst_retry}},
-            headers={"Retry-After": str(burst_retry)},
-        )
-    sustained_retry = await RateLimitService.hit(
-        redis,
-        f"rl:msg:{user.id}:{channel_id}:sustained",
-        limit=200,
-        window_seconds=10,
-    )
-    if sustained_retry is not None:
-        raise HTTPException(
-            status_code=429,
-            detail={"code": "RATE_LIMITED", "message": "rate limit exceeded", "details": {"retry_after_seconds": sustained_retry}},
-            headers={"Retry-After": str(sustained_retry)},
-        )
+    await _enforce_message_write(redis, user.id, "publish")
     try:
         message = await MessageService.publish_message(db, channel_id, user.id, req)
     except AppError as exc:
@@ -196,9 +235,8 @@ async def list_messages(
         )
     except AppError as exc:
         raise to_http_exception(exc) from exc
-    sender_cache: dict[UUID, User | None] = {}
     return MessageListResponse(
-        items=[await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in messages],
+        items=await _to_message_responses_with_reactions(db, user.id, messages),
         next_before_seq_id=next_before,
         next_after_seq_id=next_after,
         has_more=has_more,
@@ -228,10 +266,9 @@ async def list_messages_around(
         items = await MessageService.messages_around(db, channel_id, user.id, seq_id, limit_before, limit_after)
     except AppError as exc:
         raise to_http_exception(exc) from exc
-    sender_cache: dict[UUID, User | None] = {}
     return MessageAroundResponse(
         seq_id=seq_id,
-        items=[await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in items],
+        items=await _to_message_responses_with_reactions(db, user.id, items),
     )
 
 
@@ -251,7 +288,9 @@ async def edit_message(
     req: MessagePatchRequest,
     db: DBDep,
     user: CurrentUserDep,
+    redis: RedisDep,
 ) -> MessageResponse:
+    await _enforce_message_write(redis, user.id, "edit")
     try:
         message = await MessageService.edit_message(db, channel_id, user.id, message_id, req)
     except AppError as exc:
@@ -265,7 +304,9 @@ async def delete_message(
     message_id: UUID,
     db: DBDep,
     user: CurrentUserDep,
+    redis: RedisDep,
 ) -> MessageResponse:
+    await _enforce_message_write(redis, user.id, "delete")
     try:
         message = await MessageService.delete_message(db, channel_id, user.id, message_id)
     except AppError as exc:
@@ -274,7 +315,8 @@ async def delete_message(
 
 
 @router.post("/channels/{channel_id}/seen", response_model=SeenResponse)
-async def seen(channel_id: UUID, req: SeenRequest, db: DBDep, user: CurrentUserDep) -> SeenResponse:
+async def seen(channel_id: UUID, req: SeenRequest, db: DBDep, user: CurrentUserDep, redis: RedisDep) -> SeenResponse:
+    await _enforce_message_write(redis, user.id, "seen")
     try:
         state = await MessageService.mark_seen(db, channel_id, user.id, req)
     except AppError as exc:
@@ -296,7 +338,9 @@ async def add_reaction(
     req: ReactionRequest,
     db: DBDep,
     user: CurrentUserDep,
+    redis: RedisDep,
 ) -> ReactionSummaryResponse:
+    await _enforce_message_write(redis, user.id, "reaction")
     try:
         summary = await MessageService.add_reaction(db, channel_id, message_id, user.id, req.emoji)
     except AppError as exc:
@@ -311,7 +355,9 @@ async def remove_reaction(
     emoji: str,
     db: DBDep,
     user: CurrentUserDep,
+    redis: RedisDep,
 ) -> ReactionSummaryResponse:
+    await _enforce_message_write(redis, user.id, "reaction")
     try:
         summary = await MessageService.remove_reaction(db, channel_id, message_id, user.id, emoji)
     except AppError as exc:
@@ -320,7 +366,14 @@ async def remove_reaction(
 
 
 @router.post("/channels/{channel_id}/pins/{message_id}", status_code=204)
-async def pin_message(channel_id: UUID, message_id: UUID, db: DBDep, user: CurrentUserDep) -> None:
+async def pin_message(
+    channel_id: UUID,
+    message_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
+) -> None:
+    await _enforce_message_write(redis, user.id, "pin")
     try:
         await MessageService.pin_message(db, channel_id, message_id, user.id)
     except AppError as exc:
@@ -328,7 +381,14 @@ async def pin_message(channel_id: UUID, message_id: UUID, db: DBDep, user: Curre
 
 
 @router.delete("/channels/{channel_id}/pins/{message_id}", status_code=204)
-async def unpin_message(channel_id: UUID, message_id: UUID, db: DBDep, user: CurrentUserDep) -> None:
+async def unpin_message(
+    channel_id: UUID,
+    message_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
+) -> None:
+    await _enforce_message_write(redis, user.id, "pin")
     try:
         await MessageService.unpin_message(db, channel_id, message_id, user.id)
     except AppError as exc:
@@ -346,13 +406,13 @@ async def list_pins(
         messages = await MessageService.list_pins(db, channel_id, user.id, limit)
     except AppError as exc:
         raise to_http_exception(exc) from exc
-    sender_cache: dict[UUID, User | None] = {}
-    items = [await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in messages]
+    items = await _to_message_responses_with_reactions(db, user.id, messages)
     return PinListResponse(items=items)
 
 
 @router.post("/uploads", response_model=UploadCreateResponse, status_code=201)
-async def create_upload(req: UploadCreateRequest, db: DBDep, user: CurrentUserDep) -> UploadCreateResponse:
+async def create_upload(req: UploadCreateRequest, db: DBDep, user: CurrentUserDep, redis: RedisDep) -> UploadCreateResponse:
+    await _enforce_media(redis, user.id, "create")
     try:
         upload = await MessageService.create_upload(db, user.id, req)
     except AppError as exc:
@@ -367,7 +427,14 @@ async def create_upload(req: UploadCreateRequest, db: DBDep, user: CurrentUserDe
 
 
 @router.put("/uploads/{file_id}/content")
-async def put_upload_content(file_id: UUID, request: Request, db: DBDep, user: CurrentUserDep) -> dict:
+async def put_upload_content(
+    file_id: UUID,
+    request: Request,
+    db: DBDep,
+    user: CurrentUserDep,
+    redis: RedisDep,
+) -> dict:
+    await _enforce_media(redis, user.id, "put")
     try:
         upload = await MessageService.store_upload_content(db, user.id, file_id, request.stream())
     except AppError as exc:
@@ -376,7 +443,8 @@ async def put_upload_content(file_id: UUID, request: Request, db: DBDep, user: C
 
 
 @router.get("/uploads/{file_id}/content")
-async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> Response:
+async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep, redis: RedisDep) -> Response:
+    await _enforce_media(redis, user.id, "get")
     # Upload bytes are private by default. Access is inherited from ownership or
     # from a message/channel that references the upload.
     upload = await db.get(Upload, file_id)
@@ -428,15 +496,20 @@ async def get_upload_content(file_id: UUID, db: DBDep, user: CurrentUserDep) -> 
         }
     },
 )
-async def sync(req: SyncRequest, db: DBDep, user: CurrentUserDep) -> SyncResponse:
+async def sync(req: SyncRequest, db: DBDep, user: CurrentUserDep, redis: RedisDep) -> SyncResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:sync:{user.id}",
+        limit=get_settings().rate_limit_sync_per_minute,
+        window_seconds=60,
+    )
     try:
         payload = await MessageService.sync(db, user.id, req)
     except AppError as exc:
         raise to_http_exception(exc) from exc
-    sender_cache: dict[UUID, User | None] = {}
     return SyncResponse(
         server_time=payload["server_time"],
         channel_updates=payload["channel_updates"],
         membership_updates=payload["membership_updates"],
-        messages=[await _to_message_response_with_reactions(db, user.id, m, sender_cache) for m in payload["messages"]],
+        messages=await _to_message_responses_with_reactions(db, user.id, payload["messages"]),
     )

@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterable, AsyncIterator
 from pathlib import Path
+from datetime import timedelta
 import hashlib
 import logging
 import os
@@ -21,6 +22,7 @@ from app.db.models import (
     ContentType,
     MembershipRole,
     Message,
+    MessageAttachment,
     MessageReaction,
     PinnedMessage,
     Upload,
@@ -32,6 +34,7 @@ from app.schemas.messages import AttachmentReference, MessagePatchRequest, Publi
 from app.services.event_service import log_event
 from app.services.outbox_service import enqueue_channel_event_outbox, enqueue_message_outbox
 from app.services.rbac import can_publish, can_read
+from app.core.payload_limits import PROTOCOL_CHANNEL_ARRAY_MAX, normalize_reaction
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +238,16 @@ class MessageService:
         )
         db.add(message)
         await db.flush()
+        for attachment in attachments or []:
+            db.add(
+                MessageAttachment(
+                    message_id=message.id,
+                    channel_id=channel_id,
+                    upload_id=UUID(str(attachment["file_id"])),
+                )
+            )
+        if attachments:
+            await db.flush()
 
         sender_username, sender_display_name, sender_avatar_url = await MessageService._load_sender_profile(db, sender_id)
         payload = {
@@ -401,14 +414,23 @@ class MessageService:
         # Seen/unread state is derived from private message history, so it uses
         # the same approved-reader check as history, sync, and WebSocket resume.
         await MessageService._assert_can_read(db, channel_id, user_id)
+        # Serialize state creation/advancement per membership so two concurrent
+        # first-seen requests cannot both observe a missing state row.
+        await db.execute(
+            select(ChannelMembership)
+            .where(ChannelMembership.channel_id == channel_id, ChannelMembership.user_id == user_id)
+            .with_for_update()
+        )
         channel = await db.get(Channel, channel_id)
         if channel is None:  # Defensive; _assert_can_read already checks this.
             raise AppError("channel not found", 404, code="CHANNEL_NOT_FOUND")
 
-        state = await db.get(UserChannelState, {"channel_id": channel_id, "user_id": user_id})
-        if not state:
-            state = UserChannelState(channel_id=channel_id, user_id=user_id)
-            db.add(state)
+        state_rows = await db.execute(
+            select(UserChannelState)
+            .where(UserChannelState.channel_id == channel_id, UserChannelState.user_id == user_id)
+            .with_for_update()
+        )
+        state = state_rows.scalar_one_or_none()
 
         requested_seq: int | None = None
         requested_message_id: UUID | None = None
@@ -426,15 +448,24 @@ class MessageService:
         if requested_seq is not None and requested_seq > int(channel.last_seq_id or 0):
             raise AppError("last_seen_seq_id out of range", 400, code="VALIDATION_ERROR")
 
-        current_seen_seq = int(state.last_seen_seq_id or 0)
+        if requested_seq is None:
+            raise AppError("seen marker is required", 400, code="VALIDATION_ERROR")
+
+        current_seen_seq = int(state.last_seen_seq_id or 0) if state is not None else -1
         # Seen markers only move forward, so an older client cannot erase unread
         # progress that was recorded by a newer tab or device.
-        if requested_seq is not None and requested_seq >= current_seen_seq:
-            state.last_seen_seq_id = requested_seq
-            if clear_message_id:
-                state.last_seen_message_id = None
-            else:
-                state.last_seen_message_id = requested_message_id
+        if state is not None and requested_seq <= current_seen_seq:
+            return state
+
+        if state is None:
+            state = UserChannelState(channel_id=channel_id, user_id=user_id)
+            db.add(state)
+
+        state.last_seen_seq_id = requested_seq
+        if clear_message_id:
+            state.last_seen_message_id = None
+        else:
+            state.last_seen_message_id = requested_message_id
         if req.last_seen_at is not None:
             state.last_seen_at = req.last_seen_at
         else:
@@ -501,7 +532,10 @@ class MessageService:
         req: MessagePatchRequest,
     ) -> Message:
         role = await MessageService._assert_can_read(db, channel_id, actor_user_id)
-        message = await db.get(Message, message_id)
+        message_rows = await db.execute(
+            select(Message).where(Message.id == message_id).with_for_update()
+        )
+        message = message_rows.scalar_one_or_none()
         if not message or message.channel_id != channel_id or message.deleted_at is not None:
             raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
         if message.sender_user_id != actor_user_id and role not in {MembershipRole.owner, MembershipRole.admin}:
@@ -597,26 +631,46 @@ class MessageService:
 
     @staticmethod
     async def _reaction_summary(db: AsyncSession, message_id: UUID, actor_user_id: UUID) -> dict:
+        return (await MessageService._reaction_summaries(db, [message_id], actor_user_id))[message_id]
+
+    @staticmethod
+    async def _reaction_summaries(
+        db: AsyncSession,
+        message_ids: list[UUID],
+        actor_user_id: UUID,
+    ) -> dict[UUID, dict]:
+        unique_ids = list(dict.fromkeys(message_ids))
+        summaries = {message_id: {"counts": {}, "my_reaction": []} for message_id in unique_ids}
+        if not unique_ids:
+            return summaries
         rows = await db.execute(
-            select(MessageReaction.emoji, func.count(MessageReaction.id))
-            .where(MessageReaction.message_id == message_id)
-            .group_by(MessageReaction.emoji)
+            select(MessageReaction.message_id, MessageReaction.emoji, func.count(MessageReaction.id))
+            .where(MessageReaction.message_id.in_(unique_ids))
+            .group_by(MessageReaction.message_id, MessageReaction.emoji)
         )
         mine_rows = await db.execute(
-            select(MessageReaction.emoji).where(
-                MessageReaction.message_id == message_id,
+            select(MessageReaction.message_id, MessageReaction.emoji).where(
+                MessageReaction.message_id.in_(unique_ids),
                 MessageReaction.user_id == actor_user_id,
-            ).order_by(MessageReaction.emoji.asc())
+            ).order_by(MessageReaction.message_id.asc(), MessageReaction.emoji.asc())
         )
-        return {
-            "counts": {emoji: int(count) for emoji, count in rows.all()},
-            "my_reaction": list(mine_rows.scalars().all()),
-        }
+        for message_id, emoji, count in rows.all():
+            summaries[message_id]["counts"][emoji] = int(count)
+        for message_id, emoji in mine_rows.all():
+            summaries[message_id]["my_reaction"].append(emoji)
+        return summaries
 
     @staticmethod
     async def add_reaction(db: AsyncSession, channel_id: UUID, message_id: UUID, actor_user_id: UUID, emoji: str) -> dict:
+        try:
+            emoji = normalize_reaction(emoji)
+        except ValueError as exc:
+            raise AppError(str(exc), 400, code="VALIDATION_ERROR") from exc
         await MessageService._assert_can_read(db, channel_id, actor_user_id)
-        message = await db.get(Message, message_id)
+        message_rows = await db.execute(
+            select(Message).where(Message.id == message_id).with_for_update()
+        )
+        message = message_rows.scalar_one_or_none()
         if not message or message.channel_id != channel_id or message.deleted_at is not None:
             raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
         existing = await db.execute(
@@ -628,6 +682,15 @@ class MessageService:
         )
         existing_reaction = existing.scalar_one_or_none()
         if existing_reaction is None:
+            distinct_rows = await db.execute(
+                select(MessageReaction.emoji).where(MessageReaction.message_id == message_id).distinct()
+            )
+            distinct_emoji = set(distinct_rows.scalars().all())
+            if (
+                emoji not in distinct_emoji
+                and len(distinct_emoji) >= get_settings().max_distinct_reactions_per_message
+            ):
+                raise AppError("message reaction variety quota exceeded", 409, code="REACTION_QUOTA_EXCEEDED")
             # Reactions are idempotent per user/message/emoji; duplicate taps
             # should return the current summary without creating another row.
             db.add(
@@ -659,11 +722,15 @@ class MessageService:
 
     @staticmethod
     async def remove_reaction(db: AsyncSession, channel_id: UUID, message_id: UUID, actor_user_id: UUID, emoji: str) -> dict:
+        try:
+            emoji = normalize_reaction(emoji)
+        except ValueError as exc:
+            raise AppError(str(exc), 400, code="VALIDATION_ERROR") from exc
         await MessageService._assert_can_read(db, channel_id, actor_user_id)
         message = await db.get(Message, message_id)
         if not message or message.channel_id != channel_id or message.deleted_at is not None:
             raise AppError("message not found", 404, code="MESSAGE_NOT_FOUND")
-        await db.execute(
+        delete_result = await db.execute(
             delete(MessageReaction).where(
                 MessageReaction.message_id == message_id,
                 MessageReaction.user_id == actor_user_id,
@@ -671,18 +738,19 @@ class MessageService:
             )
         )
         summary = await MessageService._reaction_summary(db, message_id, actor_user_id)
-        await enqueue_message_outbox(
-            db,
-            message.id,
-            channel_id,
-            {
-                "type": "reaction_updated",
-                "channel_id": str(channel_id),
-                "message_id": str(message_id),
-                "reactions_summary": summary,
-            },
-        )
-        await db.commit()
+        if int(delete_result.rowcount or 0) > 0:
+            await enqueue_message_outbox(
+                db,
+                message.id,
+                channel_id,
+                {
+                    "type": "reaction_updated",
+                    "channel_id": str(channel_id),
+                    "message_id": str(message_id),
+                    "reactions_summary": summary,
+                },
+            )
+            await db.commit()
         return summary
 
     @staticmethod
@@ -781,6 +849,21 @@ class MessageService:
             raise AppError("content_type not allowed", 400, code="VALIDATION_ERROR")
         if media_type == "image/svg+xml":
             raise AppError("svg uploads are not allowed", 400, code="VALIDATION_ERROR")
+        await db.execute(select(User).where(User.id == actor_user_id).with_for_update())
+        quota_rows = await db.execute(
+            select(
+                func.count(Upload.id).filter(Upload.created_at >= utcnow() - timedelta(days=1)),
+                func.count(Upload.id).filter(Upload.public_url.is_(None)),
+                func.coalesce(func.sum(Upload.size_bytes), 0),
+            ).where(Upload.owner_user_id == actor_user_id)
+        )
+        uploads_today, pending_uploads, reserved_bytes = quota_rows.one()
+        if int(uploads_today or 0) >= settings.max_uploads_per_user_per_day:
+            raise AppError("daily upload quota exceeded", 429, code="RESOURCE_QUOTA_EXCEEDED")
+        if int(pending_uploads or 0) >= settings.max_pending_uploads_per_user:
+            raise AppError("pending upload quota exceeded", 429, code="RESOURCE_QUOTA_EXCEEDED")
+        if int(reserved_bytes or 0) + req.size_bytes > settings.max_stored_upload_bytes_per_user:
+            raise AppError("upload storage quota exceeded", 429, code="RESOURCE_QUOTA_EXCEEDED")
         safe_filename = normalize_upload_filename(req.filename)
         # The display filename is preserved, but storage uses a normalized path
         # under the user's id to avoid path traversal and accidental collisions.
@@ -828,7 +911,7 @@ class MessageService:
         if channel_ids:
             selected = sorted([cid for cid in channel_ids if cid in membership_map], key=lambda v: str(v))
         else:
-            selected = sorted(list(membership_map.keys()), key=lambda v: str(v))
+            selected = sorted(list(membership_map.keys()), key=lambda v: str(v))[:PROTOCOL_CHANNEL_ARRAY_MAX]
 
         channel_updates: list[dict] = []
         for cid in selected:
@@ -1120,27 +1203,23 @@ class MessageService:
             return True
         if await MessageService._can_access_avatar_upload(db, actor_user_id, file_id):
             return True
-        # Message attachments inherit access from the channel containing the
-        # message; upload bytes are never public just because a URL is known.
-        memberships = await db.execute(
-            select(ChannelMembership.channel_id).where(
-                ChannelMembership.user_id == actor_user_id,
-                ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+        # Attachment authorization follows the normalized, indexed relation;
+        # it does not scan or deserialize arbitrary message history.
+        access_row = await db.execute(
+            select(MessageAttachment.upload_id)
+            .join(
+                ChannelMembership,
+                and_(
+                    ChannelMembership.channel_id == MessageAttachment.channel_id,
+                    ChannelMembership.user_id == actor_user_id,
+                    ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
+                ),
             )
+            .join(Message, Message.id == MessageAttachment.message_id)
+            .where(MessageAttachment.upload_id == file_id, Message.deleted_at.is_(None))
+            .limit(1)
         )
-        member_channels = set(memberships.scalars().all())
-        if not member_channels:
-            return False
-        rows = await db.execute(select(Message).where(Message.deleted_at.is_(None), Message.attachments.is_not(None)))
-        file_id_raw = str(file_id)
-        for message in rows.scalars().all():
-            if message.channel_id not in member_channels:
-                continue
-            for item in (message.attachments or []):
-                item_file_id = str(item.get("file_id") or "")
-                if item_file_id == file_id_raw:
-                    return True
-        return False
+        return access_row.scalar_one_or_none() is not None
 
     @staticmethod
     async def _can_access_avatar_upload(db: AsyncSession, actor_user_id: UUID, file_id: UUID) -> bool:

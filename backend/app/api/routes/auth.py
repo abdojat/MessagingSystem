@@ -19,27 +19,26 @@ from app.schemas.auth import (
 from app.realtime.auth_control import AuthControlEvent, dispatch_auth_control
 from app.services.auth_service import AuthService, RefreshTokenReplayError
 from app.services.event_service import log_event
-from app.services.rate_limit_service import RateLimitService
+from app.services.rate_limit_service import enforce_rate_limit
 from app.services.ws_ticket_service import WebSocketTicketService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 async def _enforce_auth_rate_limits(redis: RedisDep, scope: str, ip: str, identity: str) -> None:
-    ip_retry = await RateLimitService.hit(redis, f"rl:auth:{scope}:ip:{ip}", limit=30, window_seconds=60)
-    if ip_retry is not None:
-        raise HTTPException(
-            status_code=429,
-            detail={"code": "RATE_LIMITED", "message": "rate limit exceeded", "details": {"retry_after_seconds": ip_retry}},
-            headers={"Retry-After": str(ip_retry)},
-        )
-    user_retry = await RateLimitService.hit(redis, f"rl:auth:{scope}:identity:{identity.lower()}", limit=20, window_seconds=60)
-    if user_retry is not None:
-        raise HTTPException(
-            status_code=429,
-            detail={"code": "RATE_LIMITED", "message": "rate limit exceeded", "details": {"retry_after_seconds": user_retry}},
-            headers={"Retry-After": str(user_retry)},
-        )
+    settings = get_settings()
+    await enforce_rate_limit(
+        redis,
+        f"rl:auth:{scope}:ip:{ip}",
+        limit=settings.rate_limit_auth_ip_per_minute,
+        window_seconds=60,
+    )
+    await enforce_rate_limit(
+        redis,
+        f"rl:auth:{scope}:identity:{identity.lower()}",
+        limit=settings.rate_limit_auth_identity_per_minute,
+        window_seconds=60,
+    )
 
 
 @router.post("/register", status_code=201)
@@ -183,5 +182,11 @@ async def revoke_session(
 
 @router.post("/ws-ticket", response_model=WebSocketTicketResponse)
 async def create_websocket_ticket(auth: CurrentAuthDep, redis: RedisDep) -> WebSocketTicketResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:websocket:ticket:{auth.user.id}",
+        limit=get_settings().rate_limit_websocket_per_minute,
+        window_seconds=60,
+    )
     ticket = await WebSocketTicketService.issue(redis, auth)
     return WebSocketTicketResponse(ticket=ticket.value, expires_at=ticket.expires_at)

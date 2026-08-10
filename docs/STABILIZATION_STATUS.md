@@ -4,7 +4,18 @@ Last updated: 2026-08-10
 
 ## Summary
 
-The latest pass completes Phase 2 authentication hardening: access tokens are session-bound, refresh replay revokes the compromised family, sessions have idle and absolute deadlines, WebSockets use one-time Redis tickets, and Redis control events close revoked sockets across backend instances. The isolated PostgreSQL-backed suite passes all 124 backend tests; httpOnly-cookie migration and attachment encryption remain explicitly deferred.
+The latest pass completes Phase 3 abuse and messaging-reliability hardening: sensitive rate limits stay bounded during Redis failure, logical message/protocol inputs have explicit limits, repeated seen/reaction operations are idempotent, reaction and upload-authorization queries are bounded, basic account quotas are enforced, RabbitMQ queues have lifecycle bounds, membership binding changes use the transactional outbox, and Redis fanout cannot create a tight RabbitMQ requeue loop. The isolated PostgreSQL-backed suite passes all 143 backend tests; live multi-service outage testing, httpOnly-cookie migration, and attachment encryption remain explicitly deferred.
+
+## Security Hardening Phase 3 - 2026-08-10
+
+| Area | Status | Evidence | Remaining Risk | Next Action |
+| ---- | ------ | -------- | -------------- | ----------- |
+| Rate limits and quotas | Fixed and verified | Grouped auth/search/message/media/channel/WebSocket/sync/admin policies; capped local Redis-outage fallback; channel/invite/upload/WebSocket quotas; focused threshold and boundary regressions | Emergency limiter and WebSocket count are per process without Redis/distributed coordination | Add metrics and distributed load testing only if deployment scale requires it |
+| Payload/protocol amplification | Fixed and verified | 64 KiB text/JSON defaults, JSON depth 20, 100-entry REST/WS arrays, constrained reaction emoji/cardinality, idempotent seen/reaction events | HTTP server/proxy-wide body limit is still deployment-specific | Keep application validation and add reverse-proxy request limits in a production deployment |
+| Query scaling | Fixed and verified | 25-message rendering uses two reaction queries plus one sender query; indexed `message_attachments` lookup replaces message-history JSON scanning; migration backfill validated with a historical row | Avatar URL reference lookup still uses bounded string matching and is separate from message attachment authorization | Normalize profile/channel media references later only if measured data volume justifies it |
+| Broker consistency | Fixed with durable retry | Membership changes enqueue idempotent bind/unbind desired state in the existing outbox; simulated Rabbit failure leaves DB removal authoritative and command `retry_scheduled` | No live RabbitMQ outage/recovery integration run; exhausted binding commands still require operator retry/reconciliation | Add one live broker-outage test and a small reconciliation command in Phase 4 |
+| Queue/Redis outage behavior | Fixed and unit verified | Queue expiry/TTL/max-length arguments match backend/worker; Redis fanout uses bounded exponential attempts plus delayed NACK/requeue | Existing legacy queues must be recreated once because RabbitMQ queue arguments are immutable; live outage behavior is not integration-tested | Reset/recreate demo queues before the next full-stack run and add broker metrics/alerts later |
+| Validation | Passed | Fresh migration to `0018`; historical attachment backfill check; Phase 3 `19 passed`; full backend `143 passed`; one existing passlib/argon2 warning | Frontend was unchanged, and no real broker/Redis outage was simulated | Run the live demo/verifier after recreating legacy queues before supervisor presentation |
 
 ## Security Hardening Phase 2 - 2026-08-10
 

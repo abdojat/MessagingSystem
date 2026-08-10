@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core import encryption
 from app.core.config import get_settings
 from app.db.models import Base
+from app.services.rate_limit_service import RateLimitService
 
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@postgres:5432/channels")
@@ -21,6 +22,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 def _clear_settings_cache() -> None:
     get_settings.cache_clear()
     encryption._build_fernet.cache_clear()
+    RateLimitService.reset_local_for_tests()
 
 
 @pytest_asyncio.fixture
@@ -62,7 +64,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with session_maker() as session:
         # Isolate test cases while reusing a migrated schema.
-        await session.execute(text("TRUNCATE TABLE outbox, events, user_channel_state, pinned_messages, message_reactions, messages, channel_invites, channel_memberships, channel_counters, channels, user_sessions, users RESTART IDENTITY CASCADE"))
+        await session.execute(text("TRUNCATE TABLE outbox, events, user_channel_state, pinned_messages, message_reactions, message_attachments, messages, channel_invites, channel_memberships, channel_counters, channels, user_sessions, users RESTART IDENTITY CASCADE"))
         await session.commit()
         yield session
     await engine.dispose()

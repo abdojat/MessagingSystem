@@ -2,7 +2,14 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.core.payload_limits import (
+    PROTOCOL_CHANNEL_ARRAY_MAX,
+    normalize_reaction,
+    validate_message_json,
+    validate_message_text,
+)
 
 
 class AttachmentReference(BaseModel):
@@ -18,6 +25,9 @@ class PublishMessageRequest(BaseModel):
     reply_to_seq_id: int | None = Field(default=None, ge=1)
     attachments: list[AttachmentReference] | None = Field(default=None, max_length=10)
     client_msg_id: UUID | None = None
+
+    _text_size = field_validator("content_text")(validate_message_text)
+    _json_size = field_validator("content_json")(validate_message_json)
 
     @model_validator(mode="after")
     def validate_content(self) -> "PublishMessageRequest":
@@ -66,6 +76,9 @@ class MessagePatchRequest(BaseModel):
     content_text: str | None = None
     content_json: dict[str, Any] | None = None
 
+    _text_size = field_validator("content_text")(validate_message_text)
+    _json_size = field_validator("content_json")(validate_message_json)
+
     @model_validator(mode="after")
     def validate_content(self) -> "MessagePatchRequest":
         # Edits must replace the body with exactly one concrete content shape.
@@ -80,6 +93,8 @@ class MessagePatchRequest(BaseModel):
 
 class ReactionRequest(BaseModel):
     emoji: str = Field(min_length=1, max_length=64)
+
+    _normalize_emoji = field_validator("emoji")(normalize_reaction)
 
 
 class ReactionSummaryResponse(BaseModel):
@@ -112,7 +127,7 @@ class SyncChannelCursor(BaseModel):
 
 
 class SyncRequest(BaseModel):
-    channels: list[SyncChannelCursor] = Field(default_factory=list)
+    channels: list[SyncChannelCursor] = Field(default_factory=list, max_length=PROTOCOL_CHANNEL_ARRAY_MAX)
     since: datetime | None = None
     limit: int = Field(default=200, ge=1, le=500)
 
@@ -148,7 +163,7 @@ class MessageListResponse(BaseModel):
 
 class SeenRequest(BaseModel):
     last_seen_message_id: UUID | None = None
-    last_seen_seq_id: int | None = None
+    last_seen_seq_id: int | None = Field(default=None, ge=0)
     last_seen_at: datetime | None = None
 
     @model_validator(mode="after")

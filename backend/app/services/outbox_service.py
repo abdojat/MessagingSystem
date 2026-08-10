@@ -94,3 +94,38 @@ async def enqueue_user_event_outbox(
     db.add(row)
     await db.flush()
     return row
+
+
+async def enqueue_broker_binding_outbox(
+    db: AsyncSession,
+    channel_id: UUID,
+    user_id: UUID,
+    action: str,
+) -> Outbox:
+    if action not in {"bind", "unbind"}:
+        raise ValueError("broker binding action must be bind or unbind")
+    settings = get_settings()
+    username = await _get_username(db, user_id)
+    channel_slug = await _get_channel_slug(db, channel_id)
+    row = Outbox(
+        aggregate_type="broker_binding",
+        aggregate_id=user_id,
+        channel_id=channel_id,
+        payload={
+            "type": "broker_binding",
+            "action": action,
+            "user_id": str(user_id),
+            "username": username,
+            "channel_id": str(channel_id),
+            "channel_slug": channel_slug,
+        },
+        type=f"broker_binding.{action}",
+        # The worker intercepts broker_binding rows instead of publishing this
+        # routing key as an application event.
+        routing_key="broker.binding",
+        status=OutboxStatus.pending,
+        max_attempts=settings.outbox_max_attempts,
+    )
+    db.add(row)
+    await db.flush()
+    return row

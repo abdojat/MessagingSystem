@@ -10,6 +10,7 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.config import get_settings
 from app.core.identifiers import SAFE_IDENTIFIER_MAX_LENGTH, normalize_channel_slug, normalize_username
 from app.core.encryption import decrypt_json_payload, decrypt_message
 from app.core.utils import make_invite_token, sha256_hex, utcnow
@@ -29,7 +30,7 @@ from app.db.models import (
 from app.mq.publisher import bind_user_channel, unbind_user_channel
 from app.schemas.channels import AdminPermissionsUpdateRequest, ChannelCreateRequest, ChannelPatchRequest, InviteRequest, JoinRequest
 from app.services.event_service import log_event
-from app.services.outbox_service import enqueue_channel_event_outbox, enqueue_user_event_outbox
+from app.services.outbox_service import enqueue_broker_binding_outbox, enqueue_channel_event_outbox, enqueue_user_event_outbox
 from app.services.rbac import (
     build_permissions as build_rbac_permissions,
     can_approve,
@@ -160,6 +161,16 @@ class ChannelService:
 
     @staticmethod
     async def create_channel(db: AsyncSession, owner_user_id: UUID, req: ChannelCreateRequest, amqp: aio_pika.RobustConnection) -> Channel:
+        settings = get_settings()
+        await db.execute(select(User).where(User.id == owner_user_id).with_for_update())
+        owned_count = await db.scalar(
+            select(func.count(Channel.id)).where(
+                Channel.owner_user_id == owner_user_id,
+                Channel.deleted_at.is_(None),
+            )
+        )
+        if int(owned_count or 0) >= settings.max_channels_owned_per_user:
+            raise AppError("owned channel quota exceeded", 429, code="RESOURCE_QUOTA_EXCEEDED")
         # Channel avatars may reference protected uploads, so ownership and media type
         # are checked before the URL becomes visible to other channel readers.
         if req.avatar_url is not None:
@@ -209,20 +220,9 @@ class ChannelService:
                 channel_id=channel.id,
                 actor_user_id=owner_user_id,
             )
+        await enqueue_broker_binding_outbox(db, channel.id, owner_user_id, "bind")
         await db.commit()
         await db.refresh(channel)
-
-        owner = await db.get(User, owner_user_id)
-        if owner is None:
-            raise AppError("owner not found", 404, code="USER_NOT_FOUND")
-
-        # The owner needs an immediate binding so the newly created topic can be
-        # demonstrated through the broker without waiting for a reconnect.
-        amqp_channel = await amqp.channel()
-        try:
-            await bind_user_channel(amqp_channel, owner.username, channel.channel_slug)
-        finally:
-            await amqp_channel.close()
         return channel
 
     @staticmethod
@@ -653,24 +653,15 @@ class ChannelService:
             "channel_deleted",
             {"type": "channel_deleted", "channel_id": str(channel_id)},
         )
-        await db.commit()
-
-        amqp_channel = await amqp.channel()
-        try:
-            # The database tombstone is committed first, then broker bindings are
-            # removed so active subscribers stop receiving realtime messages.
-            rows = await db.execute(
-                select(User.username)
-                .join(ChannelMembership, ChannelMembership.user_id == User.id)
-                .where(
-                    ChannelMembership.channel_id == channel_id,
-                    ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
-                )
+        member_rows = await db.execute(
+            select(ChannelMembership.user_id).where(
+                ChannelMembership.channel_id == channel_id,
+                ChannelMembership.role.in_([MembershipRole.owner, MembershipRole.admin, MembershipRole.member]),
             )
-            for username in rows.scalars().all():
-                await unbind_user_channel(amqp_channel, username, channel.channel_slug)
-        finally:
-            await amqp_channel.close()
+        )
+        for member_user_id in member_rows.scalars().all():
+            await enqueue_broker_binding_outbox(db, channel_id, member_user_id, "unbind")
+        await db.commit()
 
     @staticmethod
     async def join_channel(
@@ -741,15 +732,6 @@ class ChannelService:
         )
         await db.commit()
 
-        if membership.role in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member}:
-            # Only active subscribers receive RabbitMQ bindings; pending requests
-            # stay visible in the database but do not receive channel traffic.
-            username = await ChannelService._require_username(db, user_id)
-            amqp_channel = await amqp.channel()
-            try:
-                await bind_user_channel(amqp_channel, username, channel.channel_slug)
-            finally:
-                await amqp_channel.close()
         return (status, membership, message)
 
     @staticmethod
@@ -763,6 +745,18 @@ class ChannelService:
         membership = await ChannelService.get_membership(db, channel_id, actor_user_id)
         if not membership or not can_invite(membership.role, membership.admin_permissions):
             raise AppError("forbidden", 403, code="FORBIDDEN")
+
+        await db.execute(select(User).where(User.id == actor_user_id).with_for_update())
+        active_invites = await db.scalar(
+            select(func.count(ChannelInvite.id)).where(
+                ChannelInvite.created_by_user_id == actor_user_id,
+                ChannelInvite.accepted_at.is_(None),
+                ChannelInvite.revoked_at.is_(None),
+                ChannelInvite.expires_at > utcnow(),
+            )
+        )
+        if int(active_invites or 0) >= get_settings().max_active_invites_per_user:
+            raise AppError("active invite quota exceeded", 429, code="RESOURCE_QUOTA_EXCEEDED")
 
         token = make_invite_token()
         # Store only a hash plus a short mask so leaked database rows cannot be
@@ -956,13 +950,6 @@ class ChannelService:
         )
         await db.commit()
 
-        amqp_channel = await amqp.channel()
-        # Accepting an invite makes the user a subscriber, so their durable queue
-        # must be bound to the channel routing key after the membership commit.
-        try:
-            await bind_user_channel(amqp_channel, user.username, channel.channel_slug)
-        finally:
-            await amqp_channel.close()
         return membership
 
     @staticmethod
@@ -1001,15 +988,6 @@ class ChannelService:
         )
         await db.commit()
 
-        target_username = await ChannelService._require_username(db, target_id)
-        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
-        amqp_channel = await amqp.channel()
-        # Approval is the point where a pending user begins receiving published
-        # messages through the broker.
-        try:
-            await bind_user_channel(amqp_channel, target_username, channel_slug)
-        finally:
-            await amqp_channel.close()
         return target
 
     @staticmethod
@@ -1055,14 +1033,6 @@ class ChannelService:
         )
         await db.commit()
 
-        target_username = await ChannelService._require_username(db, target_id)
-        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
-        amqp_channel = await amqp.channel()
-        # Directly added members become subscribers immediately.
-        try:
-            await bind_user_channel(amqp_channel, target_username, channel_slug)
-        finally:
-            await amqp_channel.close()
         return target
 
     @staticmethod
@@ -1200,15 +1170,6 @@ class ChannelService:
         )
         await db.commit()
 
-        target_username = await ChannelService._require_username(db, target_id)
-        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
-        amqp_channel = await amqp.channel()
-        # Removing membership must also remove the broker binding so future
-        # publishes no longer fan out to that user's queue.
-        try:
-            await unbind_user_channel(amqp_channel, target_username, channel_slug)
-        finally:
-            await amqp_channel.close()
 
     @staticmethod
     async def leave_channel(
@@ -1239,15 +1200,6 @@ class ChannelService:
         )
         await db.commit()
 
-        username = await ChannelService._require_username(db, user_id)
-        channel_slug = await ChannelService._require_channel_slug(db, channel_id)
-        amqp_channel = await amqp.channel()
-        # Leaving is a user-initiated unsubscribe, so the queue binding is cleaned
-        # up after the membership record is deleted.
-        try:
-            await unbind_user_channel(amqp_channel, username, channel_slug)
-        finally:
-            await amqp_channel.close()
 
     @staticmethod
     async def list_members(
@@ -1434,6 +1386,12 @@ class ChannelService:
             user_id,
             "membership_update_target",
             target_payload,
+        )
+        await enqueue_broker_binding_outbox(
+            db,
+            channel_id,
+            user_id,
+            "bind" if role in {MembershipRole.owner, MembershipRole.admin, MembershipRole.member} else "unbind",
         )
 
     @staticmethod

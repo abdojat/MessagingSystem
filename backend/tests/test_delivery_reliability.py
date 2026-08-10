@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 sys.path.append(str(Path(__file__).resolve().parents[2] / "worker"))
 
@@ -66,6 +66,15 @@ async def _create_channel(db_session, monkeypatch, owner_username: str = "delive
         ChannelCreateRequest(name=f"{owner_username} channel", visibility="public", join_mode="open"),
         _FakeAmqpConnection(),
     )
+    # Channel creation now durably enqueues its owner binding. Delivery tests
+    # isolate the message-outbox rows they create below, so treat that separate
+    # binding command as already processed.
+    await db_session.execute(
+        update(Outbox)
+        .where(Outbox.aggregate_type == "broker_binding", Outbox.channel_id == channel.id)
+        .values(status=OutboxStatus.published)
+    )
+    await db_session.commit()
     return owner, channel
 
 

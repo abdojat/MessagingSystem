@@ -2,7 +2,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import AMQPDep, CurrentUserDep, DBDep
+from app.api.deps import AMQPDep, CurrentUserDep, DBDep, RedisDep
+from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.db.models import ChannelVisibility
 from app.schemas.channels import (
@@ -15,12 +16,29 @@ from app.schemas.channels import (
     MyMembershipResponse,
 )
 from app.services.channel_service import ChannelService
+from app.services.rate_limit_service import enforce_rate_limit
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
 
+async def _enforce_channel_management(redis: RedisDep, user_id: UUID) -> None:
+    await enforce_rate_limit(
+        redis,
+        f"rl:channel-management:{user_id}",
+        limit=get_settings().rate_limit_channel_management_per_minute,
+        window_seconds=60,
+    )
+
+
 @router.post("", response_model=ChannelResponse, status_code=201)
-async def create_channel(req: ChannelCreateRequest, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> ChannelResponse:
+async def create_channel(
+    req: ChannelCreateRequest,
+    db: DBDep,
+    user: CurrentUserDep,
+    amqp: AMQPDep,
+    redis: RedisDep,
+) -> ChannelResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         created = await ChannelService.create_channel(db, user.id, req, amqp)
         channel = await ChannelService.get_channel_view(db, created.id, user.id)
@@ -76,7 +94,15 @@ async def get_channel(channel_id: UUID, db: DBDep, user: CurrentUserDep) -> Chan
 
 
 @router.patch("/{channel_id}", response_model=ChannelResponse)
-async def patch_channel(channel_id: UUID, req: ChannelPatchRequest, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> ChannelResponse:
+async def patch_channel(
+    channel_id: UUID,
+    req: ChannelPatchRequest,
+    db: DBDep,
+    user: CurrentUserDep,
+    amqp: AMQPDep,
+    redis: RedisDep,
+) -> ChannelResponse:
+    await _enforce_channel_management(redis, user.id)
     try:
         channel = await ChannelService.update_channel(db, channel_id, user.id, req, amqp)
         membership = await ChannelService.get_membership(db, channel_id, user.id)
@@ -92,7 +118,14 @@ async def patch_channel(channel_id: UUID, req: ChannelPatchRequest, db: DBDep, u
 
 
 @router.delete("/{channel_id}")
-async def delete_channel(channel_id: UUID, db: DBDep, user: CurrentUserDep, amqp: AMQPDep) -> dict:
+async def delete_channel(
+    channel_id: UUID,
+    db: DBDep,
+    user: CurrentUserDep,
+    amqp: AMQPDep,
+    redis: RedisDep,
+) -> dict:
+    await _enforce_channel_management(redis, user.id)
     try:
         await ChannelService.delete_channel(db, channel_id, user.id, amqp)
     except AppError as exc:
