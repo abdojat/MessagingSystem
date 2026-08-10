@@ -88,6 +88,11 @@ export interface TokenPair {
   token_type: string;
 }
 
+export interface WebSocketTicketResponse {
+  ticket: string;
+  expires_at: string;
+}
+
 export interface RegisterRequest {
   username: string;
   email?: string | null;
@@ -266,6 +271,7 @@ export interface SessionResponse {
   id: string;
   created_at: string;
   expires_at: string;
+  absolute_expires_at: string;
   revoked_at?: string | null;
   user_agent?: string | null;
   ip?: string | null;

@@ -141,7 +141,7 @@ PostgreSQL is the source of truth. Important entities in [`backend/app/db/models
 ```mermaid
 flowchart LR
   FE[Next.js Frontend] -->|REST + JWT| BE[FastAPI Backend]
-  FE -->|WebSocket token auth| WS[FastAPI WebSocket]
+  FE -->|WebSocket one-time ticket| WS[FastAPI WebSocket]
 
   BE -->|SQLAlchemy| PG[(PostgreSQL)]
   BE -->|Writes outbox/events/messages| PG
@@ -151,6 +151,7 @@ flowchart LR
   WK -->|Forward online-user payloads| REDIS[(Redis pub/sub)]
 
   WS -->|Reads realtime events| REDIS
+  BE <-->|Ticket storage + revocation control| REDIS
   WS -->|Pushes live updates| FE
 ```
 
@@ -163,7 +164,7 @@ flowchart LR
 | 3. Automatic delivery to subscribers | Mostly complete | [`worker/worker_app/amqp_consumer_runner.py`](worker/worker_app/amqp_consumer_runner.py) `_consume_user`; [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py) `_redis_forward_loop`; membership binding in channel service; `scripts/verify_demo_flow.py`; `scripts/verify_approval_flow.py` | Join-after-connect and approval-after-connect now have scripted coverage, but there is still no browser e2e test or full CI broker/WebSocket job | High | Keep the verifiers in the supervisor path and add a CI broker/WebSocket integration test later |
 | 4. Channel management interface/API | Complete | [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`, `list_channels`, `get_channel`, `patch_channel`, `delete_channel`, `channel_stats` | Duplicate root routes are also exposed by [`backend/app/main.py`](backend/app/main.py) | Medium | Keep only one public API surface or document the duplicate compatibility routes |
 | 5. Subscriber management interface/API | Complete | [`backend/app/api/routes/memberships.py`](backend/app/api/routes/memberships.py) `join_channel`, `leave_channel`, `list_members`, `list_pending_requests`, `create_invite`, `accept_invite`, `approve_member`, `add_member_direct`, `promote_member`, `demote_member`, `update_admin_permissions`, `remove_member` | Complex permission matrix; not all flows are exercised by tests | Medium | Add integration tests for join/approve/invite/promote/demote/remove paths |
-| 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) `register`, `login`, `refresh`, `logout`; [`backend/app/core/security.py`](backend/app/core/security.py) `hash_password`, `create_access_token`, `create_refresh_token` | Frontend still uses a JS-managed access-token cookie plus `localStorage` refresh token storage, which is fine for the demo but not production-grade | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
+| 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) session-bound access checks, row-locked refresh rotation/replay detection, idle/absolute lifetime, and revocation; [`backend/app/services/ws_ticket_service.py`](backend/app/services/ws_ticket_service.py) one-time tickets; migration `0017_auth_session_hardening`; Phase 2 regressions | Frontend still uses a JS-managed access-token cookie plus `localStorage` refresh token storage, which is fine for the demo but not production-grade | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
 | 7. Authorization/permissions | Complete | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership/avatar/wallpaper-reference rules before returning bytes | Browser token handling remains the larger remaining security caveat | High | Keep backend authorization strong and document the client-side limitation honestly |
 | 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; encryption key must stay out of tracked files | High | Treat encryption key as an external secret only and keep the env story explicit |
 | 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message/upload services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py) hash-chain verification | Event logging is not guaranteed if the logging path fails; event visibility and integrity verification are limited to channel managers | Medium | Keep the log path best-effort, document the limitation, and backfill legacy event hashes before final demos |
@@ -300,7 +301,7 @@ flowchart LR
 - A real `.env` is present locally but is not tracked in git; only `.env.example` is versioned.
 - Refresh tokens are stored in browser-managed localStorage; access tokens are mirrored into a JS-managed cookie.
 - Access tokens are stored in JavaScript-managed cookies.
-- WebSocket auth token can be placed in a query string for the helper script and demo flow.
+- WebSocket URLs contain only a short-lived one-time opaque ticket; raw access JWT query authentication is rejected.
 
 ### Code Duplication
 
@@ -321,8 +322,8 @@ flowchart LR
 
 - Per-user queue fanout is workable for a demo or moderate load, but not ideal for large scale.
 - The worker polls the outbox instead of using an event-driven publisher.
-- Live delivery depends on Redis pub/sub and a single WebSocket manager process. The verifier now exercises that path directly, but there is still no dedicated CI job for it.
-- There is no obvious horizontal-scaling strategy for websocket state or subscription synchronization.
+- Live delivery depends on Redis pub/sub and per-instance WebSocket managers. Redis auth-control messages now propagate session/user revocation across instances, but there is still no dedicated two-backend CI job.
+- Socket/subscription state remains local to each backend, while realtime fanout and revocation control are shared through Redis. This is a credible MVP horizontal path but not a measured production scaling design.
 
 ## 6. Messaging-System Correctness Review
 
@@ -395,7 +396,9 @@ flowchart LR
 
 - Password hashing with Argon2 in [`backend/app/core/security.py`](backend/app/core/security.py).
 - JWT access and refresh tokens in [`backend/app/core/security.py`](backend/app/core/security.py).
-- Session tracking and revocation in [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py).
+- Session-bound access authentication, idle/absolute lifetime, refresh-family replay detection, and durable revocation in [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py).
+- Short-lived hashed Redis WebSocket tickets with atomic single-use consumption in [`backend/app/services/ws_ticket_service.py`](backend/app/services/ws_ticket_service.py).
+- Local and Redis-distributed socket revocation plus access-expiry closure in [`backend/app/realtime/auth_control.py`](backend/app/realtime/auth_control.py) and [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py).
 - Role/permission checks in [`backend/app/services/rbac.py`](backend/app/services/rbac.py).
 - Message encryption at rest in [`backend/app/core/encryption.py`](backend/app/core/encryption.py).
 - Rate limiting on auth and publish endpoints.
@@ -413,7 +416,6 @@ flowchart LR
 
 - Refresh tokens are stored in localStorage.
 - Access tokens are stored in JavaScript-managed cookies.
-- WebSocket auth token is sent as a query string.
 - A real encryption key must remain outside tracked files and be provided through the environment.
 
 ### Missing / Limited Security
@@ -625,7 +627,7 @@ The frontend is real and fairly complete.
 | Architecture | 72 | Clear service separation and realistic distributed components, but some consistency and routing risks remain |
 | Backend quality | 68 | Solid domain logic and validation, but large services, a thin repo layer, and a few risky shortcuts |
 | Frontend/UI | 82 | Surprisingly complete for a graduation project, with actual channel, membership, publishing, and event-log flows |
-| Security | 64 | Real auth and encryption exist, upload, avatar, and wallpaper access are backend-protected, but browser token handling remains demo-grade |
+| Security | 72 | Session-bound auth, replay detection, absolute lifetime, one-time WebSocket tickets, distributed revocation, encryption, and protected uploads exist; browser credential storage remains demo-grade |
 | Persistence/database | 84 | Strong schema coverage and durable storage, with only a few schema-quality improvements needed |
 | Testing | 55 | Backend regression tests exist and pass here, but frontend/broker integration coverage is still thin |
 | Deployment | 73 | Dockerized and reproducible in principle, but secrets and environment handling need cleanup |
@@ -636,7 +638,7 @@ The frontend is real and fairly complete.
 
 ### Complete
 
-- Authentication, password hashing, session management, membership controls, channel CRUD, message persistence, event logging, upload/avatar/wallpaper authorization, safe identifier validation, and server-side encryption at rest.
+- Authentication, password hashing, session-bound access, refresh replay detection, absolute lifetime, one-time WebSocket tickets, distributed revocation, membership controls, channel CRUD, message persistence, event logging, upload/avatar/wallpaper authorization, safe identifier validation, and server-side encryption at rest.
 
 ### Mostly Complete
 

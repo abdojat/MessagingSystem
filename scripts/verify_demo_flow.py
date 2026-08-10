@@ -181,7 +181,8 @@ async def main_async() -> int:
         _pass(f"Created channel {channel_slug} ({channel_id})")
 
         ws_base_url = args.base_url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
-        ws_url = f"{ws_base_url}/ws?token={user_b.access_token}"
+        ws_ticket = await _req(client, "POST", "/auth/ws-ticket", token=user_b.access_token, payload={})
+        ws_url = f"{ws_base_url}/ws?ticket={ws_ticket['ticket']}"
         plaintext = f"Hello from demo {secrets.token_hex(3)}"
         _step("3) User B opens WebSocket before joining the channel")
         _info("hello timeout=10s, subscribe acknowledgement timeout=10s, live delivery timeout=30s")

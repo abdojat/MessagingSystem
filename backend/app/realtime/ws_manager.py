@@ -1,12 +1,15 @@
 import asyncio
 import json
 import logging
+from contextlib import suppress
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 import aio_pika
 from fastapi import WebSocket
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -26,6 +29,7 @@ from app.realtime.protocol import (
     build_error,
     parse_client_envelope,
 )
+from app.realtime.auth_control import AuthControlEvent, auth_control_channel
 from app.realtime.redis_pubsub import mark_user_offline, mark_user_online, user_pubsub_channel
 from app.schemas.messages import SeenRequest
 from app.services.message_service import MessageService
@@ -42,8 +46,31 @@ class WSManager:
         self._amqp = amqp
         self._subscriptions: dict[int, set[str]] = {}
         self._connections: dict[UUID, dict[int, WebSocket]] = {}
+        self._session_connections: dict[UUID, dict[int, WebSocket]] = {}
+        self._socket_sessions: dict[int, UUID] = {}
+        self._closing_sockets: set[int] = set()
+        self._control_task: asyncio.Task[None] | None = None
 
-    async def connect(self, websocket: WebSocket, user_id: UUID, username: str, pre_accepted: bool = False) -> None:
+    async def start(self) -> None:
+        if self._control_task is None or self._control_task.done():
+            self._control_task = asyncio.create_task(self._auth_control_loop())
+
+    async def stop(self) -> None:
+        if self._control_task is None:
+            return
+        self._control_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await self._control_task
+        self._control_task = None
+
+    async def connect(
+        self,
+        websocket: WebSocket,
+        user_id: UUID,
+        username: str,
+        session_id: UUID,
+        pre_accepted: bool = False,
+    ) -> None:
         if not pre_accepted:
             await websocket.accept()
         await mark_user_online(self._redis, username)
@@ -52,46 +79,100 @@ class WSManager:
         await self._ensure_user_bindings(user_id, username)
         self._subscriptions[id(websocket)] = set(await self._member_channel_ids(user_id))
         self._connections.setdefault(user_id, {})[id(websocket)] = websocket
+        self._session_connections.setdefault(session_id, {})[id(websocket)] = websocket
+        self._socket_sessions[id(websocket)] = session_id
 
     async def disconnect(self, websocket: WebSocket, username: str) -> None:
         self._subscriptions.pop(id(websocket), None)
+        getattr(self, "_closing_sockets", set()).discard(id(websocket))
         for user_id, sockets in list(self._connections.items()):
             sockets.pop(id(websocket), None)
             if not sockets:
                 self._connections.pop(user_id, None)
+        session_id = getattr(self, "_socket_sessions", {}).pop(id(websocket), None)
+        if session_id is not None:
+            session_sockets = getattr(self, "_session_connections", {}).get(session_id, {})
+            session_sockets.pop(id(websocket), None)
+            if not session_sockets:
+                self._session_connections.pop(session_id, None)
         await mark_user_offline(self._redis, username)
 
-    async def disconnect_user(self, user_id: UUID, reason: str = "account deactivated") -> int:
+    async def disconnect_user(self, user_id: UUID, reason: str = "account deactivated", code: int = 1008) -> int:
         sockets = list(self._connections.get(user_id, {}).values())
+        closed = 0
         for websocket in sockets:
+            closing = getattr(self, "_closing_sockets", None)
+            if closing is not None and id(websocket) in closing:
+                continue
+            if closing is not None:
+                closing.add(id(websocket))
             try:
-                await websocket.close(code=1008, reason=reason)
+                await websocket.close(code=code, reason=reason)
+                closed += 1
             except Exception:
                 logger.exception("failed to close websocket for deactivated user", extra={"user_id": str(user_id)})
-        return len(sockets)
+        return closed
 
-    async def run_socket(self, websocket: WebSocket, user_id: UUID, username: str) -> None:
+    async def disconnect_session(self, session_id: UUID, reason: str = "session revoked", code: int = 4003) -> int:
+        sockets = list(getattr(self, "_session_connections", {}).get(session_id, {}).values())
+        closed = 0
+        for websocket in sockets:
+            closing = getattr(self, "_closing_sockets", None)
+            if closing is not None and id(websocket) in closing:
+                continue
+            if closing is not None:
+                closing.add(id(websocket))
+            try:
+                await websocket.close(code=code, reason=reason)
+                closed += 1
+            except Exception:
+                logger.exception("failed to close websocket for revoked session", extra={"session_id": str(session_id)})
+        return closed
+
+    async def handle_auth_control_event(self, event: AuthControlEvent) -> int:
+        if event.session_id is not None:
+            return await self.disconnect_session(event.session_id, reason=event.reason)
+        return await self.disconnect_user(event.user_id, reason=event.reason, code=4003)
+
+    async def run_socket(
+        self,
+        websocket: WebSocket,
+        user_id: UUID,
+        username: str,
+        session_id: UUID,
+        authentication_expires_at: datetime,
+    ) -> None:
         await websocket.send_json(
             build_envelope(
                 "hello",
                 {
                     "server_time": utcnow().isoformat(),
                     "user_id": str(user_id),
-                    "session_id": None,
+                    "session_id": str(session_id),
                 },
             )
         )
 
         redis_task = asyncio.create_task(self._redis_forward_loop(websocket, username, user_id))
-        inbound_task = asyncio.create_task(self._inbound_loop(websocket, user_id))
-        # The socket is alive while both loops are alive; if either side exits,
-        # cancel the other side and let the route perform disconnect cleanup.
-        done, pending = await asyncio.wait({redis_task, inbound_task}, return_when=asyncio.FIRST_COMPLETED)
+        inbound_task = asyncio.create_task(self._inbound_loop(websocket, user_id, session_id))
+        expiry_task = asyncio.create_task(self._close_when_auth_expires(websocket, authentication_expires_at))
+        # The socket is alive while all three loops are alive. Token/session
+        # lifetime is enforced without polling PostgreSQL per connection.
+        done, pending = await asyncio.wait(
+            {redis_task, inbound_task, expiry_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
         for task in pending:
             task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
         for task in done:
-            if task.exception():
+            if not task.cancelled() and task.exception():
                 raise task.exception()
+
+    async def _close_when_auth_expires(self, websocket: WebSocket, expires_at: datetime) -> None:
+        delay = max(0.0, (expires_at - utcnow()).total_seconds())
+        await asyncio.sleep(delay)
+        await websocket.close(code=4001, reason="authentication expired")
 
     async def _member_channel_ids(self, user_id: UUID) -> list[str]:
         async with self._session_factory() as db:
@@ -214,7 +295,7 @@ class WSManager:
             "reactions_summary": {"counts": {}, "my_reaction": []},
         }
 
-    async def _inbound_loop(self, websocket: WebSocket, user_id: UUID) -> None:
+    async def _inbound_loop(self, websocket: WebSocket, user_id: UUID, session_id: UUID) -> None:
         # Receive client commands continuously until the WebSocket disconnects.
         while True:
             raw = await websocket.receive_text()
@@ -232,7 +313,13 @@ class WSManager:
             if msg_type == "ping":
                 await websocket.send_json(build_envelope("pong", {}, request_id=envelope.request_id))
             elif msg_type == "auth":
-                await websocket.send_json(build_envelope("hello", {"user_id": str(user_id), "session_id": None}, request_id=envelope.request_id))
+                await websocket.send_json(
+                    build_envelope(
+                        "hello",
+                        {"user_id": str(user_id), "session_id": str(session_id)},
+                        request_id=envelope.request_id,
+                    )
+                )
             elif msg_type == "subscribe":
                 await self._handle_subscribe(websocket, user_id, payload, envelope.request_id)
             elif msg_type == "unsubscribe":
@@ -429,6 +516,33 @@ class WSManager:
         finally:
             await pubsub.unsubscribe(channel_name)
             await pubsub.close()
+
+    async def _auth_control_loop(self) -> None:
+        while True:
+            pubsub = self._redis.pubsub()
+            try:
+                await pubsub.subscribe(auth_control_channel())
+                while True:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if message is None:
+                        await asyncio.sleep(0)
+                        continue
+                    try:
+                        event = AuthControlEvent.from_json(message["data"])
+                    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                        logger.warning("ignored malformed auth control event")
+                        continue
+                    await self.handle_auth_control_event(event)
+            except asyncio.CancelledError:
+                raise
+            except (RedisError, RedisTimeoutError):
+                logger.warning("auth control subscriber disconnected; retrying")
+                await asyncio.sleep(1)
+            finally:
+                with suppress(Exception):
+                    await pubsub.unsubscribe(auth_control_channel())
+                with suppress(Exception):
+                    await pubsub.close()
 
     async def _forward_event(self, websocket: WebSocket, user_id: UUID, event: dict[str, Any]) -> bool:
         channel_id = str(event.get("channel_id") or "")

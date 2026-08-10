@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChannelResponse, MessageResponse } from '../types/api';
+import { ChannelResponse, MessageResponse, WebSocketTicketResponse } from '../types/api';
 import { getWsUrl } from '@/services/api/runtime';
+import { apiClient } from '@/services/api/client';
 import { isChannelListQueryKey } from '@/hooks/query-keys';
 
 interface WSContextType {
@@ -40,10 +41,30 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
     let isUnmounted = false;
     shouldReconnect.current = true;
 
-    const connect = () => {
+    const scheduleReconnect = () => {
+      if (isUnmounted || !shouldReconnect.current) return;
+      const backoff = Math.min(1000 * Math.pow(2, reconnectAttempt.current), maxBackoff);
+      reconnectAttempt.current += 1;
+      reconnectTimer.current = window.setTimeout(() => {
+        void connect();
+      }, backoff);
+    };
+
+    const connect = async () => {
       if (isUnmounted || !shouldReconnect.current) return;
       setStatus('connecting');
-      const wsUrl = getWsUrl(accessToken);
+      let ticketResponse: WebSocketTicketResponse;
+      try {
+        // The access JWT stays in the authenticated HTTP header. Only a
+        // short-lived, single-use opaque ticket is placed in the WS URL.
+        ticketResponse = await apiClient<WebSocketTicketResponse>('/auth/ws-ticket', { method: 'POST' });
+      } catch (_error) {
+        setStatus('disconnected');
+        scheduleReconnect();
+        return;
+      }
+      if (isUnmounted || !shouldReconnect.current) return;
+      const wsUrl = getWsUrl(ticketResponse.ticket);
       ws.current = new WebSocket(wsUrl);
 
       ws.current.onopen = () => {
@@ -205,17 +226,13 @@ export function WSProvider({ children }: { children: React.ReactNode }) {
       ws.current.onclose = () => {
         setStatus('disconnected');
         ws.current = null;
-        if (!isUnmounted && shouldReconnect.current) {
-          // Exponential backoff keeps reconnects responsive at first without
-          // hammering the backend during a longer outage.
-          const backoff = Math.min(1000 * Math.pow(2, reconnectAttempt.current), maxBackoff);
-          reconnectAttempt.current += 1;
-          reconnectTimer.current = window.setTimeout(connect, backoff);
-        }
+        // Exponential backoff keeps reconnects responsive at first without
+        // hammering the backend during a longer outage.
+        scheduleReconnect();
       };
     };
 
-    connect();
+    void connect();
 
     return () => {
       isUnmounted = true;

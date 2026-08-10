@@ -231,7 +231,11 @@ class AdminService:
 
         active_sessions = (
             select(UserSession.user_id, func.count(UserSession.id).label("active_session_count"))
-            .where(UserSession.revoked_at.is_(None), UserSession.expires_at > utcnow())
+            .where(
+                UserSession.revoked_at.is_(None),
+                UserSession.expires_at > utcnow(),
+                UserSession.absolute_expires_at > utcnow(),
+            )
             .group_by(UserSession.user_id)
             .subquery()
         )

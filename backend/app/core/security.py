@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -17,30 +18,44 @@ def verify_password(password: str, password_hash: str) -> bool:
     return pwd_context.verify(password, password_hash)
 
 
-def create_access_token(user_id: UUID) -> str:
+def _timestamp(value: datetime) -> int:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.timestamp())
+
+
+def create_access_token(user_id: UUID, session_id: UUID, auth_expires_at: datetime | None = None) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
-    # Access tokens are intentionally short-lived and carry only identity plus
-    # token type; revocation is handled through refresh/session state.
+    expires_at = now + timedelta(minutes=settings.jwt_access_ttl_min)
+    if auth_expires_at is not None:
+        expires_at = min(expires_at, auth_expires_at)
+    # The stable session id makes logout and server-side revocation effective
+    # for already-issued access tokens, not only for refresh tokens.
     payload = {
         "sub": str(user_id),
+        "sid": str(session_id),
         "type": "access",
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=settings.jwt_access_ttl_min)).timestamp()),
+        "iat": _timestamp(now),
+        "exp": _timestamp(expires_at),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
-def create_refresh_token(user_id: UUID, session_id: UUID) -> str:
+def create_refresh_token(user_id: UUID, session_id: UUID, expires_at: datetime | None = None) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
+    token_expires_at = expires_at or (now + timedelta(days=settings.jwt_refresh_ttl_days))
     # The session id links this refresh token to a revocable database session.
+    # A random jti guarantees that rotations within the same second still
+    # produce distinct token hashes for reliable replay detection.
     payload = {
         "sub": str(user_id),
         "sid": str(session_id),
+        "jti": secrets.token_urlsafe(18),
         "type": "refresh",
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(days=settings.jwt_refresh_ttl_days)).timestamp()),
+        "iat": _timestamp(now),
+        "exp": _timestamp(token_expires_at),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 

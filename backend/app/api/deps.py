@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError, to_http_exception
 from app.db.models import User
 from app.db.session import get_db
-from app.services.auth_service import AuthService
+from app.services.auth_service import AccessContext, AuthService
 
 
 async def get_redis(request: Request) -> Redis:
@@ -20,10 +20,10 @@ async def get_amqp(request: Request) -> aio_pika.RobustConnection:
     return request.app.state.amqp
 
 
-async def get_current_user(
+async def get_current_auth(
     db: Annotated[AsyncSession, Depends(get_db)],
     authorization: Annotated[str | None, Header()] = None,
-) -> User:
+) -> AccessContext:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
             status_code=401,
@@ -31,7 +31,7 @@ async def get_current_user(
         )
     token = authorization.split(" ", 1)[1].strip()
     try:
-        return await AuthService.get_user_from_access_token(db, token)
+        return await AuthService.get_access_context(db, token)
     except AppError as exc:
         raise to_http_exception(exc) from exc
     except ValueError as exc:
@@ -39,6 +39,13 @@ async def get_current_user(
             status_code=401,
             detail={"code": "AUTH_EXPIRED", "message": str(exc) or "invalid token", "details": None},
         ) from exc
+
+
+CurrentAuthDep = Annotated[AccessContext, Depends(get_current_auth)]
+
+
+async def get_current_user(auth: CurrentAuthDep) -> User:
+    return auth.user
 
 
 DBDep = Annotated[AsyncSession, Depends(get_db)]

@@ -41,6 +41,8 @@ Important:
 - `RABBITMQ_URL`
 - `REDIS_URL`
 - `JWT_SECRET` (replace the development default; production/prod/staging require at least 32 non-placeholder characters)
+- `JWT_ACCESS_TTL_MIN` (default `30`), `JWT_REFRESH_TTL_DAYS` (idle lifetime, default `14`), and `SESSION_ABSOLUTE_TTL_DAYS` (non-sliding maximum, default `30`)
+- `WS_TICKET_TTL_SECONDS` (single-use Redis-backed WebSocket ticket lifetime, default `30` seconds)
 - `MESSAGE_ENCRYPTION_ENABLED=true`
 - `MESSAGE_ENCRYPTION_KEY` (Fernet key)
 - `UPLOAD_MAX_SIZE_BYTES` (defaults to 25 MiB; upload bodies are streamed and bounded by this value)
@@ -55,6 +57,8 @@ Important:
 Development note:
 - In `dev/test/local`, empty `MESSAGE_ENCRYPTION_KEY` uses a fallback key.
 - For `production`, `prod`, and `staging`, startup rejects missing/default/weak JWT secrets and rejects a missing or invalid Fernet key while message encryption is enabled.
+- Access JWTs are bound to their database session. Logout, explicit revocation, logout-all, replay detection, absolute expiry, and account deactivation invalidate later HTTP authentication immediately.
+- WebSocket clients obtain a short-lived, one-time opaque ticket with `POST /auth/ws-ticket`; long-lived access JWTs are not accepted in WebSocket URLs. Redis control events close matching sockets across backend instances when Redis is available.
 - Generate one with:
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

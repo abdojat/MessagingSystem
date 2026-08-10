@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.api.deps import CurrentUserDep, DBDep, RedisDep
+from app.api.deps import CurrentAuthDep, CurrentUserDep, DBDep, RedisDep
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.schemas.auth import (
@@ -14,10 +14,13 @@ from app.schemas.auth import (
     SessionListResponse,
     SessionResponse,
     TokenPair,
+    WebSocketTicketResponse,
 )
-from app.services.auth_service import AuthService
+from app.realtime.auth_control import AuthControlEvent, dispatch_auth_control
+from app.services.auth_service import AuthService, RefreshTokenReplayError
 from app.services.event_service import log_event
 from app.services.rate_limit_service import RateLimitService
+from app.services.ws_ticket_service import WebSocketTicketService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -62,6 +65,7 @@ async def login(req: LoginRequest, db: DBDep, request: Request, redis: RedisDep)
             user_agent=request.headers.get("user-agent"),
             ip=request.client.host if request.client else None,
             refresh_ttl_days=settings.jwt_refresh_ttl_days,
+            absolute_ttl_days=settings.session_absolute_ttl_days,
         )
     except AppError as exc:
         if exc.code == "AUTH_INVALID":
@@ -92,6 +96,13 @@ async def refresh(req: RefreshRequest, db: DBDep, request: Request, redis: Redis
             ip=request.client.host if request.client else None,
             refresh_ttl_days=settings.jwt_refresh_ttl_days,
         )
+    except RefreshTokenReplayError as exc:
+        await dispatch_auth_control(
+            redis,
+            request.app.state.ws_manager,
+            AuthControlEvent.for_session(exc.revocation),
+        )
+        raise to_http_exception(exc) from exc
     except (AppError, ValueError) as exc:
         if isinstance(exc, AppError):
             raise to_http_exception(exc) from exc
@@ -102,9 +113,17 @@ async def refresh(req: RefreshRequest, db: DBDep, request: Request, redis: Redis
 
 
 @router.post("/logout")
-async def logout(req: LogoutRequest, db: DBDep) -> dict:
+async def logout(req: LogoutRequest, db: DBDep, request: Request, redis: RedisDep) -> dict:
     try:
-        await AuthService.logout(db, req.refresh_token)
+        revocation = await AuthService.logout(db, req.refresh_token)
+        await dispatch_auth_control(redis, request.app.state.ws_manager, AuthControlEvent.for_session(revocation))
+    except RefreshTokenReplayError as exc:
+        await dispatch_auth_control(
+            redis,
+            request.app.state.ws_manager,
+            AuthControlEvent.for_session(exc.revocation),
+        )
+        raise to_http_exception(exc) from exc
     except (AppError, ValueError) as exc:
         if isinstance(exc, AppError):
             raise to_http_exception(exc) from exc
@@ -124,6 +143,7 @@ async def list_sessions(db: DBDep, user: CurrentUserDep) -> SessionListResponse:
                 id=s.id,
                 created_at=s.created_at,
                 expires_at=s.expires_at,
+                absolute_expires_at=s.absolute_expires_at,
                 revoked_at=s.revoked_at,
                 user_agent=s.user_agent,
                 ip=s.ip,
@@ -134,15 +154,23 @@ async def list_sessions(db: DBDep, user: CurrentUserDep) -> SessionListResponse:
 
 
 @router.post("/logout_all", response_model=LogoutAllResponse)
-async def logout_all(db: DBDep, user: CurrentUserDep) -> LogoutAllResponse:
-    revoked_count = await AuthService.logout_all(db, user.id)
-    return LogoutAllResponse(revoked_count=revoked_count)
+async def logout_all(db: DBDep, user: CurrentUserDep, request: Request, redis: RedisDep) -> LogoutAllResponse:
+    revocation = await AuthService.logout_all(db, user.id)
+    await dispatch_auth_control(redis, request.app.state.ws_manager, AuthControlEvent.for_user(revocation))
+    return LogoutAllResponse(revoked_count=revocation.revoked_count)
 
 
 @router.delete("/sessions/{session_id}")
-async def revoke_session(session_id: str, db: DBDep, user: CurrentUserDep) -> dict:
+async def revoke_session(
+    session_id: str,
+    db: DBDep,
+    user: CurrentUserDep,
+    request: Request,
+    redis: RedisDep,
+) -> dict:
     try:
-        await AuthService.revoke_session(db, user.id, UUID(session_id))
+        revocation = await AuthService.revoke_session(db, user.id, UUID(session_id))
+        await dispatch_auth_control(redis, request.app.state.ws_manager, AuthControlEvent.for_session(revocation))
     except (AppError, ValueError) as exc:
         if isinstance(exc, AppError):
             raise to_http_exception(exc) from exc
@@ -151,3 +179,9 @@ async def revoke_session(session_id: str, db: DBDep, user: CurrentUserDep) -> di
             detail={"code": "VALIDATION_ERROR", "message": "invalid session id", "details": None},
         ) from exc
     return {"status": "ok"}
+
+
+@router.post("/ws-ticket", response_model=WebSocketTicketResponse)
+async def create_websocket_ticket(auth: CurrentAuthDep, redis: RedisDep) -> WebSocketTicketResponse:
+    ticket = await WebSocketTicketService.issue(redis, auth)
+    return WebSocketTicketResponse(ticket=ticket.value, expires_at=ticket.expires_at)

@@ -248,7 +248,8 @@ async def main_async() -> int:
         _pass("Outsider cannot read the private approval channel")
 
         ws_base_url = args.base_url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
-        ws_url = f"{ws_base_url}/ws?token={subscriber.access_token}"
+        ws_ticket = await _req(client, "POST", "/auth/ws-ticket", token=subscriber.access_token, payload={})
+        ws_url = f"{ws_base_url}/ws?ticket={ws_ticket['ticket']}"
         plaintext = f"Approval live message {secrets.token_hex(3)}"
         membership_update_received = False
         live_delivery_passed = False

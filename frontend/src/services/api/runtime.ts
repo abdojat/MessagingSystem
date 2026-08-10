@@ -32,13 +32,12 @@ export function getApiBaseUrl(): string {
   );
 }
 
-export function getWsUrl(accessToken: string): string {
+export function getWsUrl(ticket: string): string {
   const apiBaseUrl = getApiBaseUrl();
   const wsBaseUrl = /^https?:\/\//i.test(apiBaseUrl)
     ? apiBaseUrl.replace(/^http/i, "ws")
     : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}${apiBaseUrl}`;
   const wsUrl = new URL(`${trimTrailingSlash(wsBaseUrl)}/ws`);
-  wsUrl.searchParams.set("token", accessToken);
+  wsUrl.searchParams.set("ticket", ticket);
   return wsUrl.toString();
 }
-

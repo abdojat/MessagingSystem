@@ -36,6 +36,11 @@ class TokenPair(BaseModel):
     token_type: str = "bearer"
 
 
+class WebSocketTicketResponse(BaseModel):
+    ticket: str
+    expires_at: datetime
+
+
 class MeResponse(BaseModel):
     id: UUID
     username: str
@@ -54,6 +59,7 @@ class SessionResponse(BaseModel):
     id: UUID
     created_at: datetime
     expires_at: datetime
+    absolute_expires_at: datetime
     revoked_at: datetime | None
     user_agent: str | None
     ip: str | None

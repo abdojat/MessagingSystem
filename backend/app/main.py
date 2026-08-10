@@ -19,6 +19,7 @@ from app.realtime.protocol import build_error
 from app.realtime.ws_manager import WSManager
 from app.schemas.common import ErrorResponse
 from app.services.auth_service import AuthService
+from app.services.ws_ticket_service import WebSocketTicketService
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,12 @@ async def lifespan(app: FastAPI):
     app.state.redis = redis
     app.state.amqp = amqp
     app.state.ws_manager = WSManager(SessionLocal, redis, amqp)
+    await app.state.ws_manager.start()
 
     try:
         yield
     finally:
+        await app.state.ws_manager.stop()
         await redis.close()
         await amqp.close()
 
@@ -121,54 +124,49 @@ async def websocket_endpoint_v1(websocket: WebSocket):
 
 
 async def _run_websocket(websocket: WebSocket) -> None:
-    # Query/header tokens support simple clients; first-frame auth below lets
-    # clients avoid putting bearer tokens in the WebSocket URL.
-    token = websocket.query_params.get("token")
-    if not token:
-        auth_header = websocket.headers.get("authorization", "")
-        if auth_header.lower().startswith("bearer "):
-            token = auth_header.split(" ", 1)[1].strip()
-    if not token:
+    # Browsers present only a short-lived, single-use opaque ticket. Raw access
+    # JWT query parameters, headers, and first-frame credentials are rejected.
+    ticket = websocket.query_params.get("ticket")
+    if not ticket:
         await websocket.accept()
-        try:
-            # The socket is accepted only long enough to receive an auth frame;
-            # unauthenticated sockets are closed with a protocol-level error.
-            auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=5)
-        except Exception:
-            await websocket.send_json(build_error("missing auth", code="AUTH_INVALID"))
-            await websocket.close(code=1008, reason="missing token")
-            return
-        if auth_msg.get("type") != "auth":
-            await websocket.send_json(build_error("missing auth", code="AUTH_INVALID"))
-            await websocket.close(code=1008, reason="missing token")
-            return
-        payload = auth_msg.get("payload") or {}
-        token = payload.get("token")
-        if not token:
-            await websocket.send_json(build_error("missing auth token", code="AUTH_INVALID"))
-            await websocket.close(code=1008, reason="missing token")
-            return
-        await _run_websocket_with_token(websocket, token, pre_accepted=True)
+        await websocket.send_json(build_error("missing WebSocket ticket", code="WS_TICKET_INVALID"))
+        await websocket.close(code=1008, reason="missing WebSocket ticket")
         return
-    await _run_websocket_with_token(websocket, token, pre_accepted=False)
+    try:
+        ticket_claims = await WebSocketTicketService.consume(app.state.redis, ticket)
+    except AppError as exc:
+        await websocket.accept()
+        await websocket.send_json(build_error(exc.message, code=exc.code))
+        close_code = 1013 if exc.status_code == 503 else 1008
+        await websocket.close(code=close_code, reason="invalid WebSocket ticket")
+        return
 
-
-async def _run_websocket_with_token(websocket: WebSocket, token: str, pre_accepted: bool = False) -> None:
     async with SessionLocal() as db:
         try:
-            user = await AuthService.get_user_from_access_token(db, token)
-        except (AppError, ValueError):
-            if not pre_accepted:
-                await websocket.accept()
-            await websocket.send_json(build_error("invalid token", code="AUTH_INVALID"))
-            await websocket.close(code=1008, reason="invalid token")
+            auth = await AuthService.get_session_access_context(
+                db,
+                ticket_claims.user_id,
+                ticket_claims.session_id,
+                ticket_claims.authentication_expires_at,
+            )
+        except (AppError, ValueError) as exc:
+            await websocket.accept()
+            code = exc.code if isinstance(exc, AppError) else "AUTH_INVALID"
+            await websocket.send_json(build_error("invalid authentication session", code=code))
+            await websocket.close(code=1008, reason="invalid authentication session")
             return
 
     manager: WSManager = app.state.ws_manager
-    await manager.connect(websocket, user.id, user.username, pre_accepted=pre_accepted)
+    await manager.connect(websocket, auth.user.id, auth.user.username, auth.session_id)
     try:
-        await manager.run_socket(websocket, user.id, user.username)
+        await manager.run_socket(
+            websocket,
+            auth.user.id,
+            auth.user.username,
+            auth.session_id,
+            auth.authentication_expires_at,
+        )
     except WebSocketDisconnect:
         pass
     finally:
-        await manager.disconnect(websocket, user.username)
+        await manager.disconnect(websocket, auth.user.username)

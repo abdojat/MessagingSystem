@@ -115,6 +115,7 @@ async def test_superadmin_can_deactivate_user_and_immediately_revoke_access(db_s
         user_id=user.id,
         refresh_token_hash="unused",
         expires_at=utcnow() + timedelta(days=1),
+        absolute_expires_at=utcnow() + timedelta(days=30),
     )
     db_session.add(session)
     await db_session.commit()
@@ -136,7 +137,10 @@ async def test_superadmin_can_deactivate_user_and_immediately_revoke_access(db_s
         )
     assert login_error.value.code == "ACCOUNT_DISABLED"
     with pytest.raises(AppError) as token_error:
-        await AuthService.get_user_from_access_token(db_session, create_access_token(user.id))
+        await AuthService.get_user_from_access_token(
+            db_session,
+            create_access_token(user.id, session.id, session.expires_at),
+        )
     assert token_error.value.code == "ACCOUNT_DISABLED"
 
 

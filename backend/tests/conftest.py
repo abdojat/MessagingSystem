@@ -47,6 +47,15 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at timestamptz"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_by_user_id uuid"))
+            await conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS absolute_expires_at timestamptz"))
+            await conn.execute(
+                text(
+                    "UPDATE user_sessions SET absolute_expires_at = "
+                    "GREATEST(expires_at, now() + interval '30 days') WHERE absolute_expires_at IS NULL"
+                )
+            )
+            await conn.execute(text("ALTER TABLE user_sessions ALTER COLUMN absolute_expires_at SET NOT NULL"))
+            await conn.execute(text("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS replay_detected_at timestamptz"))
     except Exception as exc:
         await engine.dispose()
         pytest.skip(f"PostgreSQL test database is not reachable for DATABASE_URL={database_url!r}: {exc}")

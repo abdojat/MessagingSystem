@@ -3,7 +3,7 @@ import base64
 import json
 from typing import Any
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,8 +30,10 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
 
     jwt_secret: str = "change-me"
-    jwt_access_ttl_min: int = 30
-    jwt_refresh_ttl_days: int = 14
+    jwt_access_ttl_min: int = Field(default=30, gt=0)
+    jwt_refresh_ttl_days: int = Field(default=14, gt=0)
+    session_absolute_ttl_days: int = Field(default=30, gt=0)
+    ws_ticket_ttl_seconds: int = Field(default=30, ge=5, le=120)
 
     outbox_poll_interval: float = 1.0
     outbox_max_attempts: int = 5

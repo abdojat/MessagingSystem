@@ -3,9 +3,13 @@
 ## Authentication
 - API routes that expose user, channel, message, event, and upload data require JWT-based authentication.
 - Passwords are hashed with a strong password hashing algorithm in the backend.
-- Refresh tokens are stored server-side as hashes, not plain text.
+- Access JWTs contain a stable `sid` and every protected request resolves the user and that `UserSession` together. Missing, malformed, nonexistent, revoked, idle-expired, or absolute-expired sessions are rejected.
+- Refresh tokens are stored server-side as hashes, not plain text. Rotation adds a unique `jti`; reuse of a signed stale token revokes that session/family and logs `security.refresh_replay_detected`.
+- Sessions have both a sliding idle deadline (`JWT_REFRESH_TTL_DAYS`, default 14 days) and a non-sliding absolute deadline (`SESSION_ABSOLUTE_TTL_DAYS`, default 30 days).
 - The frontend keeps the access token in a JavaScript-managed cookie and the refresh token in `localStorage`, which is acceptable for this university demo but not production-grade session security.
-- WebSocket connections use a short-lived access token in the connection URL for the demo flow and verifier.
+- Authenticated clients obtain a cryptographically random ticket from `POST /auth/ws-ticket`. Redis stores only its hash plus user/session/expiry metadata; atomic `GETDEL` consumption makes the ticket single-use. The default TTL is 30 seconds.
+- WebSocket URLs carry only that short-lived opaque ticket. Raw access JWT query parameters, authorization headers, and first-frame JWT authentication are not accepted.
+- An authenticated socket closes when the access/session authentication lifetime captured by its ticket expires. Logout, session revocation, logout-all, replay detection, and account deactivation publish minimal Redis control events so every listening backend instance can close matching sockets without per-socket database polling.
 - WebSocket membership refresh is demo-grade but explicit: after a user joins or receives a membership update, the frontend sends a subscribe/resync message so the open socket follows the latest authorized channel set.
 - Targeted `membership_update` events are forwarded to the authenticated user even when the affected channel is not yet in that socket's subscription set. This supports approval-required joins without exposing message payloads to unauthorized users.
 - An empty WebSocket subscription set receives no ordinary channel events. A membership change bypasses that filter only when its `user_id` targets the authenticated user; removal/leave updates also clear the affected channel from the socket's local subscription set.
@@ -39,7 +43,7 @@
 - Superadmin React Query entries use immediate garbage-collection after their final observer unmounts, limiting privileged data retention in the SPA's in-memory query cache.
 - The initial account is created only when `SUPERADMIN_USERNAME` and `SUPERADMIN_PASSWORD` are explicitly configured. The password must contain at least 12 characters, and bootstrap refuses to promote an existing normal account with the same username/email.
 - Superadmins can browse all audit events, view platform counts, deactivate/reactivate normal accounts, revoke their sessions, suspend/restore channels, and inspect/retry delivery failures across active channels.
-- Account deactivation is enforced on login and access-token resolution; active refresh sessions are revoked and sockets connected to the current backend instance are closed immediately.
+- Account deactivation is enforced on login and access-token resolution; active sessions are revoked, local sockets close immediately, and a Redis control event notifies other backend instances.
 - A superadmin cannot deactivate their own account through the API, and one superadmin cannot alter another superadmin through normal administration endpoints.
 - Superadmin operations create `superadmin.*` or channel audit events.
 - Destructive console actions require an explicit confirmation. This is a safety guard against accidental clicks; server-side `SuperadminDep` authorization remains the actual security boundary.
@@ -86,7 +90,7 @@ This protects against accidental or unauthorized event modification, insertion, 
 
 ## Known Limitations
 - This project is a university MVP, not a production-hardened identity or secret-management platform.
-- The frontend token storage and WebSocket token transport are demo-oriented and should not be presented as production-grade session security.
+- Browser token storage remains demo-oriented: JavaScript can read the access/refresh credentials, so the project does not claim an httpOnly-cookie/CSRF-hardened production session architecture. WebSocket transport itself uses short-lived one-time tickets rather than access JWT URLs.
 - The project does not claim end-to-end encryption; it uses server-side encryption at rest.
 - There is no automatic encryption-key rotation or historical-key ring. Replacing `MESSAGE_ENCRYPTION_KEY` makes existing encrypted message bodies unreadable; retain the original key or migrate ciphertext deliberately before rotating it.
 - Event integrity is tamper-evident inside PostgreSQL, but it does not prove that the database itself was never rewritten by a fully privileged operator.
@@ -95,4 +99,4 @@ This protects against accidental or unauthorized event modification, insertion, 
 - Protected upload-backed avatars, wallpapers, and message media are fetched by the frontend with the bearer token and rendered through temporary object URLs. This is suitable for the local demo, but it is not a production CDN/media pipeline.
 - Upload attachments are protected and immutable after storage, but their file bytes are not encrypted by the message-body Fernet layer; attachment encryption remains future work.
 - Superadmin activity is application-audited but does not replace external administrator monitoring, MFA, a hardware-backed secret store, or separation-of-duties controls.
-- In a future multi-backend deployment, immediate socket termination would need a shared Redis control message so every backend instance disconnects the user; durable token/account rejection already applies on the next authenticated request or reconnect.
+- Cross-instance socket termination is best-effort realtime control. If Redis is unavailable during revocation, the database revocation still commits and blocks subsequent HTTP authentication, refresh, ticket validation, and reconnects, but a socket on another instance may remain until its captured authentication expiry.

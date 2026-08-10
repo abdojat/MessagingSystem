@@ -2,7 +2,7 @@
 
 ## What Is Complete
 - Environment-bootstrapped global superadmin with platform-wide audit visibility, account/session controls, channel suspension/restoration, and global delivery recovery; private message content is not implicitly exposed.
-- User authentication with password hashing, JWT access/refresh tokens, and session revocation.
+- User authentication with password hashing, session-bound JWT access/refresh tokens, idle and absolute expiry, refresh replay detection, one-time WebSocket tickets, and local/distributed session revocation.
 - Channel/topic creation, listing, updates, joins, leaves, invites, approvals, role changes, and member removal.
 - Publish/subscribe message persistence with PostgreSQL as the source of truth.
 - Event logging for the key channel, membership, message, and security flows.
@@ -30,6 +30,7 @@
 - Verified during multimedia publishing audit on 2026-06-16: backend P0 tests passed (`33 passed, 13 skipped`) and frontend typecheck passed after tightening attachment references, upload error handling, SVG rejection, upload audit events, and refreshed-token PUT uploads.
 - Verified during profile wallpaper upload pass on 2026-06-17: backend P0 tests passed (`33 passed, 14 skipped`), frontend typecheck passed, locale key alignment passed, Docker Compose rebuilt and started successfully, Alembic applied `0014_user_wallpaper_url`, and `git diff --check` reported only line-ending warnings.
 - Verified during Phase 1 security hardening on 2026-08-10: the focused security suite passed (`27 passed`), existing upload/sync-focused tests passed (`29 passed`), the full backend suite passed (`105 passed`) against isolated PostgreSQL 16, and `docker compose config --quiet` plus `git diff --check` passed. One existing passlib/argon2 deprecation warning remains.
+- Verified during Phase 2 authentication hardening on 2026-08-10: migration `0017_auth_session_hardening` applied on fresh PostgreSQL 16 and preserved/backfilled an existing session in a downgrade/upgrade check; the focused Phase 2 suite passed (`19 passed`), relevant Phase 1/superadmin coverage passed (`36 passed`), the full backend suite passed (`124 passed`), and frontend typecheck passed. One existing passlib/argon2 deprecation warning remains.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 - Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.
@@ -63,8 +64,7 @@
 - Legacy rows need explicit backfill before the verifier can report them as initialized.
 
 ## What Is Demo-Grade
-- Browser-managed token storage and WebSocket token transport.
-- This is acceptable for a university demo, but it is not production-grade session security.
+- Browser-managed access/refresh token storage remains demo-grade. WebSocket transport now uses one-time opaque tickets, but the broader browser session design has not migrated to httpOnly cookies and CSRF-aware flows.
 - Protected upload-backed avatars and chat wallpapers are fetched by the frontend with the bearer token and rendered through temporary object URLs; this is suitable for the demo but is not a production CDN/media pipeline.
 - Protected message video/audio media is also fetched into temporary object URLs for browser playback; this is suitable for the demo but not a production streaming/transcoding pipeline.
 - Arabic/RTL frontend coverage is demo-oriented and verified by typecheck plus translation-file parsing; there is no automated visual regression suite for RTL layout yet.

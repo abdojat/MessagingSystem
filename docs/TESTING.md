@@ -19,6 +19,24 @@ python -m pytest -q tests/security/test_phase1_hardening.py
 
 Verified on 2026-08-10 against a dedicated PostgreSQL 16 test container: `27 passed, 1 warning`. The warning is the existing `passlib` access to deprecated `argon2.__version__` metadata.
 
+## Phase 2 Authentication Security Regression Tests
+
+`backend/tests/security/test_phase2_auth_hardening.py` contains 19 focused regressions covering:
+
+- active, revoked, logout-all, isolated-session, forged-`sid`, legacy-token, idle-expiry, and absolute-expiry access behavior;
+- refresh rotation uniqueness, one-time compatibility rotation for a current pre-Phase-2 refresh token, stale-token replay detection, family revocation even if audit logging fails, compromise of the newly rotated token, audit logging, and unrelated-session continuity;
+- authenticated WebSocket ticket issue, opaque hashed storage, short expiry, atomic single use, user/session binding, anonymous/expired denial, and rejection of raw access JWT URL parameters;
+- valid ticket connection, revoked-session reconnect denial, authentication-expiry socket closure, idempotent local plus Redis revocation dispatch without credential payloads, and durable logout behavior during a Redis publish outage.
+
+Focused command:
+
+```bash
+cd backend
+python -m pytest -q tests/security/test_phase2_auth_hardening.py
+```
+
+Verified on 2026-08-10 against isolated PostgreSQL 16: `19 passed, 1 warning`. The complete backend suite then passed with `124 passed, 1 warning`.
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`
@@ -66,7 +84,7 @@ Event integrity tests:
 Superadmin tests (`backend/tests/test_superadmin.py`):
 - explicit, idempotent bootstrap and refusal to auto-promote an existing user
 - immediate account deactivation, session revocation, login denial, and access-token denial
-- immediate closure of WebSockets connected to the current backend instance
+- immediate socket closure plus the Phase 2 Redis cross-instance control path
 - denied superadmin dependency access with audit logging
 - global system/cross-channel event visibility with matching channel name/slug and actor identity, including upload-event channel recovery through message attachments
 - relevant event search by actor plus category filtering

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query, Request, Response
 
 from app.api.deps import AMQPDep, DBDep, SuperadminDep
 from app.core.errors import AppError, to_http_exception
+from app.realtime.auth_control import AuthControlEvent, dispatch_auth_control
 from app.schemas.admin import (
     AdminActionResponse,
     AdminChannelListResponse,
@@ -82,16 +83,30 @@ async def update_user_status(
     try:
         count = await AdminService.set_user_active(db, superadmin, user_id, req.is_active)
         if not req.is_active:
-            await request.app.state.ws_manager.disconnect_user(user_id)
+            await dispatch_auth_control(
+                request.app.state.redis,
+                request.app.state.ws_manager,
+                AuthControlEvent(user_id=user_id, reason="account deactivated"),
+            )
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return AdminActionResponse(affected_sessions=count)
 
 
 @router.post("/users/{user_id}/revoke-sessions", response_model=AdminActionResponse)
-async def revoke_user_sessions(user_id: UUID, db: DBDep, superadmin: SuperadminDep) -> AdminActionResponse:
+async def revoke_user_sessions(
+    user_id: UUID,
+    db: DBDep,
+    superadmin: SuperadminDep,
+    request: Request,
+) -> AdminActionResponse:
     try:
         count = await AdminService.revoke_user_sessions(db, superadmin, user_id)
+        await dispatch_auth_control(
+            request.app.state.redis,
+            request.app.state.ws_manager,
+            AuthControlEvent(user_id=user_id, reason="sessions revoked by administrator"),
+        )
     except AppError as exc:
         raise to_http_exception(exc) from exc
     return AdminActionResponse(affected_sessions=count)
