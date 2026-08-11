@@ -954,6 +954,28 @@
         "memberships": "Memberships", "uploads": "Uploads", "delivery": "Delivery", "administration": "Administration", "system": "System"
       }
     },
+    "merkle": {
+      "title": "Audit Integrity",
+      "description": "Global Merkle checkpoints commit audit-event hashes and protect each checkpoint with an Ed25519 signature.",
+      "unavailable": "Integrity status unavailable",
+      "latestBatch": "Latest batch",
+      "checkpointed": "Checkpointed",
+      "pending": "Pending",
+      "root": "Merkle root",
+      "signature": "Checkpoint signature",
+      "chain": "Checkpoint chain",
+      "signingKey": "Signing key",
+      "integrity": "Integrity",
+      "verifyProof": "Verify Merkle proof",
+      "proofTitle": "Merkle inclusion proof",
+      "proofDescription": "Compact verification that this audit-event hash belongs to the signed checkpoint.",
+      "notCheckpointed": "This event is not checkpointed or its integrity verification failed.",
+      "batch": "Batch",
+      "leaf": "Leaf",
+      "proofSiblings": "Proof siblings",
+      "eventHash": "Event hash",
+      "inclusion": "Merkle inclusion"
+    },
     "users": {
       "searchPlaceholder": "Search username, email, or display name...", "total": "{count} users", "user": "User",
       "status": "Status", "sessions": "Active sessions", "created": "Created", "actions": "Actions",

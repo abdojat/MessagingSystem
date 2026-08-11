@@ -90,7 +90,7 @@ async def db_session(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncSes
     session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with session_maker() as session:
         # Isolate test cases while reusing a migrated schema.
-        await session.execute(text("TRUNCATE TABLE email_verification_challenges, outbox, events, user_channel_state, pinned_messages, message_reactions, message_attachments, messages, channel_invites, broker_binding_states, channel_memberships, channel_counters, channels, user_sessions, users RESTART IDENTITY CASCADE"))
+        await session.execute(text("TRUNCATE TABLE audit_merkle_leaves, audit_merkle_batches, email_verification_challenges, outbox, events, user_channel_state, pinned_messages, message_reactions, message_attachments, messages, channel_invites, broker_binding_states, channel_memberships, channel_counters, channels, user_sessions, users RESTART IDENTITY CASCADE"))
         await session.commit()
         yield session
     await engine.dispose()

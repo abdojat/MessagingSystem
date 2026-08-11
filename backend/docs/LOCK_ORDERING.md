@@ -30,6 +30,12 @@ Rules:
   attempted. The diagnostic transaction takes only its event advisory lock.
 - Event-integrity advisory locks are last in application transactions. A
   standalone system/security audit transaction may take only that lock.
+- The Phase 11 Merkle checkpoint transaction uses a dedicated two-key advisory
+  lock namespace (`audit_merkle_checkpoint_v1`). It takes no row lock on the
+  whole event table and no per-scope event-integrity advisory lock. Checkpoint
+  jobs serialize with each other only; ordinary event writers continue and
+  events not visible to the checkpoint transaction remain pending for a later
+  batch.
 - Refresh rotation locks one `UserSession`; refresh-replay revocation commits
   before its separate best-effort system audit transaction.
 

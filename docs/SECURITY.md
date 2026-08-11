@@ -206,14 +206,55 @@
 - Channel owners/admins with event-log access can call `GET /v1/channels/{id}/events/integrity` or use the Event Log UI to verify the chain.
 - Legacy events created before the upgrade may show Not initialized until `scripts/backfill_event_integrity.py` is run. The canonical demo-safe dry-run is `docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"`.
 
-This protects against accidental or unauthorized event modification, insertion, reordering, or deletion that breaks links between remaining events being silently missed by the application verifier. Tail truncation requires an external remembered last hash to prove. It does not replace database access control, backups, monitoring, or secret management. It is not a blockchain, not external notarization, and not a full Merkle-tree proof. A database administrator with full write access could recompute a forged chain unless event hashes are anchored outside the database.
+This protects against accidental or unauthorized event modification, insertion,
+reordering, or deletion that breaks links between remaining events being
+silently missed by the application verifier. Phase 11 retains this layer and
+adds a global sequence of bounded Merkle checkpoints:
+
+- Leaves use `SHA256(0x00 || raw_32_byte_event_hash)`; internal nodes use
+  `SHA256(0x01 || raw_left || raw_right)`. An odd final node is promoted
+  unchanged.
+- Checkpoint leaf rows snapshot both the source `event_hash` and derived leaf
+  hash. Database verification recomputes the current event hash before comparing
+  the snapshot, rebuilding the root, and checking the checkpoint chain.
+- Canonical checkpoint metadata is SHA-256 hashed and the raw 32-byte hash is
+  signed with Ed25519. Verification selects exactly the checkpoint's trusted
+  `signing_key_id`; an unknown ID fails.
+- The backend/API receives only the bounded public-key ring. The separate
+  `merkle-checkpoint` maintenance process receives the active private seed. The
+  worker, frontend, and proxy receive neither signing private material nor an
+  unnecessary public ring.
+- Proof and anchor APIs are superadmin-only and return integrity metadata, not
+  event payloads. Responses use `Cache-Control: no-store`.
+- Signing-key rotation retains old public keys so historical checkpoints remain
+  verifiable; old checkpoints are never rewritten.
+
+The signed root resists a database-only attacker rewriting events, snapshots,
+and roots without the private signing key. It does not make PostgreSQL immutable.
+Deleting a valid signed tail can still present an older state. Periodically
+exporting the latest signed anchor and actually retaining it outside the
+database/server gives a verifier a trusted latest-state reference; the project
+does not claim automatic external anchoring.
 
 ## Known Limitations
 - This project is a production-oriented single-host university MVP, not an enterprise identity, HA, backup, or secret-management platform.
 - Browser refresh credentials are HttpOnly and access tokens are memory-only, but no automated Playwright/browser suite currently exercises the complete UI cookie lifecycle. Focused backend tests and static frontend inspection cover the boundary. WebSocket transport continues to use short-lived one-time tickets rather than access JWT URLs.
 - The project does not claim end-to-end encryption; it uses server-side encryption at rest.
 - Key rotation is explicit operator work rather than automatic scheduling, and keys are environment-injected rather than KMS/HSM-backed.
-- Event integrity is tamper-evident inside PostgreSQL, but it does not prove that the database itself was never rewritten by a fully privileged operator.
+- Event integrity is tamper-evident and signed checkpoints resist database-only
+  rewriting without the signing key. A compromised backend can still create
+  legitimate-looking audit events, a compromised signing key defeats future
+  signatures, and a fully privileged operator controlling both database and
+  key can forge new state. No blockchain, gossip/witness network, or external
+  transparency service is implemented.
+- Merkle integrity is not end-to-end encryption and does not hide hashes,
+  identifiers, roots, proof paths, public keys, or signatures. Message/upload
+  confidentiality remains the separate server-side at-rest encryption layer.
+- The signing private key is deployment-managed; external KMS/HSM custody,
+  automated rotation scheduling, multi-host checkpoint high availability, and
+  separation-of-duties/operator monitoring remain operational work.
+- External anchors detect deletion/rollback only when an operator stores and
+  protects the exported file independently and later supplies it for checking.
 - The verifier does not prove tail deletion unless the previous last hash was stored or witnessed outside the database.
 - Successful upload access logging is best-effort so a temporary audit-log failure does not break protected media playback; unauthorized access logging still blocks the request with `403 Forbidden`.
 - Protected upload-backed avatars, wallpapers, and message media are fetched by the frontend with the bearer token and rendered through temporary object URLs. This is suitable for the local demo, but it is not a production CDN/media pipeline.

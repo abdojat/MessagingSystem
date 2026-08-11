@@ -35,6 +35,10 @@ logs/
 tmp/
 temp/
 .cache/
+event-proof.json
+latest-audit-anchor.json
+*.audit-proof.json
+*.audit-anchor.json
 
 # Local upload/runtime data
 /uploads/

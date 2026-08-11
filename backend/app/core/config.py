@@ -16,6 +16,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEVELOPMENT_ENVIRONMENTS = {"dev", "development", "local", "test"}
 DATA_ENCRYPTION_KEY_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_DATA_ENCRYPTION_KEYS = 32
+AUDIT_MERKLE_KEY_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+MAX_AUDIT_MERKLE_PUBLIC_KEYS = 32
 DEVELOPMENT_DATA_KEY_ID = "development-only"
 DEVELOPMENT_DATA_KEY_SEED = b"MessagingSystem/development/data-encryption-key/v1"
 INSECURE_JWT_SECRETS = {
@@ -78,6 +80,53 @@ def _parse_data_encryption_keys(value: Any) -> dict[str, str]:
             raise ValueError("DATA_ENCRYPTION_KEYS values must be URL-safe base64 strings")
         key_value = raw_key.strip()
         _decode_32_byte_key(key_value, setting_name="DATA_ENCRYPTION_KEYS")
+        normalized[key_id] = key_value
+    return normalized
+
+
+def parse_audit_merkle_public_keys(value: Any) -> dict[str, str]:
+    """Parse a bounded Ed25519 public-key ring without exposing key values."""
+
+    if value in (None, ""):
+        return {}
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+
+        def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, item in pairs:
+                if key in result:
+                    raise ValueError("AUDIT_MERKLE_PUBLIC_KEYS contains a duplicate key ID")
+                result[key] = item
+            return result
+
+        try:
+            parsed = json.loads(raw, object_pairs_hook=reject_duplicates)
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ValueError("AUDIT_MERKLE_PUBLIC_KEYS must be a JSON object with unique key IDs") from exc
+    elif isinstance(value, dict):
+        parsed = dict(value)
+    else:
+        raise ValueError("AUDIT_MERKLE_PUBLIC_KEYS must be a JSON object")
+
+    if not isinstance(parsed, dict):
+        raise ValueError("AUDIT_MERKLE_PUBLIC_KEYS must be a JSON object")
+    if len(parsed) > MAX_AUDIT_MERKLE_PUBLIC_KEYS:
+        raise ValueError(
+            f"AUDIT_MERKLE_PUBLIC_KEYS may contain at most {MAX_AUDIT_MERKLE_PUBLIC_KEYS} keys"
+        )
+
+    normalized: dict[str, str] = {}
+    for raw_key_id, raw_key in parsed.items():
+        key_id = str(raw_key_id)
+        if AUDIT_MERKLE_KEY_ID_RE.fullmatch(key_id) is None:
+            raise ValueError("AUDIT_MERKLE_PUBLIC_KEYS contains an invalid key ID")
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            raise ValueError("AUDIT_MERKLE_PUBLIC_KEYS values must be URL-safe base64 strings")
+        key_value = raw_key.strip()
+        _decode_32_byte_key(key_value, setting_name="AUDIT_MERKLE_PUBLIC_KEYS")
         normalized[key_id] = key_value
     return normalized
 
@@ -219,6 +268,14 @@ class Settings(BaseSettings):
     presence_reaper_interval_seconds: int = Field(default=10, ge=1, le=300)
     presence_reaper_batch_size: int = Field(default=200, ge=1, le=5000)
 
+    audit_merkle_verification_enabled: bool = False
+    audit_merkle_batch_size: int = Field(default=256, ge=1, le=4096)
+    # Public keys are safe verifier material. The signing seed is intentionally
+    # absent from normal backend/worker Compose environments.
+    audit_merkle_public_keys: Any = ""
+    audit_merkle_signing_key_id: str = ""
+    audit_merkle_signing_private_key: SecretStr = Field(default_factory=lambda: SecretStr(""))
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _parse_cors_origins(cls, value: Any) -> list[str]:
@@ -300,6 +357,27 @@ class Settings(BaseSettings):
 
         self.data_encryption_active_key_id = active_key_id
         self.data_encryption_keys = key_map
+        return self
+
+    @model_validator(mode="after")
+    def _validate_audit_merkle_configuration(self) -> "Settings":
+        public_keys = parse_audit_merkle_public_keys(self.audit_merkle_public_keys)
+        signing_key_id = self.audit_merkle_signing_key_id.strip()
+        private_key = self.audit_merkle_signing_private_key.get_secret_value().strip()
+
+        if signing_key_id and AUDIT_MERKLE_KEY_ID_RE.fullmatch(signing_key_id) is None:
+            raise ValueError("AUDIT_MERKLE_SIGNING_KEY_ID has an invalid format")
+        if private_key:
+            _decode_32_byte_key(private_key, setting_name="AUDIT_MERKLE_SIGNING_PRIVATE_KEY")
+            if not signing_key_id:
+                raise ValueError("AUDIT_MERKLE_SIGNING_KEY_ID is required when a signing private key is configured")
+        if self.audit_merkle_verification_enabled and self.environment not in DEVELOPMENT_ENVIRONMENTS and not public_keys:
+            raise ValueError(
+                "AUDIT_MERKLE_PUBLIC_KEYS must configure at least one trusted key when Merkle verification is enabled"
+            )
+
+        self.audit_merkle_public_keys = public_keys
+        self.audit_merkle_signing_key_id = signing_key_id
         return self
 
     @field_validator("trusted_proxy_cidrs", mode="before")

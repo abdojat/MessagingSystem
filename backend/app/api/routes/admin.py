@@ -14,8 +14,10 @@ from app.schemas.admin import (
     AdminUserListResponse,
     AdminUserStatusUpdate,
 )
+from app.schemas.merkle import MerkleBatchListResponse, MerkleProofResponse, MerkleStatusResponse
 from app.services.admin_service import AdminService
 from app.services.channel_service import ChannelService
+from app.services.merkle_audit_service import MerkleAuditService, MerkleIntegrityError
 from app.services.rate_limit_service import enforce_rate_limit
 
 router = APIRouter(prefix="/admin", tags=["superadmin"])
@@ -57,6 +59,71 @@ async def list_events(
         limit=limit,
     )
     return AdminEventListResponse(items=items, total=total)
+
+
+@router.get("/audit/merkle/status", response_model=MerkleStatusResponse)
+async def merkle_status(
+    db: DBDep,
+    superadmin: SuperadminDep,
+    response: Response,
+    redis: RedisDep,
+) -> MerkleStatusResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:admin:{superadmin.id}",
+        limit=get_settings().rate_limit_admin_per_minute,
+        window_seconds=60,
+    )
+    _prevent_sensitive_caching(response)
+    result = await MerkleAuditService.status(db, get_settings().audit_merkle_public_keys)
+    return MerkleStatusResponse(**result)
+
+
+@router.get("/audit/merkle/batches", response_model=MerkleBatchListResponse)
+async def merkle_batches(
+    db: DBDep,
+    superadmin: SuperadminDep,
+    response: Response,
+    redis: RedisDep,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> MerkleBatchListResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:admin:{superadmin.id}",
+        limit=get_settings().rate_limit_admin_per_minute,
+        window_seconds=60,
+    )
+    _prevent_sensitive_caching(response)
+    items, total = await MerkleAuditService.list_batches(db, offset=offset, limit=limit)
+    return MerkleBatchListResponse(items=items, total=total)
+
+
+@router.get("/audit/merkle/events/{event_id}/proof", response_model=MerkleProofResponse)
+async def merkle_event_proof(
+    event_id: UUID,
+    db: DBDep,
+    superadmin: SuperadminDep,
+    response: Response,
+    redis: RedisDep,
+) -> MerkleProofResponse:
+    await enforce_rate_limit(
+        redis,
+        f"rl:admin:{superadmin.id}",
+        limit=get_settings().rate_limit_admin_per_minute,
+        window_seconds=60,
+    )
+    _prevent_sensitive_caching(response)
+    try:
+        proof = await MerkleAuditService.proof_for_event(
+            db,
+            event_id,
+            public_keys=get_settings().audit_merkle_public_keys,
+        )
+    except MerkleIntegrityError as exc:
+        status_code = 404 if exc.code == "EVENT_NOT_FOUND" else 409
+        raise to_http_exception(AppError(str(exc), status_code, code=exc.code)) from exc
+    return MerkleProofResponse(**proof)
 
 
 @router.get("/users", response_model=AdminUserListResponse)

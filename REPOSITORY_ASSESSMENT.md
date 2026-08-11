@@ -4,7 +4,7 @@ Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
 
-This report is evidence-based and references the current codebase. Last updated after Security Hardening Phase 10 on 2026-08-11.
+This report is evidence-based and references the current codebase. Last updated after Security Hardening Phase 11 on 2026-08-11.
 
 ## 1. Executive Summary
 
@@ -15,7 +15,7 @@ It does more than a toy chat app:
 - It persists state in PostgreSQL and uses Alembic migrations.
 - It has a RabbitMQ topic exchange, an outbox worker, Redis-based realtime fanout, and WebSocket delivery.
 - It now has explicit outbox delivery status tracking, retry scheduling, dead-letter state, RabbitMQ DLQ topology, and a frontend Delivery Monitor.
-- It now has a tamper-evident event audit hash chain with a verification API, backfill script, and frontend integrity badge/check.
+- It now has tamper-evident per-scope event hash chains plus real bounded Merkle batches, compact inclusion proofs, Ed25519-signed checkpoint chaining, optional external anchor export/verification, operator CLI tooling, and a superadmin integrity view.
 - It has a substantial Next.js frontend for login, channel management, publishing, membership control, and event logs.
 - It implements password hashing, JWT auth, role-based authorization, explicit-key-ID message encryption, and chunked authenticated upload encryption at rest.
 - Browser refresh credentials use rotating `HttpOnly`, `Secure`, `SameSite` cookies with exact-Origin/double-submit CSRF validation; access JWTs are memory-only.
@@ -40,7 +40,7 @@ Biggest risks:
 - Certificate issuance/renewal, external KMS/HSM custody, automated rotation scheduling, MFA, and automated browser security coverage remain deployment work; Phase 9 supplies explicit operator rotation commands.
 - Runtime verification still depends on the full Docker stack, even though the demo verifier now exercises the live WebSocket path when available with REST backfill fallback.
 - Phase 4 broker ordering/missed-Redis-removal, Phase 5 WebSocket abuse, Phase 6 download concurrency, and post-Phase-7 proxy bucket isolation remain mostly deterministic application/component tests rather than live TCP/load runs. Phase 7 lock concurrency uses real independent PostgreSQL sessions, but RabbitMQ failure is mocked rather than a live broker outage. Phase 10 presence tests do execute the actual atomic Lua contract against disposable Redis and share state across two service instances; this proves transition correctness, not multi-host load capacity. Download and socket work limits remain per backend process; the Nginx path bounds one proxy instance but does not coordinate replicas or guarantee minimum client throughput. SMTP delivery depends on operator provider availability and was not tested against an external mailbox provider.
-- There is no full Merkle tree, external hash anchoring, or anomaly detection feature in the codebase.
+- Phase 11 implements a full bounded Merkle checkpoint/proof layer and manual signed external-anchor export/verification. The repository does not automatically place anchors in independent storage, use blockchain/distributed witnesses, or implement anomaly detection.
 - Superadmin authentication is still password/JWT based without MFA or an external privileged-access workflow, so it remains appropriate for the university MVP rather than production operations.
 
 Most urgent missing pieces:
@@ -75,6 +75,12 @@ Most urgent missing pieces:
   - Register, login, refresh, logout, revoke sessions, logout all.
 - [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py)
   - Canonical event hashing, per-scope hash-chain linking, and channel integrity verification.
+- [`backend/app/services/merkle_service.py`](backend/app/services/merkle_service.py)
+  - Pure domain-separated SHA-256 tree, proof construction, and proof verification.
+- [`backend/app/services/merkle_audit_service.py`](backend/app/services/merkle_audit_service.py)
+  - Atomic global checkpoint persistence, Ed25519 signing, database verification, proof bundles, and anchors.
+- [`backend/app/db/merkle_tool.py`](backend/app/db/merkle_tool.py)
+  - Operator status/checkpoint/verify/proof/offline-proof/anchor/key-generation commands.
 - [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py)
   - WebSocket auth, subscription handling, Redis forward loop, backfill, and seen handling.
 - [`backend/app/mq/publisher.py`](backend/app/mq/publisher.py)
@@ -177,13 +183,13 @@ flowchart LR
 | 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) session-bound access checks, row-locked refresh rotation/replay detection, idle/absolute lifetime, and revocation; [`backend/app/core/browser_security.py`](backend/app/core/browser_security.py) and browser auth routes provide rotating `HttpOnly`/`Secure`/`SameSite` refresh cookies plus exact-Origin/double-submit CSRF; frontend access tokens are memory-only; one-time WebSocket tickets remain | No automated real-browser end-to-end test and no MFA/external identity provider | High | Add a browser smoke test and MFA only if the deployment threat model requires them |
 | 7. Authorization/permissions | Complete for university MVP | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel/message/upload services; existing email invite targets use immutable user IDs; unresolved targets require the Phase 10 exact-current-email proof; presence is explicitly excluded from authorization | Provider availability and per-replica resource counters remain deployment caveats | High | Keep backend boundaries strong and document deployment limitations honestly |
 | 8. Message/upload encryption | Mostly complete operationally | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) v2 envelopes/key ring; [`backend/app/core/upload_encryption.py`](backend/app/core/upload_encryption.py) chunked AES-GCM format; [`backend/app/db/crypto_tool.py`](backend/app/db/crypto_tool.py) status/migration/rotation; migration 0022; 35 focused Phase 9 tests | Server holds decryption keys; no external KMS/HSM or automatic scheduler; backups/physical remanence remain operator concerns | High | Run status/migration/rotation deliberately, keep keys external, and remove old keys only at zero references/errors |
-| 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message/upload services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py) hash-chain verification | Event logging is not guaranteed if the logging path fails; event visibility and integrity verification are limited to channel managers | Medium | Keep the log path best-effort, document the limitation, and backfill legacy event hashes before final demos |
+| 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message/upload services; channel/global event APIs and UI; per-scope hash-chain verification; Phase 11 global signed Merkle checkpoints and superadmin proof/status endpoints | Some operational event logging is best-effort; legacy rows require hash initialization before checkpointing; external anchor retention is manual | Medium | Backfill legacy hashes, run a signed checkpoint, and retain the latest exported anchor independently before the final demo |
 | 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | Bounded topology; versioned desired state/migration `0019`; worker generation check plus row lock/current DB authorization; reconnect and global repair command; demo/delivery verifiers; Delivery Monitor | Current state dominates stale commands, but asynchronous current reconciliation can remain retrying/dead-lettered during a prolonged outage and still needs a live outage test | High | Keep the verifiers and add live broker outage/recovery coverage later |
 | 11. Docker/environment setup | Complete for MVP; production-oriented single-host profile validated | Direct development Compose, local/demo hardened Compose, and [`docker-compose.production.yml`](docker-compose.production.yml); production TLS/security headers, internal-only services, explicit migrations, separate database roles, authenticated infrastructure, non-root/read-only app containers, and required secrets were live-validated | Public certificate lifecycle, centralized secrets/KMS, multi-host HA, and load certification remain outside this profile | Medium | Use the production profile only with deployment-owned secrets and a trusted certificate; keep development profiles clearly separated |
 | 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md); [`docs/SECURITY.md`](docs/SECURITY.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
 | 13. Testing | Mostly complete | P0 plus Phase 1-10 and post-Phase-7 suites cover auth/session/CSRF, authorization, production configuration, encrypted storage/rotation, broker desired state, bounded work, invite identity, exact mailbox proof, and real Redis multi-connection presence Lua. Phase 8 also live-ran the full RabbitMQ -> worker -> Redis -> WebSocket demo through the production network | No frontend browser-automation suite, external SMTP-provider test, live broker-outage CI job, or slow-client/load certification | High | Add one Playwright smoke test and controlled broker-outage/slow-reader tests later |
 | 14. Monitoring/message-flow visibility | Mostly complete for MVP | Minimal `/health`, dependency-aware `/ready`, channel event APIs, frontend event log, `/v1/admin/delivery/*`, and Delivery Monitor | No metrics dashboard or tracing; delivery monitor is scoped to managed channels | Medium | Add metrics/tracing only if deployment operations require them |
-| 15. Merkle-tree or hashing/data-integrity feature | Mostly complete for hash-chain v1 | SHA-256 event hash chain in [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py); migration `0013_event_integrity`; endpoint `GET /v1/channels/{id}/events/integrity`; script [`scripts/backfill_event_integrity.py`](scripts/backfill_event_integrity.py); frontend Event Log integrity badge/check | No full Merkle tree, no external notarization, and legacy rows need explicit backfill | Low | Keep the hash-chain explanation honest; add optional Merkle batch roots or external anchoring only if requested |
+| 15. Merkle-tree or hashing/data-integrity feature | Mostly complete operationally | Existing SHA-256 scope chains plus migration `0024`, domain-separated bounded Merkle trees, unique event leaf snapshots, Ed25519-signed checkpoint chain, explicit-side inclusion proofs, offline verifier, manual external-anchor export/check, dedicated CLI, superadmin UI/API, and focused/live PostgreSQL tests | Independent anchor storage is operator-managed; no KMS/HSM, blockchain, distributed witness, or automatic notarization | Low | Rehearse proof/offline/tampered-copy/anchor steps and store the latest demo anchor outside the server if rollback detection is claimed |
 | 16. Optional anomaly detection / AI feature | Missing | Repo-wide search found no anomaly/AI module | Not present | Low | Only add this if your supervisor explicitly expects it; otherwise do not spend time here |
 
 ## 4. Functional Flow Analysis
@@ -240,6 +246,7 @@ flowchart LR
 - Exposed through [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py).
 - Event Integrity Upgrade v1 chains new audit events with SHA-256 through [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py).
 - Channel integrity verification is exposed through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
+- Phase 11 retains those chronology chains and commits initialized system/channel event hashes into one bounded global Merkle sequence. Checkpoints are hash-linked, canonically hashed, and signed with an isolated Ed25519 key; proofs can be verified offline against the public-key ring.
 - Worker-created delivery reliability events are hashed in [`worker/worker_app/outbox_runner.py`](worker/worker_app/outbox_runner.py).
 - Legacy events need [`scripts/backfill_event_integrity.py`](scripts/backfill_event_integrity.py) before they verify as initialized.
 
@@ -426,7 +433,7 @@ flowchart LR
 - Empty WebSocket subscription sets reject ordinary channel traffic while self-targeted membership removal remains deliverable.
 - Pending members are denied private read-derived state. `ENVIRONMENT` is required; only explicit dev/development/local/test labels permit the warned deterministic data key, while production-like JWT/key-ring/plaintext-policy violations fail startup.
 - SVG uploads are rejected to keep protected media rendering focused on ordinary photo/video/audio content.
-- Event audit rows are tamper-evident through a per-scope SHA-256 hash chain with an authorized verification endpoint.
+- Event audit rows are tamper-evident through per-scope SHA-256 chains and global Ed25519-signed Merkle checkpoints, with authorized channel-chain and superadmin proof/status endpoints.
 
 ### Weak Security
 
@@ -464,7 +471,7 @@ The schema in [`backend/app/db/models.py`](backend/app/db/models.py) is broad an
 
 ### Migrations
 
-- Alembic migrations are present from `0001` through `0013`, including delivery reliability and event integrity.
+- Alembic migrations are present from `0001` through `0024`, including delivery reliability, event integrity, production/data/identity hardening, and Phase 11 Merkle checkpoint tables.
 - Startup also has a schema repair path in [`backend/app/db/bootstrap_schema.py`](backend/app/db/bootstrap_schema.py).
 
 ### Data Survival
@@ -554,6 +561,7 @@ The frontend is real and fairly complete.
 - Backend tests: [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py)
 - Delivery reliability tests: [`backend/tests/test_delivery_reliability.py`](backend/tests/test_delivery_reliability.py)
 - Event integrity tests: [`backend/tests/test_event_integrity.py`](backend/tests/test_event_integrity.py)
+- Phase 11 Merkle/signature/persistence/proof/tamper/anchor/concurrency/API tests: [`backend/tests/security/test_phase11_merkle_integrity.py`](backend/tests/security/test_phase11_merkle_integrity.py)
 - Phase 1 security regression tests: [`backend/tests/security/test_phase1_hardening.py`](backend/tests/security/test_phase1_hardening.py)
 - Phase 7 security regression tests: [`backend/tests/security/test_phase7_final_app_hardening.py`](backend/tests/security/test_phase7_final_app_hardening.py)
 - Phase 8 production-hardening regressions: [`backend/tests/security/test_phase8_production_hardening.py`](backend/tests/security/test_phase8_production_hardening.py)
@@ -574,7 +582,7 @@ The frontend is real and fairly complete.
 - `npm run typecheck` in `frontend/` passed during the 2026-06-16 multimedia audit.
 - `docker compose config` passed.
 - `scripts/verify_demo_flow.py` and `scripts/verify_approval_flow.py` are the current supervisor-facing WebSocket verifiers; rerun them against a live Docker stack before final review.
-- The new migration is `0013_event_integrity`; a live Alembic upgrade was not separately run in this pass, but `docker compose config` passed and backend tests validated the model-level schema path.
+- Historical event-chain migration `0013_event_integrity` remains in place; Phase 11 migration `0024_phase11_merkle_audit` passed both a fresh upgrade and a representative `0023->0024` upgrade without changing existing event hashes.
 - On 2026-08-10, Phase 1 security regressions passed `27` tests, the existing upload/sync-focused group passed `29`, and the complete backend suite passed `105` tests against a dedicated PostgreSQL 16 container; `docker compose config --quiet` and `git diff --check` also passed. One existing passlib/argon2 deprecation warning remains.
 - On 2026-08-10, Phase 4 P0 regressions passed `15` tests and the complete backend suite passed `158` tests against isolated PostgreSQL 16. Fresh migration through 0019 and an upgrade from 0018 with active/removed historical broker rows passed. No live multi-worker RabbitMQ ordering or Redis-loss scenario was run.
 - On 2026-08-10, Phase 5 regressions passed `18` tests, Phase 1–4 security suites passed `80`, and the complete backend suite passed `176` tests against disposable PostgreSQL 16. Invite races used two independent sessions; Redis/WebSocket outage/flood behavior was deterministic rather than live multi-backend load. No migration was required.
@@ -584,6 +592,8 @@ The frontend is real and fairly complete.
 - On 2026-08-11, Phase 8 regressions passed `13` tests, the requested Phase 1-8/post-Phase-7 set passed `128 tests, 1 warning`, and the complete backend suite passed `252 tests, 1 warning`. Frontend typecheck/build, all Compose renders, and production image builds passed. A live disposable production stack passed TLS redirect/header/host/docs/health checks, default-credential rejection, runtime database privilege denials, port-isolation inspection, and the full RabbitMQ -> worker -> Redis -> WebSocket demo verifier. Its certificate was deliberately self-signed; no public trust or load certification is claimed.
 - On 2026-08-11, Phase 9 focused tests passed `35` cases and the complete backend suite passed `287 tests, 1 warning` against disposable PostgreSQL 16. Frontend typecheck/build and all three Compose renders passed. Real filesystem tests covered multi-megabyte bounded reads, ciphertext marker absence, malformed/tampered framing, exact download, migration crash recovery, idempotency, rotation, and old-key removal. Fresh `->0022` and representative `0021->0022` schema upgrades passed. A fresh production-profile stack passed the complete RabbitMQ/worker/Redis/WebSocket verifier; direct inspection proved encrypted message/upload storage, exact authorized download, Range rejection, idempotent migration reruns, HTTPS health/redirect behavior, and absence of JWT/data keys in the worker.
 - On 2026-08-11, Phase 10 focused tests passed `25 tests, 1 warning` against disposable PostgreSQL 16 and real Redis 7 Lua execution. The requested Phase 2/5/6/8/9/post-repair group plus Phase 10 passed `150 tests, 1 warning`, and the complete backend suite passed `312 tests, 1 warning`. Frontend typecheck/build, 825-key locale alignment, and all three Compose renders passed. Fresh `->0023` and representative `0022->0023` upgrades preserved verified/unverified users, an unresolved invitation, and an immutable existing-user invitation. Capture transport and a disposable Mailpit sink—not an external provider—proved the raw-link and application-to-SMTP boundaries; configuration tests reject production console/capture and plaintext SMTP. An isolated hardened stack passed the full RabbitMQ/worker/Redis/WebSocket demo, authorized encrypted download, ciphertext inspection, and logout-all revocation. The live run exposed and fixed missing inherited proxy identity headers in WebSocket locations; containerized Nginx syntax validation passed afterward.
+
+- On 2026-08-11, Phase 11 focused tests passed `40 tests`; Phase 8-10 passed `73 tests, 1 warning`; and the complete backend suite passed `352 tests, 1 warning`. Frontend typecheck/build and 845-key locale alignment passed. All three Compose renders passed, and rendered production configuration placed the private signing seed only on `merkle-checkpoint`. Live PostgreSQL proved signed proof/anchor/two-batch validation, concurrent non-overlap, payload/root tamper detection, and a 1,024-event checkpoint with a 10-sibling proof (about 229.651 ms checkpoint creation and 0.485 ms offline verification on this host). The deterministic 16-event demo succeeded and rejected its tampered proof copy. An isolated hardened stack passed the full broker/WebSocket verifier. The canonical backend image build stalled twice at the local five-minute builder limit; the live stack therefore used a prior dependency image with the current source/migrations in a disposable image, which is an explicit environment caveat rather than a claimed image-build pass.
 
 ### Practical Testing Plan
 
@@ -652,9 +662,9 @@ The frontend is real and fairly complete.
 | Architecture | 72 | Clear service separation and realistic distributed components, but some consistency and routing risks remain |
 | Backend quality | 68 | Solid domain logic and validation, but large services, a thin repo layer, and a few risky shortcuts |
 | Frontend/UI | 82 | Surprisingly complete for a graduation project, with actual channel, membership, publishing, and event-log flows |
-| Security | 91 | Session-bound auth, replay detection, `HttpOnly` rotating refresh cookies with Origin/CSRF controls, memory-only access tokens, one-time WebSocket tickets, distributed revocation, fail-safe limits, versioned message/upload encryption, exact-email mailbox proof, rotation tooling, and lifecycle-aware authorization exist; MFA, external KMS, provider monitoring, and browser automation remain |
+| Security | 92 | Session-bound auth, replay detection, `HttpOnly` rotating refresh cookies with Origin/CSRF controls, memory-only access tokens, one-time WebSocket tickets, distributed revocation, fail-safe limits, versioned message/upload encryption, exact-email mailbox proof, rotation tooling, lifecycle-aware authorization, and signed Merkle audit checkpoints exist; MFA, external KMS, automatic external anchor custody, provider monitoring, and browser automation remain |
 | Persistence/database | 84 | Strong schema coverage and durable storage, with only a few schema-quality improvements needed |
-| Testing | 76 | Full backend regressions, 35 Phase 9 storage tests, 25 Phase 10 identity/presence tests with real Redis Lua, and a live production-network broker/WebSocket verifier pass, but browser automation, outage CI, external SMTP delivery, and load testing remain thin |
+| Testing | 80 | Full 352-test backend regression, 40 focused Merkle tests, real PostgreSQL/Redis concurrency and tamper runs, frontend build, and a live broker/WebSocket verifier pass provide broad MVP evidence; browser automation, outage CI, external SMTP delivery, and load certification remain thin |
 | Deployment | 86 | Development/demo paths remain separate from a live-validated TLS, least-privilege, internal-network production profile; managed secrets, public certificate lifecycle, and multi-host HA remain operator work |
 | Documentation | 83 | Core architecture/security/testing/demo/status docs and dedicated Phase 8/9/10 reports are synchronized; screenshots and final submission packaging can still improve |
 | Overall graduation-project readiness | 85 | Functionally strong and production-oriented for a single-host university deployment, with remaining operational and scale gaps stated explicitly |
@@ -702,7 +712,7 @@ The frontend is real and fairly complete.
 | Task | Why it matters | Difficulty | Files/modules likely involved | Suggested direction |
 |---|---|---:|---|---|
 | Expand the Delivery Monitor into richer ops metrics | Makes the system more teachable if extra polish is needed | Medium | Frontend delivery page, events API, health route | Add broker health, event counts, online users, recent publishes, and live refresh |
-| Add optional Merkle batch roots or external hash anchoring | Helps the cryptography angle beyond hash-chain v1 | High | Event integrity service, docs, possibly a new anchoring table | Keep v1 stable first; only add Merkle roots or off-database anchoring if the supervisor asks |
+| Automate independent anchor custody/monitoring | Turns the implemented manual signed-anchor export into a stronger operating practice | Medium | deployment scheduler, external object store, alerting | Keep private/public key isolation; periodically export the latest anchor to append-protected storage and alert on verification failure |
 | Add anomaly detection / AI message analysis | Nice advanced feature if your supervisor wants a stretch goal | High | New worker/service + analytics UI | Keep it lightweight: frequency spikes, unread surges, or simple anomaly scoring |
 | Add load/reliability tests | Useful for defending the design in a presentation | Medium | `scripts/`, backend integration tests | Script a small multi-user publish flood and measure latency/throughput |
 

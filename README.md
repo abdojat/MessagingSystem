@@ -13,7 +13,7 @@ University final-year project implementing a secure distributed channel messagin
 - Production-oriented path: TLS Nginx edge plus private authenticated state services, one-shot migrations, runtime PostgreSQL role, and restricted non-root application containers (`docker-compose.production.yml`)
 - Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
 - Abuse resistance: atomic Redis/local-fallback rate limits, WebSocket frame/command/history budgets, message/protocol bounds, account quotas, bounded RabbitMQ user queues, and paced Redis fanout retries
-- Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
+- Integrity: per-scope SHA-256 event hash chains plus bounded global Merkle batches, Ed25519-signed checkpoint chains, compact inclusion proofs, optional exported anchors, and superadmin verification UI/tooling
 - Data protection: versioned message encryption, authenticated chunked upload storage, bounded migration/status tooling, and explicit historical-key rotation
 - Identity: authenticated mailbox verification with hashed one-use challenges, generic SMTP delivery, email-snapshot binding, and pre-registration invite integration
 - Presence: Redis-backed per-connection leases, heartbeats, atomic aggregate online/offline transitions, and a bounded crash reaper
@@ -76,6 +76,10 @@ Uvicorn. Initial superadmin provisioning is explicit:
 ```bash
 docker compose --env-file .env.production -f docker-compose.production.yml \
   --profile bootstrap run --rm bootstrap-superadmin
+
+# Explicit one-shot audit checkpoint; only this profile receives the signing private key.
+docker compose --env-file .env.production -f docker-compose.production.yml \
+  --profile integrity run --rm merkle-checkpoint
 ```
 
 Do not retain `SUPERADMIN_PASSWORD` after provisioning. TLS files and
@@ -104,6 +108,8 @@ Important:
 - `RATE_LIMIT_*` grouped auth/search/message/media/channel/WebSocket/sync/admin limits; `RATE_LIMIT_LOCAL_MAX_KEYS` bounds the fail-closed per-process sensitive fallback used when Redis is unavailable
 - `EMAIL_VERIFICATION_ENABLED`, `EMAIL_VERIFICATION_TTL_MINUTES`, `EMAIL_VERIFICATION_PUBLIC_URL`, `EMAIL_DELIVERY_MODE`, and `SMTP_*` configure mailbox proof. Production verification requires generic SMTP with implicit TLS or STARTTLS; credentials are injected only into the backend.
 - `PRESENCE_LEASE_SECONDS`, `PRESENCE_REFRESH_SECONDS`, `PRESENCE_REAPER_INTERVAL_SECONDS`, and `PRESENCE_REAPER_BATCH_SIZE` bound distributed per-socket presence (`refresh < lease`).
+- `AUDIT_MERKLE_VERIFICATION_ENABLED`, `AUDIT_MERKLE_BATCH_SIZE` (`1..4096`, default `256`), and `AUDIT_MERKLE_PUBLIC_KEYS` configure signed-checkpoint verification. Production-like deployments require at least one trusted public key when verification is enabled.
+- `AUDIT_MERKLE_SIGNING_KEY_ID` and `AUDIT_MERKLE_SIGNING_PRIVATE_KEY` belong only in the explicit checkpoint maintenance process. They are separate from JWT and data-encryption keys and are not injected into backend, worker, frontend, or proxy services.
 - `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, and `MAX_WEBSOCKET_CONNECTIONS_PER_USER`
 - `MAX_CONCURRENT_DOWNLOADS_PER_USER` (3), `MAX_CONCURRENT_DOWNLOADS_PER_IP` (12), and `MAX_CONCURRENT_DOWNLOADS_GLOBAL` (100) atomically bound protected streams in each backend process
 - `TRUSTED_PROXY_CIDRS` is empty in direct mode; set it only to explicit proxy peers that overwrite `X-Forwarded-For` (the hardened Compose file supplies its fixed proxy `/32`)
@@ -175,6 +181,30 @@ verification challenges and preserves every existing `email_verified_at` and
 invite row. Historical verification challenges can be removed in bounded
 batches with `python -m app.db.cleanup_email_verification`.
 
+Migration `0024_phase11_merkle_audit` adds `audit_merkle_batches` and
+`audit_merkle_leaves`. It does not rewrite existing audit events or their hash
+chains. Generate a deployment keypair once, retain the private seed only in an
+operator-controlled secret store, and configure the public-key ring wherever
+verification runs:
+
+```bash
+cd backend
+python -m app.db.merkle_tool generate-keypair
+python -m app.db.merkle_tool status
+python -m app.db.merkle_tool checkpoint --all
+python -m app.db.merkle_tool verify --verify-event-chains
+python -m app.db.merkle_tool proof --event-id <uuid> --output event-proof.json
+python -m app.db.merkle_tool verify-proof --proof event-proof.json
+python -m app.db.merkle_tool export-anchor --output latest-audit-anchor.json
+python -m app.db.merkle_tool verify-anchor --file latest-audit-anchor.json
+```
+
+`generate-keypair` prints a private value because it is an explicit operator
+command; never run it in CI logs or commit its output. Proofs and anchors contain
+hashes, signatures, identifiers, and public metadata—not payloads or private
+keys. Copy an exported anchor to storage outside the database/server if it is to
+serve as rollback evidence.
+
 ## Tests
 Docker backend tests (verified):
 ```bash
@@ -193,6 +223,13 @@ Focused identity/presence proof (use a disposable Redis through
 ```bash
 cd backend
 python -B -m pytest -q tests/security/test_phase10_identity_presence.py
+```
+
+Focused Merkle audit-integrity proof (requires disposable PostgreSQL):
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_phase11_merkle_integrity.py
 ```
 If local PostgreSQL is unreachable for `DATABASE_URL`, tests may be skipped.
 
@@ -226,6 +263,17 @@ Canonical real backfill, when you intentionally want to initialize legacy events
 docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
 ```
 Host execution (`python scripts/backfill_event_integrity.py --dry-run`) is optional and depends on local PostgreSQL credentials matching the Docker database.
+
+Merkle supervisor demonstration after configuring the checkpoint signing key:
+
+```bash
+python scripts/demo_merkle_integrity.py
+```
+
+The script uses actual PostgreSQL audit rows, checkpoints a bounded batch,
+generates and verifies one signed inclusion proof, and tampers only with an
+in-memory copy to demonstrate expected failure. The normal messaging demo and
+event writes do not depend on checkpoint creation.
 
 Delivery reliability checks:
 ```bash
@@ -266,7 +314,7 @@ docker compose exec backend sh -lc "cd /app && python -m app.db.crypto_tool stat
 - Mostly complete:
   - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier and approval verifier, including join-after-connect and approval-after-connect WebSocket resubscribe paths, but there is still no broad CI suite around it.
   - Delivery reliability monitoring with retry scheduling, dead-letter status, admin APIs, frontend Delivery Monitor, and a controlled verifier for normal publish plus manual retry. Full broker-outage CI coverage remains future work.
-  - Event audit integrity with a per-scope SHA-256 hash chain. This is tamper-evident, not external notarization; legacy rows need explicit backfill before they verify as initialized.
+  - Event audit integrity with per-scope SHA-256 chronology plus global bounded Merkle commitments, Ed25519-signed checkpoint chaining, inclusion-proof export/offline verification, and optional external anchor export. This is tamper-evident and cryptographically verifiable, not immutable storage or automatic external notarization; legacy rows still need explicit hash-chain initialization before checkpointing.
 - Production-oriented browser boundary:
   - Browser access tokens are memory-only, refresh tokens are rotating HttpOnly cookies, refresh/logout use Origin plus double-submit CSRF validation, and WebSockets continue to use one-time opaque tickets. The legacy JSON token API remains available for non-browser clients.
 - Future work:
@@ -279,6 +327,7 @@ docker compose exec backend sh -lc "cd /app && python -m app.db.crypto_tool stat
 - [Testing](docs/TESTING.md)
 - [Requirements Mapping](docs/REQUIREMENTS_MAPPING.md)
 - [Repository Assessment](REPOSITORY_ASSESSMENT.md)
+- [Phase 11 Merkle Audit Integrity Report](SECURITY_HARDENING_PHASE11_MERKLE_AUDIT_REPORT.md)
 
 ## Security Notes
 - Password hashing enabled.
@@ -290,6 +339,7 @@ docker compose exec backend sh -lc "cd /app && python -m app.db.crypto_tool stat
 - Message attachments support protected photo, video, and audio publishing through the existing upload API.
 - Profile/channel avatar uploads and profile chat wallpaper uploads use validated image references and protected authenticated media loading.
 - Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.
+- Audit evidence combines per-scope SHA-256 chains with global domain-separated Merkle batches and Ed25519-signed checkpoints. Proofs can be verified offline; rollback detection requires an independently retained exported anchor.
 - Unauthorized read/publish events logged.
 - Sensitive abuse-prone endpoints remain locally bounded during a Redis rate-limit outage; ordinary paginated reads stay available.
 - Message text/JSON, reaction values, REST sync arrays, and WebSocket subscribe/resume/sync arrays have explicit limits.

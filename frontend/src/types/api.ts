@@ -79,6 +79,57 @@ export interface AdminEventItem {
   integrity_scope?: string | null;
 }
 
+export interface AdminMerkleStatusResponse {
+  total_events: number;
+  integrity_hashed_events: number;
+  checkpointed_events: number;
+  pending_events: number;
+  missing_integrity_events: number;
+  batch_count: number;
+  latest_sequence?: number | null;
+  latest_root?: string | null;
+  latest_checkpoint_hash?: string | null;
+  latest_signing_key_id?: string | null;
+  latest_signature_valid?: boolean | null;
+  checkpoint_chain_valid: boolean;
+  reason_code?: string | null;
+}
+
+export interface AdminMerkleBatchItem {
+  id: string;
+  sequence_no: number;
+  leaf_count: number;
+  merkle_root: string;
+  checkpoint_hash: string;
+  previous_checkpoint_hash?: string | null;
+  signing_key_id: string;
+  created_at: string;
+}
+
+export interface AdminMerkleProofResponse {
+  proof_version: number;
+  event_id: string;
+  event_hash: string;
+  leaf_hash: string;
+  batch_id: string;
+  batch_sequence: number;
+  leaf_index: number;
+  leaf_count: number;
+  merkle_root: string;
+  siblings: Array<{ side: "left" | "right"; hash: string }>;
+  checkpoint_hash: string;
+  signature: string;
+  verification: {
+    valid: boolean;
+    event_hash_valid: boolean;
+    inclusion_proof_valid: boolean;
+    checkpoint_hash_valid: boolean;
+    signature_valid: boolean;
+    checkpoint_chain_valid?: boolean | null;
+    reason_code?: string | null;
+  };
+}
+
 export interface UserPublicProfile extends User {
   bio?: string | null;
   created_at?: string;

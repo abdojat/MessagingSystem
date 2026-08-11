@@ -276,7 +276,80 @@ Event Integrity Upgrade v1 adds a tamper-evident hash chain to the audit log.
 - `GET /v1/channels/{channel_id}/events/integrity` verifies the chain for a channel and returns only summary status, counts, hashes, and the first broken event id if any.
 - The frontend Event Log page includes an Audit Integrity badge and a Verify Integrity button.
 
-This is a practical hash-chain integrity layer, not a blockchain and not external notarization. It detects later modification, insertion, reordering, and deletion that breaks links between remaining events, but tail truncation requires an external remembered last hash to prove. A database administrator who can rewrite all event rows and hashes can still forge a new chain. Existing legacy events need `python scripts/backfill_event_integrity.py` before they can verify as initialized.
+This per-scope layer remains the authoritative chronology for system and channel
+events. Existing legacy events need `python scripts/backfill_event_integrity.py`
+before they can verify as initialized or enter a Merkle checkpoint.
+
+## Phase 11 Merkle audit checkpoints
+
+```text
+                    Audit Events
+                         |
+                         v
+              Canonical Event Hashes
+                     SHA-256
+                         |
+             +-----------+-----------+
+             |                       |
+             v                       v
+      Existing Hash Chain       Merkle Leaves
+       per integrity scope           |
+                                     v
+                              Merkle Tree
+                                     |
+                                     v
+                               Merkle Root
+                                     |
+                                     v
+                          Canonical Checkpoint
+                                     |
+                                     v
+                              Ed25519 Signature
+                                     |
+                      +--------------+--------------+
+                      v                             v
+                PostgreSQL                    Exported Anchor
+                                              external storage
+```
+
+Phase 11 preserves the hash chains and adds one global checkpoint sequence over
+committed system and channel audit events. A Merkle leaf is
+`SHA256(0x00 || raw_event_hash)` and a parent is
+`SHA256(0x01 || raw_left || raw_right)`. An unpaired final node is promoted
+unchanged. Trees are bounded by `AUDIT_MERKLE_BATCH_SIZE` (`1..4096`, default
+`256`), and proof nodes carry an explicit `left` or `right` side with a maximum
+of 64 siblings.
+
+The one-shot checkpoint process takes a dedicated two-key PostgreSQL advisory
+transaction lock, selects uncheckpointed initialized events by
+`created_at ASC, id ASC`, recomputes each current event hash, snapshots event and
+leaf hashes, builds the root, links the prior checkpoint hash, signs the
+canonical checkpoint hash with Ed25519, and commits batch plus leaves atomically.
+It never takes per-scope event-integrity locks or locks the whole event table.
+Two checkpoint jobs therefore serialize without overlapping membership while
+ordinary event commits continue; an event is either selected from committed
+state or remains pending for the next batch.
+
+Merkle ordering is checkpoint-processing order, not authoritative per-channel
+chronology. A transaction can commit after selection with an earlier timestamp
+and correctly enter a later batch. The existing per-scope chains remain the
+chronology mechanism.
+
+`audit_merkle_batches` forms its own signed hash-linked sequence;
+`audit_merkle_leaves` stores the checkpoint-time event-hash and leaf-hash
+snapshot and uniquely associates each event with one batch. Proof verification
+recomputes the current event hash, compares it with the snapshot, reconstructs
+the root, validates canonical checkpoint metadata/hash/signature, and validates
+the checkpoint chain. Offline proof verification uses the exported snapshot and
+trusted public-key ring without PostgreSQL or the event payload.
+
+The backend receives public verification keys only. The private signing seed is
+limited to the `merkle-checkpoint` maintenance profile, while the RabbitMQ
+worker, frontend, and proxy receive no Merkle signing keys. An exported latest
+anchor becomes rollback evidence only after an operator actually copies it
+outside PostgreSQL and the server. This architecture is tamper-evident and
+cryptographically verifiable; it is not immutable storage, a blockchain, a
+distributed transparency log, or automatic external notarization.
 
 ## Delivery Reliability
 - PostgreSQL remains the source of truth for outbox state.

@@ -3,6 +3,8 @@ import { apiClient } from "@/services/api/client";
 import type {
   AdminChannelItem,
   AdminEventItem,
+  AdminMerkleProofResponse,
+  AdminMerkleStatusResponse,
   AdminOverviewResponse,
   AdminUserItem,
 } from "@/types/api";
@@ -65,6 +67,25 @@ export function useAdminEvents(q = "", category = "", offset = 0, limit = 25, en
         `/admin/events?${params.toString()}`,
       ),
     enabled,
+    gcTime: 0,
+  });
+}
+
+export function useAdminMerkleStatus(enabled = true) {
+  return useQuery({
+    queryKey: ["/admin/audit/merkle/status"],
+    queryFn: () => apiClient<AdminMerkleStatusResponse>("/admin/audit/merkle/status"),
+    enabled,
+    gcTime: 0,
+  });
+}
+
+export function useAdminMerkleProof(eventId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["/admin/audit/merkle/proof", eventId],
+    queryFn: () => apiClient<AdminMerkleProofResponse>(`/admin/audit/merkle/events/${eventId}/proof`),
+    enabled: enabled && Boolean(eventId),
+    retry: false,
     gcTime: 0,
   });
 }

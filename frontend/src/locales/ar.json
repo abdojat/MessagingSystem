@@ -954,6 +954,28 @@
         "memberships": "العضويات", "uploads": "الملفات", "delivery": "التسليم", "administration": "الإدارة", "system": "النظام"
       }
     },
+    "merkle": {
+      "title": "سلامة سجل التدقيق",
+      "description": "تلتزم نقاط فحص ميركل العامة ببصمات أحداث التدقيق وتحمي كل نقطة بتوقيع Ed25519.",
+      "unavailable": "حالة السلامة غير متاحة",
+      "latestBatch": "أحدث دفعة",
+      "checkpointed": "أحداث مثبتة",
+      "pending": "قيد الانتظار",
+      "root": "جذر ميركل",
+      "signature": "توقيع نقطة الفحص",
+      "chain": "سلسلة نقاط الفحص",
+      "signingKey": "مفتاح التوقيع",
+      "integrity": "السلامة",
+      "verifyProof": "تحقق من برهان ميركل",
+      "proofTitle": "برهان إدراج ميركل",
+      "proofDescription": "تحقق موجز من انتماء بصمة حدث التدقيق إلى نقطة الفحص الموقعة.",
+      "notCheckpointed": "الحدث غير مثبت أو فشل التحقق من سلامته.",
+      "batch": "الدفعة",
+      "leaf": "الورقة",
+      "proofSiblings": "بصمات البرهان",
+      "eventHash": "بصمة الحدث",
+      "inclusion": "إدراج ميركل"
+    },
     "users": {
       "searchPlaceholder": "ابحث باسم المستخدم أو البريد أو الاسم...", "total": "{count} مستخدم", "user": "المستخدم",
       "status": "الحالة", "sessions": "الجلسات النشطة", "created": "تاريخ الإنشاء", "actions": "الإجراءات",

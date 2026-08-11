@@ -203,6 +203,69 @@ docker compose exec postgres psql -U postgres -d channels -c "select status, cou
 docker compose exec postgres psql -U postgres -d channels -c "select id, status, attempts, max_attempts, next_retry_at, dead_lettered_at from outbox order by created_at desc limit 10;"
 ```
 
+## Phase 11 Merkle Supervisor Proof
+
+Generate one Ed25519 keypair in a private operator terminal, store the printed
+private seed as a secret, and place only its public half in the backend verifier
+configuration:
+
+```bash
+cd backend
+python -m app.db.merkle_tool generate-keypair
+```
+
+Do not record, screenshot, commit, or paste the private value into the report.
+In production Compose, provide it only to the explicit `integrity` profile:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml \
+  --profile integrity run --rm merkle-checkpoint
+```
+
+For a local backend process with the checkpoint environment configured, run:
+
+```bash
+python -m app.db.merkle_tool status
+python -m app.db.merkle_tool checkpoint --all
+python -m app.db.merkle_tool verify --verify-event-chains
+python scripts/demo_merkle_integrity.py
+```
+
+Then open the superadmin console. The Audit Integrity card shows the latest
+batch, event count, shortened root, signature state, and checkpoint-chain state.
+Choose an audit event and click **Verify Merkle Proof** to show its leaf index,
+left/right proof path, signed root, and compact verification result. No event
+payload or signing secret is returned by these endpoints.
+
+For an offline demonstration, export and verify one proof, then change a copy of
+one sibling hash and show failure:
+
+```bash
+python -m app.db.merkle_tool proof --event-id <uuid> --output event-proof.json
+python -m app.db.merkle_tool verify-proof --proof event-proof.json
+python -m app.db.merkle_tool export-anchor --output latest-audit-anchor.json
+python -m app.db.merkle_tool verify-anchor --file latest-audit-anchor.json
+```
+
+The repository demo script performs the tampered-copy step in memory and never
+modifies real evidence.
+
+### Supervisor explanation
+
+- Why a Merkle tree? It proves one event belongs to a committed batch with
+  `O(log n)` sibling hashes—about 8 for a balanced 256-leaf batch and 10 for
+  1,024—rather than all events.
+- Why keep the hash chain? It supplies ordered continuity within each
+  `system` or `channel:<uuid>` integrity scope. Merkle order is batch processing
+  order, not authoritative channel chronology.
+- Why sign the root? Without a signature, a database-only attacker could rewrite
+  events, leaf snapshots, and the root together. The Ed25519 signature binds the
+  canonical checkpoint to an independently held private key.
+- Why export an anchor? A valid signed newest tail can still be deleted from the
+  same database. A separately retained latest anchor detects rollback before or
+  deletion of that checkpoint. Export alone is not protection unless the file is
+  actually stored outside the database/server.
+
 ## Final Acceptance Checklist
 - [ ] Docker stack starts
 - [ ] Migrations run
@@ -215,6 +278,9 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, status,
 - [ ] User B can receive
 - [ ] Event log shows activity
 - [ ] Event integrity check shows Verified or an honestly explained Not initialized state
+- [ ] Merkle status/checkpoint verification passes and a signed inclusion proof verifies offline
+- [ ] A tampered proof copy fails, while the database evidence remains unchanged
+- [ ] Latest anchor is copied outside the server if rollback evidence is claimed
 - [ ] Delivery Monitor loads for a channel owner/admin
 - [ ] English/Arabic language switch works and Arabic renders RTL
 - [ ] Normal user cannot open `/app/admin`; superadmin can see global audit events and perform audited controls

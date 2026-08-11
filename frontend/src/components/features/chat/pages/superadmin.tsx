@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { Activity, Ban, Hash, MessagesSquare, RefreshCw, ShieldCheck, Users } from "lucide-react";
+import { Activity, Ban, CheckCircle2, GitBranch, Hash, MessagesSquare, RefreshCw, ShieldCheck, Users, XCircle } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,6 +30,8 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import {
   useAdminChannels,
   useAdminEvents,
+  useAdminMerkleProof,
+  useAdminMerkleStatus,
   useAdminOverview,
   useAdminUsers,
   useRevokeAdminUserSessions,
@@ -53,6 +56,16 @@ function DateCell({ value }: { value: string }) {
 
 function EmptyRow({ columns, children }: { columns: number; children: React.ReactNode }) {
   return <TableRow><TableCell colSpan={columns} className="h-28 text-center text-muted-foreground">{children}</TableCell></TableRow>;
+}
+
+function ShortHash({ value }: { value?: string | null }) {
+  if (!value) return <span className="text-muted-foreground">—</span>;
+  return <code className="text-xs" title={value}>{value.slice(0, 12)}…</code>;
+}
+
+function VerificationLine({ valid, label }: { valid?: boolean | null; label: string }) {
+  const Icon = valid ? CheckCircle2 : XCircle;
+  return <div className="flex items-center gap-2 text-sm"><Icon className={`h-4 w-4 ${valid ? "text-emerald-500" : "text-destructive"}`} /><span>{label}</span></div>;
 }
 
 function EventChannel({ name, slug, fallback, href }: { name?: string | null; slug?: string | null; fallback: string; href?: string }) {
@@ -85,6 +98,7 @@ export default function SuperadminPage() {
   const [channelPageSize, setChannelPageSize] = useState(25);
   const [eventPageSize, setEventPageSize] = useState(25);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [proofEventId, setProofEventId] = useState<string | null>(null);
   const localePath = useLocalePath();
   const debouncedUserSearch = useDebouncedValue(userSearch.trim());
   const debouncedChannelSearch = useDebouncedValue(channelSearch.trim());
@@ -113,6 +127,8 @@ export default function SuperadminPage() {
     eventPageSize,
     enabled,
   );
+  const merkleStatus = useAdminMerkleStatus(enabled);
+  const merkleProof = useAdminMerkleProof(proofEventId, enabled);
   const setUserStatusMutation = useSetAdminUserStatus();
   const revokeSessions = useRevokeAdminUserSessions();
   const setChannelState = useSetAdminChannelState();
@@ -166,7 +182,7 @@ export default function SuperadminPage() {
           </div>
           <div className="flex gap-2">
             <Link className={buttonVariants({ variant: "outline" })} href={localePath("/app/delivery")}>{t("actions.delivery")}</Link>
-            <Button variant="outline" onClick={() => { overview.refetch(); users.refetch(); channels.refetch(); events.refetch(); }}>
+            <Button variant="outline" onClick={() => { overview.refetch(); users.refetch(); channels.refetch(); events.refetch(); merkleStatus.refetch(); }}>
               <RefreshCw className="mr-2 h-4 w-4" />{t("actions.refresh")}
             </Button>
           </div>
@@ -179,6 +195,28 @@ export default function SuperadminPage() {
             ))}
           </div>
         )}
+
+        <Card className="p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2 font-semibold"><GitBranch className="h-5 w-5 text-primary" />{t("merkle.title")}</div>
+              <p className="mt-1 text-sm text-muted-foreground">{t("merkle.description")}</p>
+            </div>
+            {merkleStatus.isLoading ? <Skeleton className="h-16 w-full lg:w-96" /> : merkleStatus.isError ? (
+              <Badge variant="destructive">{t("merkle.unavailable")}</Badge>
+            ) : (
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+                <div><div className="text-muted-foreground">{t("merkle.latestBatch")}</div><div className="font-semibold">{merkleStatus.data?.latest_sequence ? `#${merkleStatus.data.latest_sequence}` : "—"}</div></div>
+                <div><div className="text-muted-foreground">{t("merkle.checkpointed")}</div><div className="font-semibold">{merkleStatus.data?.checkpointed_events ?? 0}</div></div>
+                <div><div className="text-muted-foreground">{t("merkle.pending")}</div><div className="font-semibold">{merkleStatus.data?.pending_events ?? 0}</div></div>
+                <div><div className="text-muted-foreground">{t("merkle.root")}</div><ShortHash value={merkleStatus.data?.latest_root} /></div>
+                <VerificationLine valid={merkleStatus.data?.latest_signature_valid ?? false} label={t("merkle.signature")} />
+                <VerificationLine valid={merkleStatus.data?.checkpoint_chain_valid ?? false} label={t("merkle.chain")} />
+                <div className="text-xs text-muted-foreground sm:col-span-2">{t("merkle.signingKey")}: {merkleStatus.data?.latest_signing_key_id || "—"}</div>
+              </div>
+            )}
+          </div>
+        </Card>
 
         <Tabs defaultValue="events" className="space-y-4">
           <TabsList><TabsTrigger value="events">{t("tabs.events")}</TabsTrigger><TabsTrigger value="users">{t("tabs.users")}</TabsTrigger><TabsTrigger value="channels">{t("tabs.channels")}</TabsTrigger></TabsList>
@@ -194,7 +232,7 @@ export default function SuperadminPage() {
               </Select>
             </div>
             <Card className="overflow-hidden"><div className="border-b p-4 text-sm font-medium">{t("events.total", { count: events.data?.total ?? 0 })}</div>
-              <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>{t("events.details")}</TableHead><TableHead>{t("events.type")}</TableHead><TableHead>{t("events.actor")}</TableHead><TableHead>{t("events.channel")}</TableHead><TableHead>{t("events.time")}</TableHead></TableRow></TableHeader>
+              <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>{t("events.details")}</TableHead><TableHead>{t("events.type")}</TableHead><TableHead>{t("events.actor")}</TableHead><TableHead>{t("events.channel")}</TableHead><TableHead>{t("events.time")}</TableHead><TableHead>{t("merkle.integrity")}</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {(events.data?.items ?? []).map((event) => (
                     <TableRow key={event.id}>
@@ -219,9 +257,10 @@ export default function SuperadminPage() {
                         />
                       </TableCell>
                       <TableCell className="whitespace-nowrap"><DateCell value={event.created_at} /></TableCell>
+                      <TableCell><Button size="sm" variant="outline" disabled={!event.event_hash} onClick={() => setProofEventId(event.id)}>{t("merkle.verifyProof")}</Button></TableCell>
                     </TableRow>
                   ))}
-                  {!events.isLoading && events.data?.items.length === 0 && <EmptyRow columns={5}>{t("events.empty")}</EmptyRow>}
+                  {!events.isLoading && events.data?.items.length === 0 && <EmptyRow columns={6}>{t("events.empty")}</EmptyRow>}
                 </TableBody>
               </Table></div>
               {events.isLoading && <Skeleton className="m-4 h-24" />}
@@ -274,6 +313,33 @@ export default function SuperadminPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog open={proofEventId !== null} onOpenChange={(open) => { if (!open) setProofEventId(null); }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t("merkle.proofTitle")}</DialogTitle>
+            <DialogDescription>{t("merkle.proofDescription")}</DialogDescription>
+          </DialogHeader>
+          {merkleProof.isLoading ? <Skeleton className="h-40 w-full" /> : merkleProof.isError ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">{errorMessage(merkleProof.error, t("merkle.notCheckpointed"))}</div>
+          ) : merkleProof.data ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 rounded-md border p-4 text-sm">
+                <div><div className="text-muted-foreground">{t("merkle.batch")}</div><div className="font-semibold">#{merkleProof.data.batch_sequence}</div></div>
+                <div><div className="text-muted-foreground">{t("merkle.leaf")}</div><div className="font-semibold">{merkleProof.data.leaf_index + 1} / {merkleProof.data.leaf_count}</div></div>
+                <div><div className="text-muted-foreground">{t("merkle.proofSiblings")}</div><div className="font-semibold">{merkleProof.data.siblings.length}</div></div>
+                <div><div className="text-muted-foreground">{t("merkle.root")}</div><ShortHash value={merkleProof.data.merkle_root} /></div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <VerificationLine valid={merkleProof.data.verification.event_hash_valid} label={t("merkle.eventHash")} />
+                <VerificationLine valid={merkleProof.data.verification.inclusion_proof_valid} label={t("merkle.inclusion")} />
+                <VerificationLine valid={merkleProof.data.verification.signature_valid} label={t("merkle.signature")} />
+                <VerificationLine valid={merkleProof.data.verification.checkpoint_chain_valid} label={t("merkle.chain")} />
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={pendingAction !== null} onOpenChange={(open) => { if (!open) setPendingAction(null); }}>
         <AlertDialogContent>

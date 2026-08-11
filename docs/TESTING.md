@@ -370,6 +370,70 @@ inspection, and logout-all access-token revocation. The run also caught and
 fixed missing inherited proxy identity headers in the WebSocket locations;
 containerized `nginx -t` passed after the fix.
 
+## Security Hardening Phase 11
+
+`backend/tests/security/test_phase11_merkle_integrity.py` groups focused tests
+for pure Merkle construction, odd-node promotion, bounded explicit-side proofs,
+canonical checkpoint hashes, Ed25519 signatures and key rotation, PostgreSQL
+batch/leaf persistence, current-event snapshot comparison, offline proof
+verification, external anchors, concurrent checkpoints/event commits,
+superadmin API authorization, production configuration, and signing-key Compose
+isolation.
+
+Run against disposable PostgreSQL:
+
+```bash
+cd backend
+set DATABASE_URL=postgresql+asyncpg://postgres:...@127.0.0.1:.../channels
+python -B -m pytest -q tests/security/test_phase11_merkle_integrity.py
+```
+
+Operator and offline verification paths:
+
+```bash
+python -m app.db.merkle_tool status
+python -m app.db.merkle_tool checkpoint --all
+python -m app.db.merkle_tool verify --verify-event-chains
+python -m app.db.merkle_tool proof --event-id <uuid> --output proof.json
+python -m app.db.merkle_tool verify-proof --proof proof.json
+python -m app.db.merkle_tool export-anchor --output anchor.json
+python -m app.db.merkle_tool verify-anchor --file anchor.json
+python scripts/demo_merkle_integrity.py
+```
+
+The proof verifier needs only a proof JSON file and the trusted public-key ring;
+it does not open PostgreSQL. Proof/anchor export refuses to overwrite by default.
+Tests alter only disposable database rows or copies of exported metadata.
+
+The live 1,024-event experiment on 2026-08-11 produced a 10-sibling proof. On
+the local disposable PostgreSQL instance, audit-event creation took about
+6.516 s, checkpoint creation 229.651 ms, database-backed proof creation
+153.123 ms, and offline proof verification 0.485 ms. These are observations,
+not service-level guarantees; the key property is bounded batching and an
+`O(log n)` proof rather than transferring all events. A 256-leaf balanced tree
+is approximately eight siblings, while a 1,024-leaf balanced tree is
+approximately ten; odd-node promotion can shorten some paths.
+
+A separate live corruption exercise checkpointed ten rows, verified cleanly,
+then changed an event payload and received `EVENT_HASH_MISMATCH`. After restoring
+that disposable row, changing only the stored Merkle root produced
+`CHECKPOINT_HASH_MISMATCH`. The deterministic demo verifies a real proof and an
+intentionally tampered in-memory copy without corrupting database evidence.
+
+Verified on 2026-08-11: Phase 11 passed `40 passed`; Phase 8-10 passed
+`73 passed, 1 warning`; and the complete backend suite passed
+`352 passed, 1 warning`. The warning is the existing passlib/Argon2 package
+metadata deprecation. Frontend typecheck/build and 845-key English/Arabic locale
+alignment passed. Development, hardened, and production Compose renders passed;
+rendered production configuration showed the private seed only on
+`merkle-checkpoint` and no Merkle keys on the worker. Fresh `->0024` and
+representative `0023->0024` migrations passed. An isolated hardened stack passed
+the complete RabbitMQ/worker/Redis/WebSocket verifier. The canonical backend
+image rebuild stalled twice at the local five-minute builder timeout, so the
+live stack used the prior dependency image with current source/migrations in a
+disposable image; this is a validation-environment caveat, not a claimed image
+build pass.
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`

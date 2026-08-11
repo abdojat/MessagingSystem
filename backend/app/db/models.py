@@ -410,6 +410,68 @@ class Event(Base):
     )
 
 
+class AuditMerkleBatch(Base):
+    __tablename__ = "audit_merkle_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sequence_no: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
+    merkle_version: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    hash_algorithm: Mapped[str] = mapped_column(String(32), nullable=False)
+    leaf_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("events.id", ondelete="RESTRICT"), nullable=False
+    )
+    last_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("events.id", ondelete="RESTRICT"), nullable=False
+    )
+    first_event_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_event_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    merkle_root: Mapped[str] = mapped_column(String(64), nullable=False)
+    previous_checkpoint_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    checkpoint_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    signing_key_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    signature: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("sequence_no >= 1", name="ck_audit_merkle_batches_sequence_positive"),
+        CheckConstraint("leaf_count BETWEEN 1 AND 4096", name="ck_audit_merkle_batches_leaf_count"),
+        CheckConstraint("merkle_version = 1", name="ck_audit_merkle_batches_version"),
+        CheckConstraint("hash_algorithm = 'sha256'", name="ck_audit_merkle_batches_algorithm"),
+        CheckConstraint("first_event_hash ~ '^[0-9a-f]{64}$'", name="ck_audit_merkle_batches_first_hash"),
+        CheckConstraint("last_event_hash ~ '^[0-9a-f]{64}$'", name="ck_audit_merkle_batches_last_hash"),
+        CheckConstraint("merkle_root ~ '^[0-9a-f]{64}$'", name="ck_audit_merkle_batches_root"),
+        CheckConstraint(
+            "previous_checkpoint_hash IS NULL OR previous_checkpoint_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_audit_merkle_batches_previous_hash",
+        ),
+        CheckConstraint("checkpoint_hash ~ '^[0-9a-f]{64}$'", name="ck_audit_merkle_batches_checkpoint_hash"),
+        CheckConstraint("signing_key_id ~ '^[A-Za-z0-9_-]{1,64}$'", name="ck_audit_merkle_batches_signing_key"),
+        Index("ix_audit_merkle_batches_created", "created_at"),
+    )
+
+
+class AuditMerkleLeaf(Base):
+    __tablename__ = "audit_merkle_leaves"
+
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("audit_merkle_batches.id", ondelete="RESTRICT"), primary_key=True
+    )
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("events.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    leaf_index: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    leaf_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("leaf_index >= 0", name="ck_audit_merkle_leaves_index"),
+        CheckConstraint("event_hash ~ '^[0-9a-f]{64}$'", name="ck_audit_merkle_leaves_event_hash"),
+        CheckConstraint("leaf_hash ~ '^[0-9a-f]{64}$'", name="ck_audit_merkle_leaves_leaf_hash"),
+        Index("ix_audit_merkle_leaves_batch_index", "batch_id", "leaf_index"),
+    )
+
+
 class Outbox(Base):
     __tablename__ = "outbox"
 

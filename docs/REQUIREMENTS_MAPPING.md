@@ -14,7 +14,7 @@
 |---|---|---|---|
 | Global superadmin oversight and controls | Mostly complete | `users.is_superadmin/is_active`; migration `0015_superadmin_controls`; safe environment bootstrap; `AdminService`; guarded/no-store `/v1/admin/overview`, `/events`, `/users`, and `/channels`; global delivery-monitor scope; bilingual frontend console with ranked search, filters, typed event display, confirmation gates, and selectable pagination; focused regression tests | Login as configured superadmin, search/filter global events, change page size, revoke a test user's sessions after confirmation, and suspend/restore a disposable channel |
 
-The enhancement is intentionally bounded: superadmins administer accounts, channels, audit evidence, and delivery state but do not receive implicit access to private message bodies. Production additions such as MFA and external audit anchoring remain future work.
+The enhancement is intentionally bounded: superadmins administer accounts, channels, audit evidence, and delivery state but do not receive implicit access to private message bodies. MFA and automated third-party anchor custody remain future work; Phase 11 provides manual signed-anchor export and verification.
 
 ## Advanced Reliability Enhancement
 
@@ -29,8 +29,14 @@ This enhancement strengthens the distributed-system reliability story, but it is
 | Enhancement | Status | Implementation evidence | Demo step |
 |---|---|---|---|
 | Event Integrity Upgrade v1: tamper-evident audit hash chain | Mostly complete | Event columns and migration `0013_event_integrity`; canonical hash-chain service in `backend/app/services/event_integrity_service.py`; event logging integration in `backend/app/services/event_service.py`; worker delivery-event hashing in `worker/worker_app/outbox_runner.py`; verification endpoint `GET /v1/channels/{id}/events/integrity`; backfill script `scripts/backfill_event_integrity.py`; frontend Event Log integrity badge/check; tests in `backend/tests/test_event_integrity.py` | Open channel details -> Event Log -> Verify integrity; use the Docker backfill dry-run command before any real legacy backfill |
+| Phase 11 global Merkle audit checkpoints | Mostly complete operationally | Migration `0024`; domain-separated SHA-256 tree/proofs in `backend/app/services/merkle_service.py`; atomic signed checkpoint/anchor service; Ed25519 public-key ring and isolated signing profile; `merkle_tool` status/checkpoint/verify/proof/offline/anchor commands; superadmin no-store APIs and bilingual UI; deterministic demo and focused PostgreSQL/concurrency/tamper tests | Run checkpoint/status/verify; verify one proof in the admin UI and offline; tamper only a proof copy and show failure; export the latest anchor to separate storage |
 
-This is an advanced integrity enhancement, not an official minimum requirement. It is tamper-evident against later event modification, insertion, reordering, and deletion that breaks links between remaining events. Tail truncation requires an external remembered last hash to prove. It is not a blockchain, not a full Merkle tree, and not external notarization; a database administrator with full write access could recompute a forged chain unless hashes are anchored outside the database.
+These are advanced integrity enhancements. Per-scope chains retain chronology;
+the real Merkle tree supplies compact membership proofs; signed checkpoint roots
+resist database-only rewriting without the Ed25519 private key. The export
+command is not automatic external notarization: rollback/tail-deletion evidence
+exists only after the latest anchor is copied to and protected in independent
+storage. The design is tamper-evident, not immutable and not a blockchain.
 
 ## Data Protection Enhancement
 
