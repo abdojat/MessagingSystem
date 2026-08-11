@@ -12,7 +12,7 @@ Fresh validation from this handoff pass is mirrored in [`FINAL_REPOSITORY_HANDOF
 
 | Check | Current result |
 |---|---|
-| Full backend suite | Passed: 352 tests; 2 upstream passlib/Argon2 warnings |
+| Full backend suite | Passed: 353 tests; 2 upstream passlib/Argon2 warnings |
 | Focused post-Phase-7 and Phase 8-11 regressions | Passed: 134 tests; 2 upstream passlib/Argon2 warnings |
 | Frontend `npm ci` | Passed from the lockfile |
 | Frontend typecheck/build | Passed; Next.js reported only its middleware-convention deprecation warning |
@@ -21,7 +21,9 @@ Fresh validation from this handoff pass is mirrored in [`FINAL_REPOSITORY_HANDOF
 | Development/hardened/production Compose renders | All three passed |
 | Nginx syntax | Hardened and production configurations passed `nginx -t` |
 | Alembic single head and fresh migration | Passed at `0024_phase11_merkle_audit`; an empty database contained zero synthetic checkpoint batches |
-| Safe release verifier | Passed, including 352 backend tests, frontend checks, locale parity, Compose renders, and hardened Nginx syntax |
+| Retained-volume migration | Passed from `0016_backfill_owner_memberships` through `0024_phase11_merkle_audit`; the Phase 3 attachment backfill safely skipped JSON `null`/non-array legacy values, and its isolated PostgreSQL regression passed |
+| Retained RabbitMQ topology | Three current legacy unbounded user queues were narrowly migrated to bounded arguments; audited replay left all 18 desired binding generations reconciled and no failed/pending outbox rows |
+| Safe release verifier | Passed, including 353 backend tests, frontend checks, locale parity, Compose renders, and hardened Nginx syntax |
 | Data-creating release-candidate verifier | Passed core identity, RBAC, delivery, encryption, upload, sync, presence, session, audit, and removal checks; external SMTP transport was not exercised |
 | Merkle demo and operator CLI | Passed hashes, inclusion proof, Ed25519 signature, checkpoint chain, expected tamper rejection, status/verify/proof, and online/offline anchor verification |
 | Markdown links, secret/artifact scan, `git diff --check` | Passed |

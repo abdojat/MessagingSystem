@@ -30,6 +30,11 @@ Development Compose environment:
 docker compose run --rm backend python -B -m pytest -q
 ```
 
+Use that Compose command only with a disposable database. The backend fixtures
+truncate application tables between cases, so the normal development database
+must not contain data that needs to be retained. Prefer `verify_release.py` for
+the safe complete check because it creates uniquely named temporary services.
+
 The latest measured result is recorded in [Stabilization Status](STABILIZATION_STATUS.md) and [Final Repository Handoff](../FINAL_REPOSITORY_HANDOFF.md). An exact count is evidence, not a test assertion.
 
 ## Focused regression groups
@@ -53,6 +58,8 @@ Important coverage groups:
 | Browser cookie/Origin/CSRF and WebSocket tickets | `tests/security/test_phase8_production_hardening.py` |
 | Invite identity and concurrency | `tests/security/test_phase5_medium_hardening.py`, `test_phase6_medium_hardening.py`, `test_phase10_identity_presence.py` |
 | Routing identifiers, uploads, and authorization repairs | `tests/test_p0_requirements.py`, `tests/security/test_post_phase7_repairs.py` |
+| Retained-data attachment migration shapes | `tests/security/test_phase3_abuse_hardening.py::test_attachment_migration_backfill_skips_json_null_and_non_array_legacy_values` |
+| Retained RabbitMQ user-queue topology migration | `tests/security/test_phase3_abuse_hardening.py::test_worker_migrates_only_legacy_unbounded_managed_user_queue`, `test_worker_does_not_delete_user_queue_for_unrecognized_topology_mismatch` |
 | Outbox retry/dead-letter and broker projections | `tests/test_delivery_reliability.py`, Phase 3/4/7 regressions |
 | Message/upload encryption, migration, and rotation | `tests/security/test_phase9_data_protection.py` |
 | Distributed presence and email verification | `tests/security/test_phase10_identity_presence.py` |
@@ -184,7 +191,7 @@ python -m alembic current
 python -m alembic upgrade head
 ```
 
-Final verification uses an empty disposable PostgreSQL database and confirms the one head `0024_phase11_merkle_audit`.
+Final verification uses an empty disposable PostgreSQL database and confirms the one head `0024_phase11_merkle_audit`. The Phase 3 attachment backfill regression also executes the exact migration SQL and verifies that JSON `null` and non-array legacy values are skipped while valid attachment arrays are normalized. A retained development database at revision `0016_backfill_owner_memberships` was also verified upgrading through `0024_phase11_merkle_audit` without deleting its application data.
 
 ## Manual acceptance
 

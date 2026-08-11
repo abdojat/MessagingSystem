@@ -182,7 +182,7 @@ The final-cleanup pass produced these fresh results:
 
 | Check | Result |
 |---|---|
-| Backend full suite | Passed: 352 tests; 2 upstream passlib/Argon2 warnings |
+| Backend full suite | Passed: 353 tests; 2 upstream passlib/Argon2 warnings |
 | Focused post-Phase-7 and Phase 8-11 regressions | Passed: 134 tests; 2 upstream passlib/Argon2 warnings |
 | Frontend `npm ci` | Passed |
 | Frontend typecheck | Passed |
@@ -192,7 +192,9 @@ The final-cleanup pass produced these fresh results:
 | Development/hardened/production Compose renders | All three passed |
 | Nginx syntax | Hardened and production configurations passed `nginx -t` |
 | Alembic single head/fresh migration | Passed at `0024_phase11_merkle_audit`; the empty database had zero synthetic Merkle batches |
-| `verify_release.py` | Passed, including 352 backend tests, frontend checks, locale parity, Compose renders, image build, and Nginx syntax |
+| Retained development migration | Passed from `0016_backfill_owner_memberships` through `0024_phase11_merkle_audit`; JSON `null`/non-array legacy attachment values were safely skipped and valid arrays were normalized |
+| Retained RabbitMQ topology | Three current legacy unbounded user queues were migrated to bounded arguments; audited replay reconciled all 18 desired bindings with no failed/pending outbox rows |
+| `verify_release.py` | Passed, including 353 backend tests, frontend checks, locale parity, Compose renders, image build, and Nginx syntax |
 | `verify_release_candidate.py` | Passed core identity, RBAC, realtime delivery, encryption, upload, sync, presence, session, audit, and member-removal denial checks |
 | Merkle demo and operator CLI | Passed hashes, inclusion proof, Ed25519 signature, checkpoint chain, expected tamper rejection, proof verification, and online/offline anchor verification |
 | Markdown links | Passed across 35 tracked Markdown files |

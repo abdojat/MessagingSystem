@@ -1,13 +1,15 @@
 import asyncio
+import runpy
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from aio_pika.exceptions import ChannelPreconditionFailed
 from fastapi import HTTPException
 from pydantic import ValidationError
-from sqlalchemy import event, select, update
+from sqlalchemy import event, select, text, update
 
 sys.path.append(str(Path(__file__).resolve().parents[3] / "worker"))
 
@@ -46,8 +48,14 @@ from app.services.message_service import MessageService
 from app.services.rate_limit_service import RateLimitService, enforce_rate_limit
 from worker_app.amqp_consumer_runner import publish_redis_with_backoff, redis_requeue_delay
 from worker_app.core.config import Settings as WorkerSettings
+from worker_app.mq.topology import migrate_legacy_user_queue
 from worker_app.mq.topology import user_queue_arguments as worker_user_queue_arguments
 from worker_app.outbox_runner import _apply_broker_binding, process_outbox_batch
+
+
+ATTACHMENT_BACKFILL_SQL = runpy.run_path(
+    str(Path(__file__).resolve().parents[2] / "alembic" / "versions" / "0018_phase3_abuse_hardening.py")
+)["ATTACHMENT_BACKFILL_SQL"]
 
 
 class _UnusedAmqp:
@@ -117,6 +125,37 @@ class _BrokerChannel:
     async def declare_queue(self, name: str, **kwargs):
         self.declarations.append({"name": name, **kwargs})
         return self.queue
+
+
+class _QueueMigrationChannel:
+    def __init__(self, *, declaration_error: Exception | None = None) -> None:
+        self.declaration_error = declaration_error
+        self.queue = _BrokerQueue()
+        self.exchange = object()
+        self.declarations: list[tuple[str, dict]] = []
+        self.deletions: list[tuple[str, bool, bool]] = []
+
+    async def declare_exchange(self, *args, **kwargs):
+        return self.exchange
+
+    async def declare_queue(self, name: str, **kwargs):
+        self.declarations.append((name, kwargs))
+        if self.declaration_error is not None:
+            error = self.declaration_error
+            self.declaration_error = None
+            raise error
+        return self.queue
+
+    async def queue_delete(self, name: str, *, if_unused: bool, if_empty: bool):
+        self.deletions.append((name, if_unused, if_empty))
+
+
+class _QueueMigrationConnection:
+    def __init__(self, *channels: _QueueMigrationChannel) -> None:
+        self.channels = list(channels)
+
+    async def channel(self):
+        return self.channels.pop(0)
 
 
 class _BrokerExchange:
@@ -400,6 +439,53 @@ async def test_attachment_lookup_does_not_scan_message_attachment_json(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_attachment_migration_backfill_skips_json_null_and_non_array_legacy_values(db_session) -> None:
+    owner = await _register(db_session, "migration_owner3")
+    channel = await _channel(db_session, owner, "Migration Attachments")
+    upload = await MessageService.create_upload(
+        db_session,
+        owner.id,
+        UploadCreateRequest(filename="migration.txt", content_type="text/plain", size_bytes=1),
+    )
+    messages = [
+        Message(
+            channel_id=channel.id,
+            sender_user_id=owner.id,
+            seq_id=1,
+            content_type=ContentType.text,
+            content_text=encrypt_message("json null"),
+            attachments=None,
+        ),
+        Message(
+            channel_id=channel.id,
+            sender_user_id=owner.id,
+            seq_id=2,
+            content_type=ContentType.text,
+            content_text=encrypt_message("legacy object"),
+            attachments={"file_id": str(upload.id)},
+        ),
+        Message(
+            channel_id=channel.id,
+            sender_user_id=owner.id,
+            seq_id=3,
+            content_type=ContentType.text,
+            content_text=encrypt_message("valid array"),
+            attachments=[{"file_id": str(upload.id)}],
+        ),
+    ]
+    db_session.add_all(messages)
+    await db_session.commit()
+
+    await db_session.execute(text(ATTACHMENT_BACKFILL_SQL))
+    await db_session.commit()
+
+    rows = await db_session.execute(
+        select(MessageAttachment.message_id).where(MessageAttachment.upload_id == upload.id)
+    )
+    assert set(rows.scalars().all()) == {messages[2].id}
+
+
+@pytest.mark.asyncio
 async def test_channel_invite_and_upload_quota_boundaries(db_session, monkeypatch) -> None:
     monkeypatch.setenv("MAX_CHANNELS_OWNED_PER_USER", "1")
     monkeypatch.setenv("MAX_ACTIVE_INVITES_PER_USER", "1")
@@ -454,6 +540,43 @@ async def test_user_queue_declaration_is_bounded_and_worker_matches_backend() ->
     assert declaration["arguments"]["x-message-ttl"] > 0
     assert declaration["arguments"]["x-max-length"] > 0
     assert worker_user_queue_arguments(WorkerSettings()) == declaration["arguments"]
+
+
+@pytest.mark.asyncio
+async def test_worker_migrates_only_legacy_unbounded_managed_user_queue() -> None:
+    mismatch = ChannelPreconditionFailed(
+        "PRECONDITION_FAILED - inequivalent arg 'x-expires' for queue 'user.legacy_user' "
+        "in vhost '/': received the value '604800000' of type 'signedint' but current is none"
+    )
+    failed_channel = _QueueMigrationChannel(declaration_error=mismatch)
+    repair_channel = _QueueMigrationChannel()
+
+    migrated = await migrate_legacy_user_queue(
+        _QueueMigrationConnection(failed_channel, repair_channel),
+        "legacy_user",
+        WorkerSettings(),
+    )
+
+    assert migrated is True
+    assert repair_channel.deletions == [("user.legacy_user", True, False)]
+    assert repair_channel.declarations[0][1]["arguments"] == worker_user_queue_arguments(WorkerSettings())
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_delete_user_queue_for_unrecognized_topology_mismatch() -> None:
+    mismatch = ChannelPreconditionFailed(
+        "PRECONDITION_FAILED - inequivalent arg 'x-max-priority' for queue 'user.safe_user' "
+        "in vhost '/': received the value '5' but current is none"
+    )
+    failed_channel = _QueueMigrationChannel(declaration_error=mismatch)
+
+    with pytest.raises(ChannelPreconditionFailed):
+        await migrate_legacy_user_queue(
+            _QueueMigrationConnection(failed_channel),
+            "safe_user",
+            WorkerSettings(),
+        )
+    assert failed_channel.deletions == []
 
 
 @pytest.mark.asyncio

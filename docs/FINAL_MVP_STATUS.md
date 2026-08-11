@@ -21,6 +21,7 @@ The system is functionally complete for the defined university MVP. It remains a
 ## Operationally bounded or mostly complete
 
 - RabbitMQ and Redis realtime buffers are intentionally bounded; PostgreSQL/REST is the durable recovery guarantee.
+- Worker startup narrowly migrates retained managed user queues that predate bounded arguments; a queue with active consumers or an unrelated topology mismatch still requires operator coordination.
 - Dead-letter mirroring to RabbitMQ is best effort after authoritative PostgreSQL state is committed.
 - Merkle checkpoint creation and independent anchor retention are explicit operator/scheduled tasks, not automatic application work.
 - The single-host production-oriented profile establishes a credible boundary but leaves certificate, secret, backup, monitoring, and recovery operations to the deployer.

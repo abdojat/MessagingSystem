@@ -15,7 +15,7 @@ Strengths:
 - Clear service boundaries among FastAPI, worker, PostgreSQL, RabbitMQ, Redis, Next.js, and Nginx.
 - PostgreSQL remains the source of truth while realtime infrastructure is recoverable/replaceable.
 - Transactional outbox and versioned desired broker bindings address database/broker consistency gaps.
-- Per-channel ordering, bounded realtime queues, REST sync, retry/dead-letter state, and publisher confirms create an explainable reliability model.
+- Per-channel ordering, bounded realtime queues, guarded retained-queue topology migration, REST sync, retry/dead-letter state, and publisher confirms create an explainable reliability model.
 - Production Compose separates administrative migrations from a restricted runtime database identity and isolates the Merkle signing seed.
 
 Remaining operational risks:

@@ -15,6 +15,24 @@ branch_labels = None
 depends_on = None
 
 
+ATTACHMENT_BACKFILL_SQL = """
+        INSERT INTO message_attachments (message_id, upload_id, channel_id)
+        SELECT m.id, u.id, m.channel_id
+        FROM messages AS m
+        CROSS JOIN LATERAL jsonb_array_elements(
+            CASE
+                WHEN jsonb_typeof(m.attachments::jsonb) = 'array'
+                THEN m.attachments::jsonb
+                ELSE '[]'::jsonb
+            END
+        ) AS item
+        JOIN uploads AS u ON u.id::text = lower(item->>'file_id')
+        WHERE item ? 'file_id'
+          AND (item->>'file_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        ON CONFLICT (message_id, upload_id) DO NOTHING
+        """
+
+
 def upgrade() -> None:
     op.create_table(
         "message_attachments",
@@ -55,19 +73,9 @@ def upgrade() -> None:
 
     # Existing JSON attachments remain the API representation. This normalized
     # relation is an authorization index and is backfilled without trusting
-    # malformed historical file ids.
-    op.execute(
-        """
-        INSERT INTO message_attachments (message_id, upload_id, channel_id)
-        SELECT m.id, u.id, m.channel_id
-        FROM messages AS m
-        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m.attachments::jsonb, '[]'::jsonb)) AS item
-        JOIN uploads AS u ON u.id::text = lower(item->>'file_id')
-        WHERE item ? 'file_id'
-          AND (item->>'file_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-        ON CONFLICT (message_id, upload_id) DO NOTHING
-        """
-    )
+    # malformed historical file ids. SQL JSON null and other scalar/object
+    # legacy values are skipped because jsonb_array_elements accepts arrays only.
+    op.execute(ATTACHMENT_BACKFILL_SQL)
 
 
 def downgrade() -> None:

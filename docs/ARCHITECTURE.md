@@ -67,7 +67,7 @@ Publisher confirms and explicit outbox states record success, scheduled retry, a
 
 Membership changes are committed in PostgreSQL with a versioned desired broker-binding state and an outbox snapshot. The worker locks and re-derives current authorization before applying bindings, ignores stale generations, removes obsolete channel-slug routing keys, and records the reconciled generation. Usernames and channel slugs must match `^[A-Za-z0-9_-]{3,50}$` before they can reach queue, routing-key, or Redis-channel construction.
 
-RabbitMQ uses the durable topic exchange `ex.channels`. User queues are named from validated usernames and are bounded by expiry, message TTL, and maximum length. A channel publish uses a validated `channel.<slug>` routing key. PostgreSQL membership is still checked before protected REST or WebSocket delivery.
+RabbitMQ uses the durable topic exchange `ex.channels`. User queues are named from validated usernames and are bounded by expiry, message TTL, and maximum length. On worker startup, current database users whose retained queues predate those managed arguments are migrated one queue at a time; only the recognized missing-argument shape is eligible, active consumers block deletion, and PostgreSQL sync recovers any queue-only realtime copies. Unrelated topology mismatches remain errors for operator review. A channel publish uses a validated `channel.<slug>` routing key. PostgreSQL membership is still checked before protected REST or WebSocket delivery.
 
 ## Offline recovery and ordering
 

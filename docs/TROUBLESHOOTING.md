@@ -50,6 +50,8 @@ docker compose exec postgres psql -U postgres -d channels \
 
 The worker retries with backoff and records terminal dead-letter state. PostgreSQL outbox rows remain authoritative; REST sync still recovers persisted messages. Development RabbitMQ management is at `http://localhost:15672`; it is intentionally not published in hardened/production profiles.
 
+Retained queues from releases before bounded user-queue arguments may initially produce one RabbitMQ `PRECONDITION_FAILED` per current user. Worker startup recognizes only a managed `user.*` queue whose expected `x-expires`, `x-message-ttl`, `x-max-length`, or `x-overflow` argument is absent, refuses deletion while another consumer is active, recreates that realtime queue with current bounds, and logs the repair. Do not delete the RabbitMQ volume merely for this upgrade: PostgreSQL/REST sync is the durable recovery path, and failed binding rows can be replayed through the authenticated Delivery Monitor after the queue repair. Other inequivalent queue arguments are not deleted automatically.
+
 ## Redis authentication/fanout/presence failure
 
 ```bash
