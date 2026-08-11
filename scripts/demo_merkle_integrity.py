@@ -81,14 +81,18 @@ async def run() -> None:
             tampered_verification = verify_proof_bundle(tampered, public_keys)
 
             print(f"Audit events checkpointed this run: {created_count}")
+            print(f"Checkpoint sequence: {proof['batch_sequence']}")
+            print(f"Batch leaf count: {proof['leaf_count']}")
             print(f"Merkle root: {proof['merkle_root']}")
+            print(f"Signing key ID: {proof['checkpoint']['signing_key_id']}")
             print(f"Selected event: {proof['event_id']}")
             print(f"Leaf index: {proof['leaf_index']}")
-            print(f"Proof siblings: {len(proof['siblings'])}")
-            print(f"Event hash valid:        {'YES' if proof['verification']['event_hash_valid'] else 'NO'}")
-            print(f"Merkle proof valid:      {'YES' if verification['inclusion_proof_valid'] else 'NO'}")
-            print(f"Checkpoint signature:    {'YES' if verification['signature_valid'] else 'NO'}")
-            print(f"Checkpoint chain:        {'YES' if proof['verification']['checkpoint_chain_valid'] else 'NO'}")
+            print(f"Proof sibling count: {len(proof['siblings'])}")
+            print(f"Event hash:              {'PASS' if proof['verification']['event_hash_valid'] else 'FAIL'}")
+            print(f"Merkle inclusion:        {'PASS' if verification['inclusion_proof_valid'] else 'FAIL'}")
+            print(f"Checkpoint hash:         {'PASS' if verification['checkpoint_hash_valid'] else 'FAIL'}")
+            print(f"Ed25519 signature:       {'PASS' if verification['signature_valid'] else 'FAIL'}")
+            print(f"Checkpoint chain:        {'PASS' if proof['verification']['checkpoint_chain_valid'] else 'FAIL'}")
             print(
                 "Tampered proof:           "
                 + ("FAILED (expected)" if not tampered_verification["valid"] else "UNEXPECTED SUCCESS")

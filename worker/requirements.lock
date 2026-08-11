@@ -1,0 +1,22 @@
+# Phase 12 release-candidate lock generated from the validated Phase 11 image.
+# Keep worker/pyproject.toml as the direct-dependency source of truth and
+# deliberately regenerate this file when dependencies are reviewed.
+SQLAlchemy==2.0.51
+aio-pika==10.0.1
+aiormq==7.0.0
+annotated-types==0.8.0
+asyncpg==0.31.0
+greenlet==3.5.5
+idna==3.18
+multidict==6.7.1
+packaging==26.3
+pamqp==4.0.1
+propcache==0.5.2
+pydantic-settings==2.15.0
+pydantic==2.13.4
+pydantic_core==2.46.4
+python-dotenv==1.2.2
+redis==8.1.0
+typing-inspection==0.4.3
+typing_extensions==4.16.0
+yarl==1.24.5

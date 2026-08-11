@@ -8,6 +8,28 @@
 | Security: encryption, authentication, permissions | Complete for university MVP; production-oriented single-host boundary validated | Session-bound access JWTs remain memory-only in the browser; refresh tokens use rotating `HttpOnly`, `Secure`, `SameSite` cookies with exact-Origin and double-submit CSRF validation. Phase 9 provides versioned message/upload encryption and rotation. Phase 10 adds hash-only exact-email verification challenges, authenticated confirmation, TLS-SMTP production validation, and email-change invalidation. Backend authorization occurs before decryption; presence remains non-authoritative metadata. Phase 1-10 regressions and schema upgrades provide evidence. | Show an Unverified profile becoming Verified through the fragment link, deny the same token twice/under another account, then demonstrate encrypted message/upload storage and outsider denial. Public certificate lifecycle, external KMS/HSM, MFA, multi-host HA, and browser automation remain limitations. |
 | Event log for tracking activity | Complete | Channel events API/UI plus global superadmin audit API `GET /v1/admin/events` and bilingual `/app/admin` console; raw payloads are replaced by typed allowlisted display details; denied superadmin access and all administrative mutations are audited | Open channel Event Log, then superadmin console -> All audit events; filter by category/actor and show human-readable details |
 
+## Phase 12 Final Validation Map
+
+The official requirements above were exercised together on a fresh disposable
+production-profile stack on 2026-08-11. The deterministic scenario in
+`scripts/verify_release_candidate.py` created identities and a private channel,
+completed a real locally captured SMTP verification and pre-registration invite,
+published through PostgreSQL outbox -> RabbitMQ -> worker -> Redis -> WebSocket,
+recovered an offline message through `/sync`, verified protected encrypted upload
+storage and outsider denial, proved two-backend aggregate presence, exercised
+refresh replay/logout, and verified event integrity/removal denial. The complete
+backend suite passed 352 tests and the requested focused security matrix passed
+213 tests.
+
+| Supervisor feature | Final status | Concrete implementation and verification |
+|---|---|---|
+| Topics/channels | Complete | `backend/app/api/routes/channels.py`, `backend/app/services/channel_service.py`, frontend channel UI, final E2E |
+| Publish/subscribe delivery | Complete for the defined MVP | `backend/app/services/message_service.py`, transactional outbox, `worker/worker_app`, RabbitMQ/Redis/WebSocket, REST sync, final live/offline E2E |
+| Subscriber management | Complete | `backend/app/api/routes/memberships.py`, invite/approval/add/remove/role flows, real verified-email invite E2E |
+| Security | Complete for the defined university MVP | Session-bound auth, RBAC, browser refresh/CSRF, broker-safe IDs, encrypted message/upload storage, production boundary, focused/full regressions; deployment limitations remain documented |
+| Event/activity log | Complete | Channel/global APIs and UI, per-scope SHA-256 chains, final event/integrity E2E |
+| Mandatory Merkle Tree | Implemented and validated | `backend/app/services/merkle_service.py`, `backend/app/services/merkle_audit_service.py`, `backend/app/db/merkle_tool.py`, `backend/alembic/versions/0024_phase11_merkle_audit.py`, `backend/tests/security/test_phase11_merkle_integrity.py`, admin UI/API, and `scripts/demo_merkle_integrity.py`; signed checkpoint, inclusion proof, linked chain, tampered-copy rejection, offline proof/anchor, and database-history anchor verification passed |
+
 ## Platform Administration Enhancement
 
 | Enhancement | Status | Implementation evidence | Demo step |

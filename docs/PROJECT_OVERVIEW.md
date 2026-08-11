@@ -10,7 +10,9 @@ Core capabilities:
 - Persistent message/event storage.
 - Security controls (JWT auth, authorization, encryption-at-rest).
 - Delivery reliability controls for outbox retry scheduling, dead-letter tracking, and admin retry.
-- Tamper-evident audit log integrity using a per-scope SHA-256 hash chain.
+- Tamper-evident audit integrity using per-scope SHA-256 hash chains plus
+  Ed25519-signed global Merkle checkpoints, compact inclusion proofs, offline
+  verification, and optional externally retained anchors.
 
 ## Why Publish/Subscribe
 Pub/Sub decouples producers from consumers:
@@ -53,7 +55,23 @@ Delivery reliability events include `broker.retry_scheduled`, `broker.dead_lette
 
 Event Integrity Upgrade v1 stores `previous_hash`, `event_hash`, `hash_algorithm`, `integrity_version`, and `integrity_scope` on new events. Channel events are chained under `channel:<channel_id>` and system events under `system`. Channel owners/admins can call `GET /v1/channels/{id}/events/integrity` from the frontend Event Log page to show a Verified, Broken, Not initialized, or Checking state.
 
-This is a tamper-evident audit mechanism for the university MVP. It is not a blockchain, not end-to-end trust, and not external notarization.
+Phase 11 adds bounded global Merkle batches over initialized event hashes. Each
+checkpoint root and prior-checkpoint link is signed with Ed25519 by the isolated
+one-shot maintenance service. Proof bundles verify offline; an exported latest
+anchor detects rollback only if an operator retains it independently.
+
+This is a tamper-evident audit mechanism for the university MVP. It is not a
+blockchain, immutable storage, end-to-end trust, or automatic external
+notarization.
+
+## Final Release-Candidate Evidence
+
+On 2026-08-11, Phase 12 validated the canonical production build, a fresh
+single-host production stack, migrations through the single head
+`0024_phase11_merkle_audit`, the complete application scenario, signed Merkle
+proof/tamper/anchor verification, 352 backend tests, frontend typecheck/build,
+and exact English/Arabic locale parity. Detailed evidence is recorded in
+`FINAL_SECURITY_STABILIZATION_REPORT.md`.
 
 ## Official Requirement Status
 All five official requirements are implemented, with backend regression tests and a demo verifier script that exercise the main flow (see `docs/REQUIREMENTS_MAPPING.md`).

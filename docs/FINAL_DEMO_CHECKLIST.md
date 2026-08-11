@@ -1,59 +1,107 @@
 # Final Demo Checklist
 
-## What To Open
-- Frontend: `http://localhost:3000`
-- Backend health: `http://localhost:8000/health`
-- RabbitMQ management UI, if exposed by Compose: `http://localhost:15672`
+Target: 10–15 minutes. Rehearse with disposable demo data and keep the normal
+feature demo separate from safe release verification.
 
-## Users To Create
-- User A: channel owner and publisher.
-- User B: subscriber who joins and receives the live message.
-- User C: outsider who will be blocked from a private upload.
+## Before the Supervisor Arrives
 
-## Demo Flow
-1. Start the stack with `docker compose up -d --build`.
-2. Open the frontend in two browser sessions, or one normal window plus one incognito window.
-3. Register and log in User A.
-4. Register and log in User B.
-5. Register and log in User C in the second window or a third window.
-6. User A creates a channel.
-7. User B joins that channel.
-8. Open the channel page for User B and keep the WebSocket-connected view visible.
-9. User A publishes a text message.
-10. User A publishes a small photo, video, or audio file from the paperclip composer control.
-11. Show that User B receives the text and media messages live through the WebSocket-backed UI. If the live socket is unavailable in the environment, show the REST sync/backfill result instead.
-12. Open the event log and show `channel.created`, `membership.joined`, and `message.published`.
-13. Click Verify integrity and show the Audit integrity badge/check.
-14. Open Delivery Monitor from User A's Profile page and show delivery counters plus empty or retryable failure tables.
-15. Create a private upload owned by User A, attach it to a message, and show that User C receives `403 Forbidden` when trying to download the file.
-16. If RabbitMQ management is available, show the exchange/queue activity, worker logs, or the `q.dead.messages` queue as extra proof of the broker path.
+- Copy `.env.example` to the untracked `.env`, replace development secrets, and
+  start the demo stack with `docker compose up -d --build`.
+- Confirm `docker compose ps -a` shows PostgreSQL, RabbitMQ, Redis, backend,
+  worker, and frontend ready/running.
+- Run `python scripts/verify_release.py` in advance. It uses uniquely named
+  disposable test containers and does not modify application volumes.
+- Prepare three browser profiles: User A (owner/publisher), User B
+  (subscriber), and User C (outsider).
+- If showing the production profile, prepare deployment-owned secrets and TLS
+  files outside the repository; do not display their contents.
 
-## Proof To Show
-- The channel exists and persists.
-- The subscriber receives the message.
-- The subscriber can view/play protected photo, video, or audio attachments.
-- The event log records the activity.
-- The event log integrity check reports Verified for initialized events.
-- The Delivery Monitor shows outbox delivery status for managed channels.
-- Unauthorized access is blocked.
-- The message remains stored encrypted at rest in PostgreSQL.
+## 10–15 Minute Demonstration
 
-## Helpful Commands During The Demo
+1. **Architecture (1 minute).** Explain that this is a distributed
+   publish/subscribe system: PostgreSQL is authoritative; the worker relays the
+   transactional outbox through RabbitMQ; Redis bridges realtime delivery to
+   WebSockets; REST sync/backfill covers missed events.
+2. **Identity and topic management (2 minutes).** Register/login A and B. A
+   creates a private channel/topic. Show its safe slug and channel details.
+3. **Subscriber workflow (2 minutes).** A creates an invite for B. For the full
+   identity proof, show an unresolved email invite denied before mailbox
+   verification and accepted after the captured/SMTP fragment is confirmed.
+4. **Live publish/subscribe (2 minutes).** Keep B's channel open. A publishes a
+   distinctive message. Show B receives it without refreshing, then refresh and
+   show persisted history. Mention the exact path: DB/outbox -> RabbitMQ ->
+   worker -> Redis -> WebSocket.
+5. **Protected attachment and offline recovery (2 minutes).** A publishes a
+   small attachment. B downloads the exact bytes; C is denied. Publish another
+   message while B is disconnected, reconnect, and show REST sync/backfill.
+6. **Security and audit (2 minutes).** Show the Event Log and its SHA-256 chain
+   integrity result. Remove B and show protected history is denied. Explain that
+   message/upload encryption is server-side encryption at rest, not E2EE.
+7. **Mandatory Merkle proof (2–3 minutes).** Create a signed checkpoint, run the
+   demonstration below, and point out the root, selected event/leaf, sibling
+   path, Ed25519 signature, linked checkpoint chain, valid proof, and expected
+   tampered-copy failure.
+
+## Merkle Demonstration Commands
+
+The production profile isolates the signing private key to the explicit
+maintenance service:
+
 ```bash
-python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
-python scripts/verify_approval_flow.py --base-url http://localhost:8000/v1
-docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
-docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"
-docker compose logs -f backend worker
-docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
-docker compose exec postgres psql -U postgres -d channels -c "select status, count(*) from outbox group by status order by status;"
+docker compose --env-file .env.production -f docker-compose.production.yml \
+  --profile integrity run --rm merkle-checkpoint
+
+docker compose --env-file .env.production -f docker-compose.production.yml \
+  --profile integrity run --rm --entrypoint python merkle-checkpoint \
+  -B scripts/demo_merkle_integrity.py
 ```
 
-## What To Say Clearly
-- This is a distributed publish/subscribe system, not just a chat app.
-- PostgreSQL is the source of truth.
-- RabbitMQ, the worker, Redis, and WebSockets are part of the delivery path.
-- Delivery failures are tracked in PostgreSQL, retried by the worker, and dead-lettered after max attempts; the RabbitMQ DLQ is operational evidence, not the source of truth.
-- The audit log hash chain is tamper-evident, not a blockchain or external notarization system.
-- Upload downloads are protected by backend authorization checks.
-- Browser token storage is demo-grade, not production-grade.
+Expected visible results: event hash PASS, Merkle inclusion PASS, checkpoint
+hash PASS, Ed25519 signature PASS, checkpoint chain PASS, and `Tampered proof:
+FAILED (expected)`. Never display the signing private key. Explain that an
+exported latest anchor detects rollback only after it is retained independently;
+this is tamper evidence, not blockchain or immutable storage.
+
+## Useful Evidence Commands
+
+```bash
+docker compose ps -a
+docker compose logs --tail=100 backend worker
+docker compose exec postgres psql -U postgres -d channels \
+  -c "select status, count(*) from outbox group by status order by status;"
+docker compose exec backend python -B -m app.db.crypto_tool status
+python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
+```
+
+For a disposable production stack, the comprehensive data-creating verifier is:
+
+```bash
+python scripts/verify_release_candidate.py --base-url http://localhost:8000/v1
+```
+
+Use its `--mailpit-url`, `--secondary-base-url`, and `--uploads-base-dir`
+options only when those disposable fixtures are configured.
+
+## Five-Minute Fallback Demo
+
+1. Show `docker compose ps -a` and the architecture diagram.
+2. A creates a channel; B joins; A publishes; B receives the message live.
+3. Refresh B to prove persistence and show C denied from the private channel or
+   attachment.
+4. Open Event Log and show hash-chain integrity.
+5. Run `scripts/demo_merkle_integrity.py` through the integrity profile and show
+   the valid signed inclusion proof plus expected tampered-copy failure.
+
+## Statements to Keep Precise
+
+- PostgreSQL—not RabbitMQ or Redis—is the source of truth.
+- Ordering is per channel; there is no global message-order guarantee.
+- RabbitMQ/Redis/WebSocket provide asynchronous realtime delivery; REST sync is
+  durable recovery.
+- Browser access tokens are memory-only; rotating refresh credentials are
+  `HttpOnly`, `Secure`, `SameSite` cookies protected by Origin/CSRF checks.
+- Messages and uploads are encrypted at rest but remain server-decryptable.
+- Signed Merkle checkpoints make audit modification detectable under the stated
+  key/anchor assumptions; they do not make the database immutable.
+- The production profile is a validated single-host university-MVP boundary,
+  not HA, external-KMS, load-tested, or production-certified infrastructure.

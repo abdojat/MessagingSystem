@@ -1,5 +1,27 @@
 # Architecture
 
+## Phase 12 Release Baseline
+
+The final validated topology remains the existing single-host distributed
+publish/subscribe design: FastAPI commits authoritative PostgreSQL state and an
+outbox row; the worker publishes through RabbitMQ, consumes subscriber queues,
+and bridges live events through Redis; FastAPI WebSockets deliver them to the
+Next.js client while REST history/sync supplies durable recovery.
+
+Canonical Python images now install exact wheel-only locks before application
+source, use a digest-pinned Python 3.11 slim base, require no runtime compiler,
+and share BuildKit download caches. A root `.dockerignore` bounds build context.
+The measured cold backend rebuild completed successfully and a source-only warm
+rebuild reused the dependency layer. This resolves the Phase 11 builder caveat
+without changing runtime responsibilities.
+
+The production profile was validated from empty volumes with one-shot
+administrative migration/grant work, a non-superuser runtime database role,
+internal PostgreSQL/RabbitMQ/Redis/backend/worker/frontend networks, and only
+the TLS Nginx edge published on ports 80/443. Normal backend and worker services
+do not receive the Merkle signing private key; it remains confined to the
+explicit `merkle-checkpoint` profile.
+
 ## Platform administration boundary
 
 Global administration is modeled independently from channel membership. `users.is_superadmin` guards `/v1/admin/*`; the admin service aggregates system/channel audit events and controls normal-user account state, sessions, channel soft deletion/restoration, and global delivery recovery. Each mutation writes an audit event. This privilege does not alter RabbitMQ topic membership and does not bypass private message/upload read authorization.

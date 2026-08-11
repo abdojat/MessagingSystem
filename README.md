@@ -2,6 +2,14 @@
 
 University final-year project implementing a secure distributed channel messaging platform with FastAPI, PostgreSQL, RabbitMQ, Redis/WebSocket, worker processing, and Next.js frontend.
 
+Release-candidate status (2026-08-11): the canonical images and complete
+production Compose profile build successfully, fresh migrations reach the
+single Alembic head `0024_phase11_merkle_audit`, the complete backend suite
+passes, and the disposable production-stack scenario verifies the full
+publish/subscribe, identity, storage, presence, and audit path. See the
+[Final Security and Stabilization Report](FINAL_SECURITY_STABILIZATION_REPORT.md)
+for measured evidence and limitations.
+
 ## Architecture Summary
 - Backend API: FastAPI (`backend/`)
 - Worker: outbox + broker fanout (`worker/`)
@@ -40,6 +48,17 @@ docker compose ps -a
 ```
 
 For the deterministic supervisor sequence, use the [Golden Demo Path](docs/DEMO_GUIDE.md#golden-demo-path).
+
+Safe release verification (creates only uniquely named disposable test
+containers and does not touch application volumes):
+
+```bash
+python scripts/verify_release.py
+```
+
+Pass `--production-env-file .env.production` to include production Compose
+rendering. The separate `scripts/verify_release_candidate.py` scenario creates
+disposable application users/channels and is documented in the demo guide.
 
 The command above remains the convenient direct-port development path. For the
 repository's recommended proxy-bounded path, expose only Nginx on port 8080:
@@ -328,6 +347,7 @@ docker compose exec backend sh -lc "cd /app && python -m app.db.crypto_tool stat
 - [Requirements Mapping](docs/REQUIREMENTS_MAPPING.md)
 - [Repository Assessment](REPOSITORY_ASSESSMENT.md)
 - [Phase 11 Merkle Audit Integrity Report](SECURITY_HARDENING_PHASE11_MERKLE_AUDIT_REPORT.md)
+- [Final Security and Stabilization Report](FINAL_SECURITY_STABILIZATION_REPORT.md)
 
 ## Security Notes
 - Password hashing enabled.

@@ -1,5 +1,22 @@
 # Repository Assessment: Distributed Messaging System
 
+## Final Phase 12 Addendum — 2026-08-11
+
+The repository is now a validated release candidate for the defined university
+MVP scope. The canonical backend and complete production Compose builds pass;
+fresh migrations reach the single head `0024_phase11_merkle_audit`; the
+requested focused matrix passes 213 tests and the complete backend passes 352
+tests; frontend typecheck/build and 845-key bilingual locale parity pass. A
+disposable production-stack run proved the complete pub/sub, real local email
+verification/invite, private RBAC, encrypted storage, two-backend presence,
+session, audit, signed Merkle proof/tamper, and external-anchor paths.
+
+This addendum supersedes the earlier Phase 11 canonical-build caveat in the
+current assessment. Historical phase reports remain unchanged. The remaining
+risks are operational: no E2EE, KMS/HSM, automatic independent anchor storage,
+cross-host HA, external SMTP-provider certification, load certification, or
+automated browser suite.
+
 Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
@@ -593,7 +610,7 @@ The frontend is real and fairly complete.
 - On 2026-08-11, Phase 9 focused tests passed `35` cases and the complete backend suite passed `287 tests, 1 warning` against disposable PostgreSQL 16. Frontend typecheck/build and all three Compose renders passed. Real filesystem tests covered multi-megabyte bounded reads, ciphertext marker absence, malformed/tampered framing, exact download, migration crash recovery, idempotency, rotation, and old-key removal. Fresh `->0022` and representative `0021->0022` schema upgrades passed. A fresh production-profile stack passed the complete RabbitMQ/worker/Redis/WebSocket verifier; direct inspection proved encrypted message/upload storage, exact authorized download, Range rejection, idempotent migration reruns, HTTPS health/redirect behavior, and absence of JWT/data keys in the worker.
 - On 2026-08-11, Phase 10 focused tests passed `25 tests, 1 warning` against disposable PostgreSQL 16 and real Redis 7 Lua execution. The requested Phase 2/5/6/8/9/post-repair group plus Phase 10 passed `150 tests, 1 warning`, and the complete backend suite passed `312 tests, 1 warning`. Frontend typecheck/build, 825-key locale alignment, and all three Compose renders passed. Fresh `->0023` and representative `0022->0023` upgrades preserved verified/unverified users, an unresolved invitation, and an immutable existing-user invitation. Capture transport and a disposable Mailpit sink—not an external provider—proved the raw-link and application-to-SMTP boundaries; configuration tests reject production console/capture and plaintext SMTP. An isolated hardened stack passed the full RabbitMQ/worker/Redis/WebSocket demo, authorized encrypted download, ciphertext inspection, and logout-all revocation. The live run exposed and fixed missing inherited proxy identity headers in WebSocket locations; containerized Nginx syntax validation passed afterward.
 
-- On 2026-08-11, Phase 11 focused tests passed `40 tests`; Phase 8-10 passed `73 tests, 1 warning`; and the complete backend suite passed `352 tests, 1 warning`. Frontend typecheck/build and 845-key locale alignment passed. All three Compose renders passed, and rendered production configuration placed the private signing seed only on `merkle-checkpoint`. Live PostgreSQL proved signed proof/anchor/two-batch validation, concurrent non-overlap, payload/root tamper detection, and a 1,024-event checkpoint with a 10-sibling proof (about 229.651 ms checkpoint creation and 0.485 ms offline verification on this host). The deterministic 16-event demo succeeded and rejected its tampered proof copy. An isolated hardened stack passed the full broker/WebSocket verifier. The canonical backend image build stalled twice at the local five-minute builder limit; the live stack therefore used a prior dependency image with the current source/migrations in a disposable image, which is an explicit environment caveat rather than a claimed image-build pass.
+- On 2026-08-11, Phase 11 focused tests passed `40 tests`; Phase 8-10 passed `73 tests, 1 warning`; and the complete backend suite passed `352 tests, 1 warning`. Frontend typecheck/build and 845-key locale alignment passed. All three Compose renders passed, and rendered production configuration placed the private signing seed only on `merkle-checkpoint`. Live PostgreSQL proved signed proof/anchor/two-batch validation, concurrent non-overlap, payload/root tamper detection, and a 1,024-event checkpoint with a 10-sibling proof (about 229.651 ms checkpoint creation and 0.485 ms offline verification on this host). The deterministic 16-event demo succeeded and rejected its tampered proof copy. An isolated hardened stack passed the full broker/WebSocket verifier. At that historical checkpoint the canonical image had not completed within the local builder limit, so the live stack used a prior dependency image with current source/migrations. The final Phase 12 addendum records the later canonical cold/warm build resolution.
 
 ### Practical Testing Plan
 

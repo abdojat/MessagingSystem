@@ -4,7 +4,28 @@ Last updated: 2026-08-11
 
 ## Summary
 
-Security Hardening Phase 11 now satisfies the supervisor's mandatory Merkle-tree requirement without replacing the Phase 10 identity/presence or earlier audit chronology layers. Existing per-scope SHA-256 event chains remain authoritative for chronology; one bounded global Merkle sequence adds compact proofs, Ed25519-signed checkpoint chaining, manual external-anchor export/verification, operator tooling, and a superadmin demonstration UI. External KMS/HSM custody, automatic independent anchor storage, physical secure erasure, backup lifecycle, cross-host HA, and production load/browser automation remain deferred.
+Phase 12 is the final stabilization and release-candidate phase. It preserves
+the Phase 1-11 architecture, resolves the canonical Docker-build caveat, and
+validates the complete production-oriented single-host stack. The supervisor's
+mandatory Merkle-tree requirement remains satisfied by compact proofs,
+Ed25519-signed checkpoint chaining, manual external-anchor
+export/verification, operator tooling, and the superadmin UI. External KMS/HSM
+custody, automatic independent anchor storage, physical secure erasure, backup
+lifecycle, cross-host HA, and production load/browser automation remain
+deferred.
+
+## Final Phase 12 Stabilization - 2026-08-11
+
+| Area | Final status | Evidence | Remaining limitation |
+|---|---|---|---|
+| Canonical build | Passed; Phase 11 caveat resolved | Cold tracked backend build `252.11s`; warm source rebuild `8.78s`; exact wheel-only backend/worker locks; full production Compose build passed | First network download remains environment-dependent |
+| Fresh install and boundary | Passed | Empty volumes; one Alembic head `0024_phase11_merkle_audit`; representative `0023 -> 0024`; TLS/header/CORS/host checks; default credentials rejected; runtime DB escalation denied; only proxy ports published | Single-host profile; operator owns trusted TLS and secret lifecycle |
+| Application scenario | Passed | Real local SMTP/invite verification; private RBAC; live outbox/RabbitMQ/worker/Redis/WebSocket; offline sync; encrypted message/outbox/upload; immutable protected attachment; two-backend presence; replay/logout; audit/removal denial | No external SMTP provider or automated real-browser/load certification |
+| Merkle evidence | Passed | Two linked signed checkpoints; inclusion proof; tampered-copy rejection; offline and database-backed anchor verification | Anchor retention is manual and signing key is environment-managed |
+| Regression | Passed | Requested focused matrix `213 passed`; full backend `352 passed, 2 warnings`; frontend typecheck/build; 845-key locale/placeholder parity; all Compose renders; Nginx syntax | Two upstream deprecation warnings remain |
+
+No additional application-security phase is planned. Future work should be
+driven by deployment requirements.
 
 ## Security Hardening Phase 11 - 2026-08-11
 
@@ -14,7 +35,7 @@ Security Hardening Phase 11 now satisfies the supervisor's mandatory Merkle-tree
 | Signed global checkpoints | Implemented and verified | Migration `0024`; unique leaf snapshots; continuous checkpoint sequence; canonical UTC JSON/hash; exact-key Ed25519 verification and rotation; dedicated PostgreSQL checkpoint advisory lock; atomic batch/leaf commit | Signing-key compromise defeats future signatures; checkpoint availability/HA remains operator-managed | Keep the private seed only in the explicit integrity maintenance service and retain historical public keys |
 | External rollback anchor | Implemented as explicit operator workflow | Safe anchor export, offline signature check, exact database checkpoint/chain verification, and deletion regression | Exporting is not automatic notarization; rollback protection exists only after independent retention | Copy the latest anchor to protected storage outside the database/server on an operating schedule |
 | Admin/API/UI | Implemented | Superadmin-only no-store status/batch/proof endpoints; bilingual integrity card and compact proof-path dialog; no payload/private-key exposure | UI is a compact operator aid, not a full transparency-log explorer | Rehearse the status and one-event proof flow with the supervisor account |
-| Validation | Passed, with one Docker builder caveat | Phase 11 `40 passed`; Phase 8-10 `73 passed, 1 warning`; full backend `352 passed, 1 warning`; frontend typecheck/build; 845-key locale alignment; all Compose renders and rendered secret placement; fresh `->0024`; representative `0023->0024`; live proof/anchor/two-batch/tamper tests; 1,024-event performance run; isolated hardened broker/WebSocket demo | Canonical backend Docker rebuild stalled twice at the local five-minute builder timeout; the live demo used the prior dependency image plus current source/migrations in a disposable image. No application failure occurred. No external KMS/provider/HA/load certification. | Rebuild the canonical image on the presentation host before submission; rerun the full verifier and retain an external anchor |
+| Validation | Phase 11 passed; its canonical-build caveat was resolved by final Phase 12 | Phase 11 `40 passed`; Phase 8-10 `73 passed, 1 warning`; full backend `352 passed, 1 warning`; frontend typecheck/build; 845-key locale alignment; all Compose renders and rendered secret placement; fresh `->0024`; representative `0023->0024`; live proof/anchor/two-batch/tamper tests; 1,024-event performance run; isolated hardened broker/WebSocket demo | At the Phase 11 checkpoint the canonical rebuild had not completed within the local five-minute limit, so that phase used the prior dependency image. Phase 12 removed the unused compiler, added exact wheel locks/cache separation, and completed both cold and warm canonical builds. No external KMS/provider/HA/load certification is claimed. | Use `scripts/verify_release.py`, rehearse the deterministic Merkle demo, and retain an external anchor |
 
 ## Security Hardening Phase 10 - 2026-08-11
 

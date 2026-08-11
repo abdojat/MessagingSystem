@@ -1,0 +1,58 @@
+# Version-control and local editor state
+.git
+.github
+.idea
+.vscode
+.codex
+
+# Local environments and secrets
+.env
+.env.*
+!.env.example
+!.env.production.example
+secrets
+*.key
+*.pem
+
+# Python caches and local environments
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+**/venv
+**/env
+**/.coverage
+**/coverage.xml
+**/htmlcov
+
+# Node/build output
+**/node_modules
+**/.next
+**/out
+**/dist
+**/build
+**/*.tsbuildinfo
+**/npm-debug.log*
+**/pnpm-debug.log*
+
+# Runtime/generated data
+**/*.log
+logs
+tmp
+temp
+.cache
+uploads
+data/uploads
+event-proof.json
+latest-audit-anchor.json
+*.audit-proof.json
+*.audit-anchor.json
+*.sql
+*.dump
+dump.rdb
+
+# OS metadata
+.DS_Store
+Thumbs.db

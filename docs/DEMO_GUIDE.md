@@ -1,5 +1,31 @@
 # Demo Guide
 
+## Phase 12 Release-Candidate Demo
+
+Use `python scripts/verify_release.py` before the presentation for safe
+regression validation. Do not confuse it with
+`scripts/verify_release_candidate.py`: the latter creates demo users, channels,
+messages, invitations, uploads, and audit events and therefore belongs only on
+a disposable/demo stack.
+
+The supervisor-facing Merkle command is:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml \
+  --profile integrity run --rm merkle-checkpoint
+docker compose --env-file .env.production -f docker-compose.production.yml \
+  --profile integrity run --rm --entrypoint python merkle-checkpoint \
+  -B scripts/demo_merkle_integrity.py
+```
+
+The second command displays the batch sequence, leaf count, root, signing key
+ID, selected event/leaf, sibling count, event hash, inclusion proof, checkpoint
+hash, Ed25519 signature, checkpoint chain, and the expected failure of a
+tampered proof copy. It prints no signing private key.
+
+For the concise timed sequence and five-minute fallback, use
+`docs/FINAL_DEMO_CHECKLIST.md`.
+
 ## Golden Demo Path
 
 Run these commands from the repository root unless a step says otherwise.

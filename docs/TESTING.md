@@ -1,5 +1,41 @@
 # Testing
 
+## Phase 12 Final Release Verification (2026-08-11)
+
+Final validation used canonical tracked Dockerfiles and isolated data stores:
+
+- requested focused Phase 2/5/6/7/post-7/8/9/10/11 matrix: `213 passed`;
+- complete backend suite: `352 passed, 2 warnings` (upstream Python/passlib
+  deprecations only);
+- frontend `npm run typecheck` and `npm run build`: passed;
+- English/Arabic JSON, key, and interpolation-placeholder parity: passed for
+  `845` leaf keys per catalog;
+- development, hardened, and production Compose renders: passed;
+- hardened and live production Nginx syntax: passed;
+- fresh migration and representative `0023 -> 0024`: passed at the single
+  Alembic head `0024_phase11_merkle_audit`;
+- disposable production E2E, local Mailpit SMTP, two-backend presence, at-rest
+  marker absence, Merkle proof/tampered-copy/anchor: passed.
+
+The safe repeatable wrapper uses uniquely named disposable PostgreSQL/Redis
+containers and never resets application volumes:
+
+```bash
+python scripts/verify_release.py
+python scripts/verify_release.py --production-env-file .env.production
+```
+
+The data-creating release scenario is intentionally separate and must target a
+disposable stack:
+
+```bash
+python scripts/verify_release_candidate.py --base-url http://localhost:8000/v1
+```
+
+Its optional `--mailpit-url`, `--secondary-base-url`, and
+`--uploads-base-dir` flags enable the captured-mailbox, cross-backend presence,
+and physical ciphertext checks used for the final validation.
+
 ## Phase 1 Security Regression Tests
 
 `backend/tests/security/test_phase1_hardening.py` contains 27 focused regressions covering:

@@ -1,5 +1,30 @@
 # Security
 
+## Phase 12 Final Validation
+
+The final disposable production run confirmed TLS redirect and security
+headers, trusted-host rejection, minimal health exposure, exact-origin CORS,
+default PostgreSQL/RabbitMQ/Redis credential rejection, non-root/read-only
+containers, dropped capabilities, and denial of runtime-role `CREATE ROLE` and
+`CREATE DATABASE`. Only Nginx publishes host ports.
+
+The application scenario additionally confirmed real local SMTP capture and
+pre-registration invite verification, owner/admin/member/outsider RBAC,
+single-use WebSocket tickets, refresh replay-family revocation, logout
+invalidation, encrypted v2 message/outbox envelopes, chunked encrypted upload
+bytes with immutable finalization, protected download, distributed aggregate
+presence across two backends, audit hash-chain integrity, and removed-member
+denial. The signed Merkle checkpoint, inclusion proof, checkpoint chain,
+tampered-copy rejection, and external anchor all verified.
+
+These are defense-in-depth university-MVP controls, not a production security
+certification. The restrained deployment limitations remain: server-side rather
+than end-to-end encryption; environment-managed rather than KMS/HSM-held keys;
+manual independent anchor retention; CSP still permits required inline script
+and style behavior; single-host dependencies without HA; operator-managed
+certificate/SMTP/DNS/backups/monitoring/incident response; and no load or
+automated browser certification.
+
 ## Authentication
 - API routes that expose user, channel, message, event, and upload data require JWT-based authentication.
 - Passwords are hashed with a strong password hashing algorithm in the backend.

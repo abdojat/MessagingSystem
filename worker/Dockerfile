@@ -1,4 +1,5 @@
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff
 
 WORKDIR /app
 
@@ -7,13 +8,12 @@ ENV PIP_DEFAULT_TIMEOUT=180 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/* && \
-    groupadd --gid 10001 messaging && \
+RUN groupadd --gid 10001 messaging && \
     useradd --uid 10001 --gid messaging --create-home --shell /usr/sbin/nologin messaging
 
-COPY worker/pyproject.toml /tmp/pyproject.toml
-RUN python -c "import pathlib, tomllib; data = tomllib.loads(pathlib.Path('/tmp/pyproject.toml').read_text(encoding='utf-8')); deps = data.get('project', {}).get('dependencies', []); pathlib.Path('/tmp/requirements.txt').write_text('\n'.join(deps) + '\n', encoding='utf-8')" && \
-    pip install --no-cache-dir --retries 10 --timeout 180 -r /tmp/requirements.txt
+COPY worker/pyproject.toml worker/requirements.lock /tmp/
+RUN --mount=type=cache,id=messaging-worker-pip,target=/root/.cache/pip \
+    pip install --only-binary=:all: --retries 10 --timeout 180 -r /tmp/requirements.lock
 
 COPY --chown=messaging:messaging worker /app
 
