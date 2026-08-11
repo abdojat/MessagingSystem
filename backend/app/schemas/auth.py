@@ -52,6 +52,15 @@ class TokenPair(BaseModel):
     token_type: str = "bearer"
 
 
+class BrowserAccessTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class BrowserCsrfResponse(BaseModel):
+    csrf_token: str
+
+
 class WebSocketTicketResponse(BaseModel):
     ticket: str
     expires_at: datetime

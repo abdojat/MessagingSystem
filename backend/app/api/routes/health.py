@@ -1,5 +1,6 @@
 import aio_pika
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 from sqlalchemy import text
 
@@ -9,7 +10,16 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health(request: Request) -> dict:
+async def health() -> dict:
+    """Public liveness without infrastructure names or topology details."""
+
+    return {"status": "ok"}
+
+
+@router.get("/ready", response_model=None)
+async def readiness(request: Request) -> JSONResponse:
+    """Internal dependency readiness used by container orchestration only."""
+
     db_ok = False
     redis_ok = False
     amqp_ok = False
@@ -36,4 +46,13 @@ async def health(request: Request) -> dict:
     except Exception:
         amqp_ok = False
 
-    return {"status": "ok", "db": db_ok, "redis": redis_ok, "rabbitmq": amqp_ok}
+    ready = db_ok and redis_ok and amqp_ok
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "status": "ready" if ready else "unavailable",
+            "db": db_ok,
+            "redis": redis_ok,
+            "rabbitmq": amqp_ok,
+        },
+    )

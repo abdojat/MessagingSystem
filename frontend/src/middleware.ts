@@ -6,7 +6,6 @@ import { routing } from "@/config/i18n/routing";
 const handleI18nRouting = createMiddleware(routing);
 
 const AUTH_REQUIRED_PREFIXES = ["/app", "/profile", "/settings"];
-const ADMIN_ONLY_PREFIXES = ["/admin", "/app/admin"];
 
 function normalizeLocalePath(pathname: string): {
   locale: string;
@@ -36,19 +35,17 @@ export default function middleware(request: NextRequest) {
   }
 
   const { locale, routePath } = normalizeLocalePath(request.nextUrl.pathname);
-  const accessToken = request.cookies.get("chat_access_token")?.value;
-  const role = request.cookies.get("chat_user_role")?.value ?? "member";
+  const hasBrowserSession = Boolean(
+    request.cookies.get("__Host-messaging_refresh")?.value ||
+    request.cookies.get("messaging_refresh")?.value,
+  );
 
   // Middleware performs lightweight route gating; backend authorization remains
   // the source of truth for protected channel and admin actions.
-  if (hasMatchingPrefix(routePath, AUTH_REQUIRED_PREFIXES) && !accessToken) {
+  if (hasMatchingPrefix(routePath, AUTH_REQUIRED_PREFIXES) && !hasBrowserSession) {
     const loginUrl = new URL(`/${locale}/login`, request.url);
     loginUrl.searchParams.set("next", request.nextUrl.pathname);
     return NextResponse.redirect(loginUrl);
-  }
-
-  if (hasMatchingPrefix(routePath, ADMIN_ONLY_PREFIXES) && role !== "superadmin") {
-    return NextResponse.redirect(new URL(`/${locale}/app`, request.url));
   }
 
   return i18nResponse;

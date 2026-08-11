@@ -35,6 +35,38 @@ docker compose -f docker-compose.hardened.yml up -d --build
 Open `http://localhost:8080`; only Nginx is published in this topology. The
 direct Compose path remains easier for showing RabbitMQ management locally.
 
+Optional production-boundary demonstration (separate project/volumes):
+
+```bash
+cp .env.production.example .env.production
+# Replace every placeholder and provide external TLS_CERT_PATH/TLS_KEY_PATH.
+docker compose --env-file .env.production -f docker-compose.production.yml config --quiet
+docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.production.yml ps -a
+```
+
+Use a trusted certificate for a real deployment. A disposable self-signed
+certificate is acceptable only for local validation and must remain outside the
+repository. Show that HTTP redirects to HTTPS, `/health` is minimal,
+`/v1/ready` and `/openapi.json` return 404 through Nginx, browser security
+headers appear on HTTPS, and only ports 80/443 have host mappings. Do not confuse
+Docker's internal `5432/tcp`/`6379/tcp` display with host publication; a host
+binding contains `->` and can also be verified with `docker inspect`.
+
+Production backend startup does not migrate or bootstrap a superadmin. The
+one-shot `migrate` dependency must exit 0. If an initial admin is required, set
+the bootstrap values temporarily and run:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml \
+  --profile bootstrap run --rm bootstrap-superadmin
+```
+
+Then remove the bootstrap password from the untracked environment. The normal
+supervisor feature demo remains easier through development Compose; the
+production profile demonstrates the deployment boundary rather than exposing
+RabbitMQ management UI.
+
 Run backend and frontend checks:
 ```bash
 docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"

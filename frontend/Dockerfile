@@ -26,10 +26,15 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/.next/static ./.next/static
-COPY --from=build /app/public ./public
+RUN addgroup -S -g 10001 messaging && adduser -S -u 10001 -G messaging messaging
+
+COPY --from=build --chown=messaging:messaging /app/.next/standalone ./
+COPY --from=build --chown=messaging:messaging /app/.next/static ./.next/static
+COPY --from=build --chown=messaging:messaging /app/public ./public
+RUN mkdir -p /app/.next/cache && chown -R messaging:messaging /app/.next
 
 EXPOSE 3000
+
+USER messaging
 
 CMD ["node", "server.js"]

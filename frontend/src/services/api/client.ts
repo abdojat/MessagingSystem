@@ -1,7 +1,11 @@
 import { useAuthStore } from "@/store/authStore";
 import { getApiBaseUrl } from "@/services/api/runtime";
+import {
+  browserRefreshRequest,
+  type BrowserAccessTokenResponse,
+} from "@/services/auth/browser-session";
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     public status: number,
     public data: unknown,
@@ -36,40 +40,22 @@ async function readApiResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function refreshAccessToken(baseUrl: string): Promise<string> {
+export async function refreshAccessToken(baseUrl: string): Promise<string> {
   if (refreshPromise) {
     return refreshPromise;
   }
 
-  const refreshToken = localStorage.getItem("chat_refresh_token");
-
-  if (!refreshToken) {
-    useAuthStore.getState().clearAuth();
-    throw new ApiError(401, { message: "Unauthorized" });
-  }
-
   refreshPromise = (async () => {
     try {
-      const refreshRes = await fetch(`${baseUrl}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
+      const refreshRes = await browserRefreshRequest(baseUrl);
 
       if (!refreshRes.ok) {
         throw new Error("Refresh failed");
       }
 
-      const data = await refreshRes.json();
-      const user = useAuthStore.getState().user;
-      if (!user) {
-        throw new Error("Missing user while refreshing session");
-      }
-
-      // Store both rotated tokens before replaying requests so every caller sees
-      // the same session state.
-      useAuthStore.getState().setAuth(user, data.access_token, data.refresh_token);
-      return data.access_token as string;
+      const data = (await refreshRes.json()) as BrowserAccessTokenResponse;
+      useAuthStore.getState().setAccessToken(data.access_token);
+      return data.access_token;
     } catch (_error) {
       useAuthStore.getState().clearAuth();
       throw new ApiError(401, { message: "Session expired" });
@@ -96,18 +82,17 @@ export async function apiClient<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(url, { ...options, headers });
+  const response = await fetch(url, { ...options, headers, credentials: "include" });
 
-  if (response.status === 401) {
+  if (response.status === 401 && token) {
     // A 401 usually means the short-lived access token expired. Refresh once,
     // then replay only this request with the new bearer token.
     const newToken = await refreshAccessToken(baseUrl);
     const retryHeaders = new Headers(headers);
     retryHeaders.set("Authorization", `Bearer ${newToken}`);
-    const retryResponse = await fetch(url, { ...options, headers: retryHeaders });
+    const retryResponse = await fetch(url, { ...options, headers: retryHeaders, credentials: "include" });
     return readApiResponse<T>(retryResponse);
   }
 
   return readApiResponse<T>(response);
 }
-

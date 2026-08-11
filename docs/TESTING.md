@@ -205,6 +205,56 @@ warning remains the existing `passlib` access to deprecated
 render checks also passed. Nginx configuration was unchanged, so no new
 `nginx -t` result is claimed for this repair.
 
+## Security Hardening Phase 8
+
+`backend/tests/security/test_phase8_production_hardening.py` contains 13 focused
+tests covering:
+
+- browser login hides refresh JSON and sets an HttpOnly cookie;
+- production `Secure`, `SameSite=Strict`, `Path=/`, host-only cookie behavior;
+- missing/mismatched CSRF and untrusted Origin denial;
+- browser refresh rotation and stale-cookie replay-family revocation;
+- browser logout revocation plus refresh/CSRF cookie clearing;
+- server-side session revocation blocking later browser refresh;
+- development HTTP cookie compatibility and production insecure-cookie refusal;
+- production wildcard-CORS refusal, secure default cookies, production docs off,
+  development docs on, and minimal public liveness;
+- production rejection of plain-HTTP external profile media;
+- static proof that authentication code has no `localStorage`, `sessionStorage`,
+  IndexedDB, persistent Zustand, or old authentication-cookie token storage, and
+  page bootstrap calls the browser refresh flow. The one remaining frontend
+  `persist()`/`localStorage` match is inspected and belongs only to
+  `chatPreferencesStore.ts` UI preferences.
+
+Verified on 2026-08-11 against disposable PostgreSQL 16:
+
+```text
+Phase 8 focused: 13 passed, 1 warning
+Phase 2/4/5/6/7/post-7/8 regression: 128 passed, 1 warning
+Complete backend: 252 passed, 1 warning
+Frontend typecheck: passed
+Frontend production build: passed (Next middleware filename deprecation notice)
+Production Compose config: passed
+Backend/worker/frontend image build: passed
+```
+
+The running production experiment also verified migration exit 0, backend and
+worker operation through the runtime database role, the complete demo verifier,
+UID 10001 application processes, UID 101 proxy, read-only/capability controls,
+default-credential rejection, actual denial of `CREATE DATABASE`/`CREATE ROLE`,
+only Nginx host bindings, HTTP-to-HTTPS redirect, disposable self-signed TLS,
+actual HTTPS security headers/CSP, hidden readiness/docs, and unknown-Host
+rejection. The machine already had an unrelated local PostgreSQL process on host
+port 5432; Docker inspection confirmed the production PostgreSQL container had
+an empty `PortBindings` map. No publicly trusted certificate is claimed.
+
+Run the focused suite:
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_phase8_production_hardening.py
+```
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`

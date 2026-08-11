@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import { MeResponse } from '../types/api';
-import { clearSessionCookies, persistSessionCookies } from '@/services/auth/session-cookie';
 
 interface AuthState {
   user: MeResponse | null;
   accessToken: string | null;
   isAuthenticated: boolean;
   isInitializing: boolean;
-  setAuth: (user: MeResponse, accessToken: string, refreshToken: string) => void;
+  setAuth: (user: MeResponse, accessToken: string) => void;
+  setAccessToken: (accessToken: string | null) => void;
   clearAuth: () => void;
   setInitializing: (val: boolean) => void;
   updateUser: (user: Partial<MeResponse>) => void;
@@ -18,14 +18,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   accessToken: null,
   isAuthenticated: false,
   isInitializing: true,
-  setAuth: (user, accessToken, refreshToken) => {
-    localStorage.setItem('chat_refresh_token', refreshToken);
-    persistSessionCookies(accessToken, user.is_superadmin ? "superadmin" : "member");
-    set({ user, accessToken, isAuthenticated: true, isInitializing: false });
-  },
+  // Access JWTs intentionally live only in this in-memory store. The browser
+  // refresh credential is an HttpOnly server cookie and is never passed here.
+  setAuth: (user, accessToken) => set({ user, accessToken, isAuthenticated: true, isInitializing: false }),
+  setAccessToken: (accessToken) => set({ accessToken }),
   clearAuth: () => {
-    localStorage.removeItem('chat_refresh_token');
-    clearSessionCookies();
     set({ user: null, accessToken: null, isAuthenticated: false, isInitializing: false });
   },
   setInitializing: (val) => set({ isInitializing: val }),

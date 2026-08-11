@@ -15,7 +15,11 @@
 - Login identity and password inputs are capped at 255 and 256 characters; refresh/logout tokens are capped at 2 KiB. Auth limiter keys use a SHA-256 digest of the normalized identity, while failed-login events retain only a 32-character prefix plus its digest and never store supplied passwords or tokens.
 - Ordinary body-bearing HTTP requests have a streaming 128 KiB ASGI boundary before schema parsing, including clients without `Content-Length`. Only the protected upload-content `PUT` is exempt and continues through its separate bounded streaming size/checksum path.
 - Sessions have both a sliding idle deadline (`JWT_REFRESH_TTL_DAYS`, default 14 days) and a non-sliding absolute deadline (`SESSION_ABSOLUTE_TTL_DAYS`, default 30 days).
-- The frontend keeps the access token in a JavaScript-managed cookie and the refresh token in `localStorage`, which is acceptable for this university demo but not production-grade session security.
+- The browser-specific endpoints (`/v1/auth/browser/login`, `/refresh`, `/logout`, and `/csrf`) reuse the same server-side `UserSession`, rotation, replay-family, idle, and absolute-lifetime semantics as the legacy JSON token API. Browser responses never expose a refresh token in JSON.
+- Browser refresh JWTs are stored only in an HttpOnly cookie. Production-like environments use `__Host-messaging_refresh` with `Secure`, `SameSite=Strict`, `Path=/`, and no `Domain`; explicit development/test HTTP uses the non-Secure `messaging_refresh` name. Production refuses `AUTH_COOKIE_SECURE=false`.
+- Browser access JWTs exist only in the in-memory Zustand store. The frontend no longer places access or refresh credentials in `localStorage`, `sessionStorage`, IndexedDB, persistent Zustand state, or JavaScript-readable authentication cookies. Page reload obtains a new memory token through browser refresh.
+- Browser refresh/logout require an allowed exact Origin and a random double-submit CSRF value: the non-HttpOnly CSRF cookie must match `X-CSRF-Token` using constant-time comparison. CSRF rotates with successful refresh. SameSite is an additional layer, not the only CSRF defense.
+- The legacy `/auth/login`, `/refresh`, and `/logout` JSON-token endpoints remain for scripts, tests, and non-browser clients.
 - Authenticated clients obtain a cryptographically random ticket from `POST /auth/ws-ticket`. Redis stores only its hash plus user/session/expiry metadata; atomic `GETDEL` consumption makes the ticket single-use. The default TTL is 30 seconds.
 - WebSocket URLs carry only that short-lived opaque ticket. Raw access JWT query parameters, authorization headers, and first-frame JWT authentication are not accepted.
 - An authenticated socket closes when the access/session authentication lifetime captured by its ticket expires. Logout, session revocation, logout-all, replay detection, and account deactivation publish minimal Redis control events so every listening backend instance can close matching sockets without per-socket database polling.
@@ -38,7 +42,7 @@
 - Message media attachments use the same protected upload route. A message can reference uploaded photo, video, or audio content only after the uploader has stored the bytes; subscribers fetch/play that media through authenticated requests.
 - Publish requests accept only attachment `file_id` references from clients. Filename, content type, size, and protected URL are derived from trusted upload records by the backend before the message is stored.
 - Upload content types are normalized before storage. SVG image uploads are rejected because they are not needed for the multimedia demo and are riskier to render than ordinary photo/video/audio files.
-- Profile avatar, profile wallpaper, and channel avatar uploads stay behind the same authenticated upload route. Stored image URLs are validated to allow only `http`, `https`, or protected upload-content paths; internal uploads must be owned by the updater, already stored, and be non-SVG images.
+- Profile avatar, profile wallpaper, and channel avatar uploads stay behind the same authenticated upload route. Development accepts external `http`/`https`, while production-like environments require HTTPS external media to prevent mixed content. Protected local upload paths remain valid; internal uploads must be owned by the updater, already stored, and be non-SVG images. Direct external HTTPS loads can still reveal the viewer's IP to that remote host.
 - Avatar and wallpaper upload downloads have explicit access rules: profile avatars are visible to authenticated users, profile wallpapers are visible to the owning user, public channel avatars are visible to authenticated users, and private channel avatars are visible only to approved channel members or the upload owner.
 - Unauthorized publish/read attempts are logged as security events.
 - `/sync` membership backfill is limited to approved channels the caller can currently read, plus membership events whose `user_id`/`target_user_id` is the caller. This preserves a removed user's own removal notification without exposing unrelated channel membership activity.
@@ -65,7 +69,7 @@
 ### Global superadmin
 - `users.is_superadmin` is a separate platform privilege; it is not a channel membership role and cannot be requested through registration or profile APIs.
 - `/v1/admin/*` requires the dedicated `SuperadminDep` authorization dependency. Denied attempts are logged as `security.superadmin_access_denied`.
-- The frontend's `chat_user_role` cookie only redirects navigation for convenience and is not trusted for authorization; every admin API re-loads the user from the signed access token and database.
+- The frontend no longer persists an access token or role cookie for navigation. Client routing is convenience only; every admin API re-loads the user/session from the memory bearer token and database.
 - Global console list/overview responses send `Cache-Control: no-store` and `Pragma: no-cache` so browsers and intermediary caches are instructed not to retain privileged data.
 - Superadmin React Query entries use immediate garbage-collection after their final observer unmounts, limiting privileged data retention in the SPA's in-memory query cache.
 - The initial account is created only when `SUPERADMIN_USERNAME` and `SUPERADMIN_PASSWORD` are explicitly configured. The password must contain at least 12 characters, and bootstrap refuses to promote an existing normal account with the same username/email.
@@ -91,6 +95,19 @@
 - A local `.env` file may be used for development, but it should remain untracked.
 - In the current repository state, `git ls-files` does not show any tracked `.env` file.
 - `ENVIRONMENT` is required and normalized; missing or empty values fail configuration instead of selecting a default. Only `dev`, `development`, `local`, and `test` opt into development secret behavior. Every other normalized label is production-like, so values such as `live`, `release`, `prod-eu`, or an arbitrary typo refuse startup when `JWT_SECRET` is absent/placeholder/weak or when enabled message encryption lacks a valid Fernet key. The deterministic development Fernet fallback is therefore unreachable unless a development-like environment is explicitly selected.
+- `.env.production.example` contains placeholders only. Production Compose requires explicit PostgreSQL admin/runtime, RabbitMQ, Redis, JWT, Fernet, public-host, and TLS-path values through `${VARIABLE:?required}` interpolation. `.env.production`, `secrets/`, `*.key`, and `*.pem` remain ignored.
+- Production PostgreSQL uses a one-shot admin/migration credential and a separate application role shared by backend/worker. The role is forced `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION` and receives maintainable schema/table/sequence runtime grants. Stronger backend/worker role separation remains future work.
+- Production RabbitMQ has an explicit non-default user and no published management/AMQP port. Redis requires a password and has no published port. Internal AMQP/Redis transport remains plaintext inside the host-local private Docker network; no claim of internal TLS is made.
+
+## Production boundary
+
+- `docker-compose.yml` is development-only. `docker-compose.hardened.yml` is an HTTP hardened local/demo path. `docker-compose.production.yml` is the TLS production-oriented single-host path.
+- Production backend startup is Uvicorn-only. A one-shot `migrate` service runs Alembic/schema repair and grants runtime permissions before backend/worker start. Superadmin creation is an explicit `bootstrap` profile and is not attempted by normal production startup.
+- Backend, worker, and frontend run as UID 10001. The unprivileged Nginx proxy runs as UID 101. These containers use read-only root filesystems, `no-new-privileges`, all capabilities dropped, and narrow uploads/cache/tmpfs write locations.
+- Only Nginx publishes host ports 80/443. Stateful services and application ports stay on the internal Docker network. Nginx redirects HTTP to HTTPS, accepts externally mounted certificate/key files, supports WebSocket upgrades, applies connection/body/header/time limits, and rejects unknown hosts.
+- HTTPS responses set HSTS, `nosniff`, strict referrer policy, a restrictive permissions policy, `X-Frame-Options: DENY`, and CSP with `frame-ancestors 'none'`, `object-src 'none'`, and `base-uri 'self'`. Next.js currently requires `'unsafe-inline'` for framework bootstrap scripts and inline styles in this deployment; `unsafe-eval` is not enabled. Nonce integration is future tightening.
+- `/health` is public minimal liveness only. `/ready` contains dependency booleans for internal orchestration and is blocked by the production proxy. Production application docs default off and Nginx also blocks their public paths.
+- Production credentialed CORS rejects `*` and non-HTTPS origins; an empty list remains a safe same-origin policy. `TrustedHostMiddleware` and Nginx `server_name` enforce configured hosts.
 
 ## Database lock ordering
 
@@ -155,8 +172,8 @@
 This protects against accidental or unauthorized event modification, insertion, reordering, or deletion that breaks links between remaining events being silently missed by the application verifier. Tail truncation requires an external remembered last hash to prove. It does not replace database access control, backups, monitoring, or secret management. It is not a blockchain, not external notarization, and not a full Merkle-tree proof. A database administrator with full write access could recompute a forged chain unless event hashes are anchored outside the database.
 
 ## Known Limitations
-- This project is a university MVP, not a production-hardened identity or secret-management platform.
-- Browser token storage remains demo-oriented: JavaScript can read the access/refresh credentials, so the project does not claim an httpOnly-cookie/CSRF-hardened production session architecture. WebSocket transport itself uses short-lived one-time tickets rather than access JWT URLs.
+- This project is a production-oriented single-host university MVP, not an enterprise identity, HA, backup, or secret-management platform.
+- Browser refresh credentials are HttpOnly and access tokens are memory-only, but no automated Playwright/browser suite currently exercises the complete UI cookie lifecycle. Focused backend tests and static frontend inspection cover the boundary. WebSocket transport continues to use short-lived one-time tickets rather than access JWT URLs.
 - The project does not claim end-to-end encryption; it uses server-side encryption at rest.
 - There is no automatic encryption-key rotation or historical-key ring. Replacing `MESSAGE_ENCRYPTION_KEY` makes existing encrypted message bodies unreadable; retain the original key or migrate ciphertext deliberately before rotating it.
 - Event integrity is tamper-evident inside PostgreSQL, but it does not prove that the database itself was never rewritten by a fully privileged operator.
@@ -164,6 +181,8 @@ This protects against accidental or unauthorized event modification, insertion, 
 - Successful upload access logging is best-effort so a temporary audit-log failure does not break protected media playback; unauthorized access logging still blocks the request with `403 Forbidden`.
 - Protected upload-backed avatars, wallpapers, and message media are fetched by the frontend with the bearer token and rendered through temporary object URLs. This is suitable for the local demo, but it is not a production CDN/media pipeline.
 - Upload attachments are protected and immutable after storage, but their file bytes are not encrypted by the message-body Fernet layer; attachment encryption remains future work.
+- Secrets are injected through required environment values rather than a managed secret store. External KMS integration, advanced message-key rotation, attachment encryption, and automatic credential rotation remain future work.
+- PostgreSQL/RabbitMQ/Redis are single instances with named volumes. Production operators still need backup/restore procedures, monitoring, upgrades, capacity tuning, and HA appropriate to their environment.
 - Superadmin activity is application-audited but does not replace external administrator monitoring, MFA, a hardware-backed secret store, or separation-of-duties controls.
 - Cross-instance socket termination is best-effort realtime control. If Redis is unavailable during revocation, the database revocation still commits and blocks subsequent HTTP authentication, refresh, ticket validation, and reconnects, but a socket on another instance may remain until its captured authentication expiry.
 - Emergency rate limiting and concurrent WebSocket quotas are per backend process when Redis/distributed coordination is unavailable; they are high-value MVP controls, not a billing-grade global quota service.

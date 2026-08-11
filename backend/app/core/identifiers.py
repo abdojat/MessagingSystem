@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from app.core.errors import AppError
+from app.core.config import get_settings
 
 # These rules keep user-facing identifiers safe for RabbitMQ routing keys, Redis
 # channel names, and URL paths where wildcard characters would be dangerous.
@@ -100,6 +101,8 @@ def normalize_profile_image_url(value: str | None, *, field_name: str = "image_u
             raise ValueError(f"{field_name} must use http, https, or a protected upload path")
         if not parsed.netloc:
             raise ValueError(f"{field_name} must include a host")
+        if parsed.scheme.lower() == "http" and get_settings().is_production_like:
+            raise ValueError(f"{field_name} must use https in production-like environments")
         return normalized
 
     if parsed.netloc or normalized.startswith("//"):

@@ -6,6 +6,7 @@ const withNextIntl = createNextIntlPlugin("./src/config/i18n/request.ts");
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  poweredByHeader: false,
 };
 
 export default withNextIntl(nextConfig);

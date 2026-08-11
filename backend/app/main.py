@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes import admin, auth, channels, delivery, events, health, memberships, messages, users
 from app.core.client_ip import get_client_ip
@@ -60,8 +61,15 @@ async def lifespan(app: FastAPI):
         await amqp.close()
 
 
-app = FastAPI(title="Channels Backend", version="0.1.0", lifespan=lifespan)
 settings = get_settings()
+app = FastAPI(
+    title="Channels Backend",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url="/docs" if settings.api_docs_enabled else None,
+    redoc_url="/redoc" if settings.api_docs_enabled else None,
+    openapi_url="/openapi.json" if settings.api_docs_enabled else None,
+)
 app.add_middleware(RequestBodyLimitMiddleware, max_body_bytes=settings.api_request_body_max_bytes)
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +78,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 
 # Keep both prefixed and legacy unprefixed routes available; newer docs use
 # /v1, while older demo scripts and supervisor bookmarks may still hit /auth.

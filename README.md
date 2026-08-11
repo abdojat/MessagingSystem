@@ -10,6 +10,7 @@ University final-year project implementing a secure distributed channel messagin
 - Realtime: Redis + WebSocket
 - Frontend: Next.js (`frontend/`)
 - Recommended hardened HTTP path: Nginx (`docker-compose.hardened.yml`) in front of the unexposed backend/frontend
+- Production-oriented path: TLS Nginx edge plus private authenticated state services, one-shot migrations, runtime PostgreSQL role, and restricted non-root application containers (`docker-compose.production.yml`)
 - Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
 - Abuse resistance: atomic Redis/local-fallback rate limits, WebSocket frame/command/history budgets, message/protocol bounds, account quotas, bounded RabbitMQ user queues, and paced Redis fanout retries
 - Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
@@ -49,6 +50,35 @@ Redis, backend, and frontend ports inside the Docker network. It adds request
 body/header bounds, connection limits, buffering, and inactivity timeouts; it
 does not add TLS or make the full deployment production-ready.
 
+### Production-oriented single-host path
+
+`docker-compose.production.yml` is separate from both local workflows. Copy
+`.env.production.example` to an untracked `.env.production`, replace every
+placeholder with a URL-safe random value, and supply a TLS certificate/private
+key from operator-controlled paths. Then run:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml config --quiet
+docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.production.yml ps -a
+```
+
+Only host ports 80/443 are published. HTTP redirects to HTTPS. PostgreSQL,
+RabbitMQ, Redis, backend, worker, and frontend remain private. The one-shot
+`migrate` service applies Alembic/schema repair and grants the non-superuser
+runtime role before backend/worker start; normal backend startup runs only
+Uvicorn. Initial superadmin provisioning is explicit:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml \
+  --profile bootstrap run --rm bootstrap-superadmin
+```
+
+Do not retain `SUPERADMIN_PASSWORD` after provisioning. TLS files and
+`.env.production` must remain untracked. This profile is production-oriented
+for the single-host university MVP; it is not an HA, managed-KMS, or
+enterprise-orchestrated deployment.
+
 ## Environment Variables
 See `.env.example`.
 Important:
@@ -69,6 +99,9 @@ Important:
 - `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, and `MAX_WEBSOCKET_CONNECTIONS_PER_USER`
 - `MAX_CONCURRENT_DOWNLOADS_PER_USER` (3), `MAX_CONCURRENT_DOWNLOADS_PER_IP` (12), and `MAX_CONCURRENT_DOWNLOADS_GLOBAL` (100) atomically bound protected streams in each backend process
 - `TRUSTED_PROXY_CIDRS` is empty in direct mode; set it only to explicit proxy peers that overwrite `X-Forwarded-For` (the hardened Compose file supplies its fixed proxy `/32`)
+- `AUTH_COOKIE_SECURE` is derived safely from `ENVIRONMENT` when omitted; production-like environments use Secure `__Host-` refresh/CSRF cookies and reject an explicit false value
+- `TRUSTED_HOSTS` controls FastAPI Host validation; production Compose also rejects unknown hosts at Nginx
+- `ENABLE_API_DOCS` defaults on only for explicit development/test environments and off for production-like environments
 - `WS_MEMBERSHIP_AUTH_CACHE_TTL_SECONDS` (default `1.0`; short fallback window for matching/older realtime membership generations)
 - `RABBIT_USER_QUEUE_EXPIRES_MS`, `RABBIT_USER_QUEUE_MESSAGE_TTL_MS`, `RABBIT_USER_QUEUE_MAX_LENGTH`; PostgreSQL/REST sync remains authoritative after realtime queue expiry/eviction
 - `REDIS_FANOUT_MAX_ATTEMPTS`, `REDIS_FANOUT_INITIAL_RETRY_DELAY_SECONDS`, `REDIS_FANOUT_MAX_RETRY_DELAY_SECONDS`
@@ -85,6 +118,7 @@ Development note:
 - Every other environment label, including unknown deployment aliases, is production-like: startup rejects missing/default/weak JWT secrets and a missing or invalid Fernet key while message encryption is enabled.
 - Access JWTs are bound to their database session. Logout, explicit revocation, logout-all, replay detection, absolute expiry, and account deactivation invalidate later HTTP authentication immediately.
 - WebSocket clients obtain a short-lived, one-time opaque ticket with `POST /auth/ws-ticket`; long-lived access JWTs are not accepted in WebSocket URLs. Redis control events close matching sockets across backend instances when Redis is available.
+- Browser clients use `/auth/browser/login`, `/refresh`, `/logout`, and `/csrf`: the access JWT exists only in the in-memory Zustand store, the rotating refresh JWT is an HttpOnly cookie, and refresh/logout require an allowed Origin plus a constant-time double-submit CSRF check. Legacy JSON token endpoints remain available for scripts and non-browser clients.
 - Established sockets use per-socket weighted command and history-row token buckets. Subscribe/resume history is capped globally per command, identical subscribe/cursor requests do not refetch history, and inbound dispatch remains one command at a time. These budgets are per backend process/socket, not a distributed global quota.
 - Generic invite links are reusable until revoked, expired, or their channel is deleted. Targeted invites are one-use and accept/revoke/delete ordering is serialized through PostgreSQL row locks. Existing-account email targets resolve once to immutable `user_id`; unresolved pre-registration email targets require verified ownership of the normalized email. Changing an account email clears verification. The repository intentionally does not implement email delivery/verification issuance, so a deployment must supply that trusted completion flow before unresolved email invites can be accepted.
 - Membership topology is stored as versioned desired state in PostgreSQL and snapshotted through the outbox. The worker locks the user/channel state, rejects stale generations, re-derives current authorization, removes obsolete slug bindings, and retries a complete idempotent projection. Run `python -m app.db.reconcile_broker_bindings` in the backend environment to enqueue a full repair from PostgreSQL.
@@ -95,7 +129,7 @@ Development note:
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-To create the initial superadmin, set `SUPERADMIN_USERNAME` and a unique 12+ character `SUPERADMIN_PASSWORD` in the untracked `.env` before startup. `SUPERADMIN_EMAIL` is optional. Startup creates the account once and never resets its password or auto-promotes an existing normal account. After login, open `/app/admin` or use the shield link in the sidebar. Remove the bootstrap password from `.env` after the account has been created if automatic recreation is not needed.
+For development/demo Compose, set `SUPERADMIN_USERNAME` and a unique 12+ character `SUPERADMIN_PASSWORD` in the untracked `.env` before startup. Production does not bootstrap during backend startup; use the explicit profile command above. `SUPERADMIN_EMAIL` is optional. Bootstrap never resets a password or auto-promotes an existing normal account.
 
 ## Migrations
 ```bash
@@ -185,10 +219,10 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
   - Distributed pub/sub delivery through PostgreSQL outbox, RabbitMQ, worker processing, Redis fanout, and WebSocket push. The live flow is exercised by the demo verifier and approval verifier, including join-after-connect and approval-after-connect WebSocket resubscribe paths, but there is still no broad CI suite around it.
   - Delivery reliability monitoring with retry scheduling, dead-letter status, admin APIs, frontend Delivery Monitor, and a controlled verifier for normal publish plus manual retry. Full broker-outage CI coverage remains future work.
   - Event audit integrity with a per-scope SHA-256 hash chain. This is tamper-evident, not external notarization; legacy rows need explicit backfill before they verify as initialized.
-- Demo-grade:
-  - Frontend token handling. Access tokens are kept in a JavaScript-managed cookie and refresh tokens are kept in `localStorage`, which is acceptable for a university demo but not production-grade session security.
+- Production-oriented browser boundary:
+  - Browser access tokens are memory-only, refresh tokens are rotating HttpOnly cookies, refresh/logout use Origin plus double-submit CSRF validation, and WebSockets continue to use one-time opaque tickets. The legacy JSON token API remains available for non-browser clients.
 - Future work:
-  - Frontend automated smoke tests, richer operational observability, a cleaner production session strategy, and any advanced features beyond the MVP.
+  - Frontend automated browser smoke tests, richer operational observability, managed secret/KMS integration, HA/backups, and advanced features beyond the MVP.
 
 ## Final Submission Docs
 - [Final MVP Status](docs/FINAL_MVP_STATUS.md)

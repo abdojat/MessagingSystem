@@ -1,13 +1,22 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.api.deps import CurrentAuthDep, CurrentUserDep, DBDep, RedisDep
 from app.core.client_ip import get_client_ip
+from app.core.browser_security import (
+    clear_browser_auth_cookies,
+    set_browser_auth_cookies,
+    set_csrf_cookie,
+    validate_browser_csrf,
+    validate_browser_origin,
+)
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
 from app.core.utils import sha256_hex
 from app.schemas.auth import (
+    BrowserAccessTokenResponse,
+    BrowserCsrfResponse,
     LoginRequest,
     LogoutAllResponse,
     LogoutRequest,
@@ -89,6 +98,63 @@ async def login(req: LoginRequest, db: DBDep, request: Request, redis: RedisDep)
         raise to_http_exception(exc) from exc
 
 
+@router.post("/browser/login", response_model=BrowserAccessTokenResponse)
+async def browser_login(
+    req: LoginRequest,
+    db: DBDep,
+    request: Request,
+    response: Response,
+    redis: RedisDep,
+) -> BrowserAccessTokenResponse:
+    """Create the existing server-side session without exposing refresh JSON."""
+
+    settings = get_settings()
+    ip = get_client_ip(request)
+    try:
+        validate_browser_origin(request, settings)
+        await _enforce_auth_rate_limits(redis, "browser-login", ip, req.username_or_email)
+        pair = await AuthService.login(
+            db,
+            req,
+            user_agent=request.headers.get("user-agent"),
+            ip=ip,
+            refresh_ttl_days=settings.jwt_refresh_ttl_days,
+            absolute_ttl_days=settings.session_absolute_ttl_days,
+        )
+    except AppError as exc:
+        if exc.code == "AUTH_INVALID":
+            await log_event(
+                db,
+                "security.login_failed",
+                {
+                    "identity_prefix": req.username_or_email.strip().lower()[:32],
+                    "identity_sha256": sha256_hex(req.username_or_email.strip().lower()),
+                    "ip": ip,
+                },
+                channel_id=None,
+                actor_user_id=None,
+            )
+            await db.commit()
+        raise to_http_exception(exc) from exc
+
+    set_browser_auth_cookies(response, pair.refresh_token, settings=settings)
+    return BrowserAccessTokenResponse(access_token=pair.access_token)
+
+
+@router.get("/browser/csrf", response_model=BrowserCsrfResponse)
+async def browser_csrf(request: Request, response: Response) -> BrowserCsrfResponse:
+    settings = get_settings()
+    # Same-origin GET requests do not consistently carry Origin. If it is
+    # present, however, never let an untrusted site plant browser state.
+    if request.headers.get("origin"):
+        try:
+            validate_browser_origin(request, settings)
+        except AppError as exc:
+            raise to_http_exception(exc) from exc
+    token = set_csrf_cookie(response, settings=settings)
+    return BrowserCsrfResponse(csrf_token=token)
+
+
 @router.post("/refresh", response_model=TokenPair)
 async def refresh(req: RefreshRequest, db: DBDep, request: Request, redis: RedisDep) -> TokenPair:
     settings = get_settings()
@@ -118,6 +184,46 @@ async def refresh(req: RefreshRequest, db: DBDep, request: Request, redis: Redis
         ) from exc
 
 
+@router.post("/browser/refresh", response_model=BrowserAccessTokenResponse)
+async def browser_refresh(
+    db: DBDep,
+    request: Request,
+    response: Response,
+    redis: RedisDep,
+) -> BrowserAccessTokenResponse:
+    settings = get_settings()
+    ip = get_client_ip(request)
+    try:
+        cookie_pair = validate_browser_csrf(request, settings)
+        await _enforce_auth_rate_limits(redis, "browser-refresh", ip, ip)
+        pair = await AuthService.refresh(
+            db,
+            cookie_pair.refresh_token,
+            user_agent=request.headers.get("user-agent"),
+            ip=ip,
+            refresh_ttl_days=settings.jwt_refresh_ttl_days,
+        )
+    except RefreshTokenReplayError as exc:
+        await dispatch_auth_control(
+            redis,
+            request.app.state.ws_manager,
+            AuthControlEvent.for_session(exc.revocation),
+        )
+        raise to_http_exception(exc) from exc
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "AUTH_EXPIRED", "message": str(exc), "details": None},
+        ) from exc
+
+    # Refresh and CSRF cookies rotate together. Only the short-lived access JWT
+    # is returned to JavaScript and it remains memory-only in the web client.
+    set_browser_auth_cookies(response, pair.refresh_token, settings=settings)
+    return BrowserAccessTokenResponse(access_token=pair.access_token)
+
+
 @router.post("/logout")
 async def logout(req: LogoutRequest, db: DBDep, request: Request, redis: RedisDep) -> dict:
     try:
@@ -137,6 +243,32 @@ async def logout(req: LogoutRequest, db: DBDep, request: Request, redis: RedisDe
             status_code=401,
             detail={"code": "AUTH_EXPIRED", "message": str(exc), "details": None},
         ) from exc
+    return {"status": "ok"}
+
+
+@router.post("/browser/logout")
+async def browser_logout(db: DBDep, request: Request, response: Response, redis: RedisDep) -> dict:
+    settings = get_settings()
+    try:
+        cookie_pair = validate_browser_csrf(request, settings)
+        revocation = await AuthService.logout(db, cookie_pair.refresh_token)
+        await dispatch_auth_control(redis, request.app.state.ws_manager, AuthControlEvent.for_session(revocation))
+    except RefreshTokenReplayError as exc:
+        await dispatch_auth_control(
+            redis,
+            request.app.state.ws_manager,
+            AuthControlEvent.for_session(exc.revocation),
+        )
+        raise to_http_exception(exc) from exc
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "AUTH_EXPIRED", "message": str(exc), "details": None},
+        ) from exc
+
+    clear_browser_auth_cookies(response, settings=settings)
     return {"status": "ok"}
 
 
@@ -160,9 +292,18 @@ async def list_sessions(db: DBDep, user: CurrentUserDep) -> SessionListResponse:
 
 
 @router.post("/logout_all", response_model=LogoutAllResponse)
-async def logout_all(db: DBDep, user: CurrentUserDep, request: Request, redis: RedisDep) -> LogoutAllResponse:
+async def logout_all(
+    db: DBDep,
+    user: CurrentUserDep,
+    request: Request,
+    response: Response,
+    redis: RedisDep,
+) -> LogoutAllResponse:
     revocation = await AuthService.logout_all(db, user.id)
     await dispatch_auth_control(redis, request.app.state.ws_manager, AuthControlEvent.for_user(revocation))
+    # The access token authorizes this endpoint, so clearing the current
+    # browser's stale cookies does not introduce cookie-derived authority.
+    clear_browser_auth_cookies(response)
     return LogoutAllResponse(revoked_count=revocation.revoked_count)
 
 

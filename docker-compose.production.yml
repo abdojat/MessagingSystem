@@ -1,0 +1,258 @@
+name: messaging-production
+
+x-backend-environment: &backend-environment
+  ENVIRONMENT: production
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:?POSTGRES_APP_USER required}:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD required}@postgres:5432/${POSTGRES_DB:-channels}
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:?RABBITMQ_USER required}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD required}@rabbitmq:5672/
+  REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379/0
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+  MESSAGE_ENCRYPTION_ENABLED: "true"
+  MESSAGE_ENCRYPTION_KEY: ${MESSAGE_ENCRYPTION_KEY:?MESSAGE_ENCRYPTION_KEY required}
+  AUTH_COOKIE_SECURE: "true"
+  ENABLE_API_DOCS: "false"
+  CORS_ORIGINS: '["https://${PUBLIC_HOST:?PUBLIC_HOST required}"]'
+  TRUSTED_HOSTS: '["${PUBLIC_HOST:?PUBLIC_HOST required}","localhost","backend"]'
+  TRUSTED_PROXY_CIDRS: '["172.30.0.10/32"]'
+  UPLOADS_BASE_DIR: /data/uploads
+  PYTHONDONTWRITEBYTECODE: "1"
+
+x-app-restrictions: &app-restrictions
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-channels}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:?POSTGRES_ADMIN_USER required}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD required}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:?POSTGRES_APP_USER required}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD required}
+    volumes:
+      - production_pg_data:/var/lib/postgresql/data
+      - ./deploy/postgres/init-app-role.sh:/docker-entrypoint-initdb.d/10-init-app-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [internal]
+    pids_limit: 200
+    mem_limit: 768m
+    cpus: 1.0
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?RABBITMQ_USER required}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD required}
+    volumes:
+      - production_rabbit_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [internal]
+    pids_limit: 300
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - production_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [internal]
+    pids_limit: 100
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      <<: *backend-environment
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_ADMIN_USER:?POSTGRES_ADMIN_USER required}:${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD required}@postgres:5432/${POSTGRES_DB:-channels}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:?POSTGRES_APP_USER required}
+    command: >-
+      sh -c "alembic upgrade head && python -m app.db.bootstrap_schema &&
+      python -m app.db.grant_runtime_role"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+    <<: *app-restrictions
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=64m,uid=10001,gid=10001,mode=1777
+    pids_limit: 150
+    mem_limit: 512m
+    cpus: 1.0
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      <<: *backend-environment
+    command: >-
+      sh -c "exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+      --ws-max-size $${WS_MAX_INBOUND_MESSAGE_BYTES:-16384}"
+    volumes:
+      - production_uploads_data:/data/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=3)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [internal]
+    <<: *app-restrictions
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=64m,uid=10001,gid=10001,mode=1777
+    pids_limit: 200
+    mem_limit: 768m
+    cpus: 1.5
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      <<: *backend-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [internal]
+    <<: *app-restrictions
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=64m,uid=10001,gid=10001,mode=1777
+    pids_limit: 200
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /v1
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: /v1
+      NODE_ENV: production
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+    <<: *app-restrictions
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=64m,uid=10001,gid=10001,mode=1777
+      - /app/.next/cache:rw,nosuid,size=64m,uid=10001,gid=10001,mode=0700
+    pids_limit: 200
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?PUBLIC_HOST required}
+      NGINX_ENVSUBST_FILTER: ^PUBLIC_HOST$
+    ports:
+      - "${HTTP_PORT:-80}:8080"
+      - "${HTTPS_PORT:-443}:8443"
+    volumes:
+      - ./deploy/nginx/templates/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${TLS_CERT_PATH:?TLS_CERT_PATH required}:/etc/nginx/tls/tls.crt:ro
+      - ${TLS_KEY_PATH:?TLS_KEY_PATH required}:/etc/nginx/tls/tls.key:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    networks:
+      edge: {}
+      internal:
+        ipv4_address: 172.30.0.10
+    <<: *app-restrictions
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=64m,uid=101,gid=101,mode=1777
+      - /etc/nginx/conf.d:rw,nosuid,noexec,size=1m,uid=101,gid=101,mode=0700
+    pids_limit: 100
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+
+  bootstrap-superadmin:
+    profiles: ["bootstrap"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      <<: *backend-environment
+      SUPERADMIN_USERNAME: ${SUPERADMIN_USERNAME:-}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-}
+    command: ["python", "-m", "app.db.bootstrap_superadmin"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+    <<: *app-restrictions
+    tmpfs:
+      - /tmp:rw,nosuid,noexec,size=64m,uid=10001,gid=10001,mode=1777
+    pids_limit: 100
+    mem_limit: 384m
+    cpus: 0.5
+    restart: "no"
+
+networks:
+  edge: {}
+  internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  production_pg_data:
+  production_rabbit_data:
+  production_redis_data:
+  production_uploads_data:

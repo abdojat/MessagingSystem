@@ -2,7 +2,8 @@ from functools import lru_cache
 import base64
 from ipaddress import ip_network
 import json
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -96,7 +97,18 @@ class Settings(BaseSettings):
     redis_fanout_max_retry_delay_seconds: float = Field(default=5.0, ge=0.05, le=300)
 
     log_level: str = "INFO"
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    # An empty production list is a safe same-origin policy. Development
+    # Compose supplies its explicit localhost origins through .env.
+    cors_origins: list[str] = Field(default_factory=list)
+    trusted_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1", "testserver"])
+    # None means derive from the explicit environment: secure in every
+    # production-like environment and insecure only for explicit local/test
+    # labels. Production may never explicitly opt out of Secure cookies.
+    auth_cookie_secure: bool | None = None
+    auth_cookie_samesite: Literal["strict", "lax"] = "strict"
+    # Development retains interactive docs. Production-like environments
+    # disable them unless an operator deliberately enables them.
+    enable_api_docs: bool | None = None
     upload_max_size_bytes: int = 25 * 1024 * 1024
     # Applied by streaming ASGI middleware to ordinary HTTP request bodies.
     # Upload-content PUTs are exempt because their separate streaming service
@@ -129,7 +141,26 @@ class Settings(BaseSettings):
                 except json.JSONDecodeError:
                     pass
             return [part.strip() for part in raw.split(",") if part.strip()]
-        return ["http://localhost:3000", "http://localhost:5173"]
+        return []
+
+    @field_validator("trusted_hosts", mode="before")
+    @classmethod
+    def _parse_trusted_hosts(cls, value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip().lower() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return [str(item).strip().lower() for item in parsed if str(item).strip()]
+                except json.JSONDecodeError:
+                    pass
+            return [part.strip().lower() for part in raw.split(",") if part.strip()]
+        raise ValueError("TRUSTED_HOSTS must be a JSON list or comma-separated hostnames")
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -166,6 +197,25 @@ class Settings(BaseSettings):
         if self.environment in DEVELOPMENT_ENVIRONMENTS:
             return self
 
+        if self.auth_cookie_secure is False:
+            raise ValueError("AUTH_COOKIE_SECURE cannot be disabled in production-like environments")
+
+        for origin in self.cors_origins:
+            if origin == "*":
+                raise ValueError("credentialed wildcard CORS is forbidden in production-like environments")
+            parsed_origin = urlsplit(origin)
+            if (
+                parsed_origin.scheme.lower() != "https"
+                or not parsed_origin.netloc
+                or parsed_origin.path not in {"", "/"}
+                or parsed_origin.query
+                or parsed_origin.fragment
+            ):
+                raise ValueError("production CORS origins must be explicit HTTPS origins")
+
+        if not self.trusted_hosts or "*" in self.trusted_hosts:
+            raise ValueError("TRUSTED_HOSTS must be explicit in production-like environments")
+
         jwt_secret = self.jwt_secret.strip()
         if not jwt_secret:
             raise ValueError("JWT_SECRET is required in production-like environments")
@@ -189,6 +239,34 @@ class Settings(BaseSettings):
                 raise ValueError("MESSAGE_ENCRYPTION_KEY must be a valid Fernet key")
 
         return self
+
+    @property
+    def is_development_like(self) -> bool:
+        return self.environment in DEVELOPMENT_ENVIRONMENTS
+
+    @property
+    def is_production_like(self) -> bool:
+        return not self.is_development_like
+
+    @property
+    def browser_cookie_secure(self) -> bool:
+        if self.auth_cookie_secure is not None:
+            return self.auth_cookie_secure
+        return self.is_production_like
+
+    @property
+    def browser_refresh_cookie_name(self) -> str:
+        return "__Host-messaging_refresh" if self.browser_cookie_secure else "messaging_refresh"
+
+    @property
+    def browser_csrf_cookie_name(self) -> str:
+        return "__Host-messaging_csrf" if self.browser_cookie_secure else "messaging_csrf"
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        if self.enable_api_docs is not None:
+            return self.enable_api_docs
+        return self.is_development_like
 
 
 @lru_cache

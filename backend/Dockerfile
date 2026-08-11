@@ -3,18 +3,23 @@ FROM python:3.11-slim
 WORKDIR /app
 
 ENV PIP_DEFAULT_TIMEOUT=180 \
-    PIP_RETRIES=10
+    PIP_RETRIES=10 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/* && \
+    groupadd --gid 10001 messaging && \
+    useradd --uid 10001 --gid messaging --create-home --shell /usr/sbin/nologin messaging && \
+    mkdir -p /data/uploads && chown -R messaging:messaging /data/uploads
 
 COPY backend/pyproject.toml /tmp/pyproject.toml
 RUN python -c "import pathlib, tomllib; data = tomllib.loads(pathlib.Path('/tmp/pyproject.toml').read_text(encoding='utf-8')); deps = data.get('project', {}).get('dependencies', []); pathlib.Path('/tmp/requirements.txt').write_text('\n'.join(deps) + '\n', encoding='utf-8')" && \
     pip install --no-cache-dir --retries 10 --timeout 180 -r /tmp/requirements.txt
 
-COPY backend /app
-COPY worker /worker
-COPY scripts /app/scripts
+COPY --chown=messaging:messaging backend /app
+COPY --chown=messaging:messaging worker /worker
+COPY --chown=messaging:messaging scripts /app/scripts
 
-ENV PYTHONUNBUFFERED=1
+USER messaging
 
-CMD ["sh", "-c", "alembic upgrade head && python -m app.db.bootstrap_schema && python -m app.db.bootstrap_superadmin && uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size ${WS_MAX_INBOUND_MESSAGE_BYTES:-16384}"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size ${WS_MAX_INBOUND_MESSAGE_BYTES:-16384}"]

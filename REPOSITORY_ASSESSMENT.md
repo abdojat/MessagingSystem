@@ -4,11 +4,11 @@ Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
 
-This report is evidence-based and references the current codebase. Last updated after the targeted post-Phase-7 security repair on 2026-08-11.
+This report is evidence-based and references the current codebase. Last updated after Security Hardening Phase 8 on 2026-08-11.
 
 ## 1. Executive Summary
 
-This repository is a **late-stage university MVP / demo-ready prototype**, not production-ready.
+This repository is a **late-stage university MVP with a production-oriented single-host deployment boundary**. Phase 8 materially hardens deployment, but this is not a certification of Internet-scale, highly available production readiness.
 
 It does more than a toy chat app:
 - It has real REST APIs for channels, memberships, messages, auth, events, users, uploads, and sync.
@@ -18,6 +18,8 @@ It does more than a toy chat app:
 - It now has a tamper-evident event audit hash chain with a verification API, backfill script, and frontend integrity badge/check.
 - It has a substantial Next.js frontend for login, channel management, publishing, membership control, and event logs.
 - It implements password hashing, JWT auth, role-based authorization, and Fernet message encryption at rest.
+- Browser refresh credentials use rotating `HttpOnly`, `Secure`, `SameSite` cookies with exact-Origin/double-submit CSRF validation; access JWTs are memory-only.
+- A separate production Compose profile uses TLS termination, security headers, internal-only data/broker services, non-root/read-only application containers, authenticated Redis/RabbitMQ, an explicit migration job, and separate administrative/runtime PostgreSQL roles.
 - It supports protected photo/video/audio attachments with server-derived attachment metadata and upload audit events.
 - It now has atomic Redis counters with non-evicting fail-safe outage limiting, shared trusted client-IP semantics for HTTP and WebSocket connection controls, mandatory explicit environment selection, bounded auth/raw ordinary request bodies, bounded logical messages/protocol arrays and `/sync` materialization, established-socket frame/command/history budgets, idempotent seen/reaction changes, active-channel attachment lifecycle authorization with database-enforced message/channel consistency, streamed downloads with atomic per-user/IP/process admission, immutable existing-account invite targets plus explicit pre-registration verification state, locked targeted/reusable invite lifecycles, a documented database lock order, basic account quotas, bounded broker queues, versioned broker desired state, pre-decryption WebSocket membership generations, and paced Redis fanout retries.
 - It has a separate, environment-bootstrapped global superadmin privilege with guarded global audit, account/session, channel lifecycle, and delivery controls. The console API now returns allowlisted event summaries instead of raw payloads, marks sensitive list responses non-cacheable, and supports ranked/escaped search plus server-side filters and selectable pagination. Audit rows recover channel context from safe message/outbox/upload references where the canonical event field is absent, show the unique slug alongside the channel name, link channels to their existing view route, and link actor identities to the appropriate profile page.
@@ -32,15 +34,15 @@ Biggest strengths:
 - Administrative intervention is auditable and does not silently grant access to private message bodies.
 
 Biggest risks:
-- Security is not strong enough for a serious deployment.
-- Frontend auth tokens are browser-managed, which is acceptable for a demo but not production-grade.
+- The production profile is a hardened single-host baseline, not a multi-host HA design or third-party security certification.
+- Certificate issuance/renewal, centralized secret management/KMS, audited rotation, MFA, and automated browser security coverage remain deployment work.
 - Runtime verification still depends on the full Docker stack, even though the demo verifier now exercises the live WebSocket path when available with REST backfill fallback.
 - Phase 4 broker ordering/missed-Redis-removal, Phase 5 WebSocket/Redis-outage abuse, Phase 6 download concurrency, and post-Phase-7 proxy bucket isolation are deterministic application/component tests rather than live multi-worker/multi-backend/TCP load runs. Phase 7 lock concurrency uses real independent PostgreSQL sessions, but RabbitMQ failure is mocked rather than a live broker outage. Download and socket work limits remain per backend process; the Nginx path bounds one proxy instance but does not coordinate replicas or guarantee minimum client throughput. Email verification delivery is not implemented, and multi-socket presence can still mark a user offline when one of several sockets closes.
 - There is no full Merkle tree, external hash anchoring, or anomaly detection feature in the codebase.
 - Superadmin authentication is still password/JWT based without MFA or an external privileged-access workflow, so it remains appropriate for the university MVP rather than production operations.
 
 Most urgent missing pieces:
-- Keep the security posture honest and documented.
+- Keep the single-host production boundary and its remaining operational limits honest and documented.
 - Keep a small set of broker/WebSocket integration tests, including a real broker failure/DLQ scenario.
 - Clarify whether the project is graded as a demo or as a security-conscious system.
 
@@ -119,8 +121,9 @@ PostgreSQL is the source of truth. Important entities in [`backend/app/db/models
 ### Docker / Deployment Setup
 
 - [`docker-compose.yml`](docker-compose.yml) defines PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend.
-- [`docker-compose.hardened.yml`](docker-compose.hardened.yml) provides the recommended Nginx-fronted path with only proxy port 8080 published; the direct file remains the development/demo path.
-- [`backend/Dockerfile`](backend/Dockerfile) runs migrations and bootstraps the schema before launching the API.
+- [`docker-compose.hardened.yml`](docker-compose.hardened.yml) provides an Nginx-fronted local/demo path with only proxy port 8080 published; the direct file remains the development path.
+- [`docker-compose.production.yml`](docker-compose.production.yml) is the production-oriented path: TLS proxy, internal-only dependencies, explicit migrations, least-privilege runtime credentials, and non-root/read-only application containers.
+- [`backend/Dockerfile`](backend/Dockerfile) runs only Uvicorn by default; development Compose retains convenience migration/bootstrap startup, while production uses a separate one-shot migration service.
 - [`worker/Dockerfile`](worker/Dockerfile) starts the worker process.
 - [`frontend/Dockerfile`](frontend/Dockerfile) builds a standalone Next.js app.
 
@@ -128,12 +131,14 @@ PostgreSQL is the source of truth. Important entities in [`backend/app/db/models
 
 - [`backend/app/core/config.py`](backend/app/core/config.py) and [`worker/worker_app/core/config.py`](worker/worker_app/core/config.py) load `.env`.
 - `.env.example` documents the required variables.
+- `.env.production.example` documents production-only secrets, public host, TLS paths, and generation commands without including real values.
 - A local `.env` may exist for development, but only `.env.example` is tracked in git.
 
 ### How the System Runs
 
 - Backend:
-  - Alembic migrate -> schema bootstrap -> Uvicorn.
+  - Development Compose: Alembic migrate -> schema bootstrap -> Uvicorn.
+  - Production Compose: one-shot administrative migration/grant job, then Uvicorn under the restricted application role.
 - Worker:
   - Connect to RabbitMQ/Redis/Postgres -> poll outbox -> consume online-user queues -> forward to Redis.
 - Frontend:
@@ -167,15 +172,15 @@ flowchart LR
 | 3. Automatic delivery to subscribers | Mostly complete | Worker Rabbit/Redis fanout; generation-aware `WSManager`; versioned `broker_binding_states`; stale-command/active-delivery Phase 4 tests; demo/approval verifiers | Desired state and final plaintext authorization are hardened, but there is still no browser e2e test or live multi-worker broker/Redis outage job | High | Keep the verifiers in the supervisor path and add a CI broker/WebSocket outage integration test later |
 | 4. Channel management interface/API | Complete | [`backend/app/api/routes/channels.py`](backend/app/api/routes/channels.py) `create_channel`, `list_channels`, `get_channel`, `patch_channel`, `delete_channel`, `channel_stats` | Duplicate root routes are also exposed by [`backend/app/main.py`](backend/app/main.py) | Medium | Keep only one public API surface or document the duplicate compatibility routes |
 | 5. Subscriber management interface/API | Complete | [`backend/app/api/routes/memberships.py`](backend/app/api/routes/memberships.py) `join_channel`, `leave_channel`, `list_members`, `list_pending_requests`, `create_invite`, `accept_invite`, `approve_member`, `add_member_direct`, `promote_member`, `demote_member`, `update_admin_permissions`, `remove_member`; Phase 5 covers invite races; Phase 6 binds existing email targets to immutable accounts and requires proof for unresolved targets | Email verification issuance/delivery is not implemented; non-invite flows are not all concurrency-tested | Medium | Use generic/user-ID invites in the demo and add a real verification provider only if pre-registration email delivery is required |
-| 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) session-bound access checks, row-locked refresh rotation/replay detection, idle/absolute lifetime, and revocation; [`backend/app/services/ws_ticket_service.py`](backend/app/services/ws_ticket_service.py) one-time tickets; migration `0017_auth_session_hardening`; Phase 2 regressions | Frontend still uses a JS-managed access-token cookie plus `localStorage` refresh token storage, which is fine for the demo but not production-grade | High | Use httpOnly secure cookies if possible, or clearly label this as demo-only and harden XSS controls |
-| 7. Authorization/permissions | Complete for university MVP | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership/avatar/wallpaper-reference rules before returning bytes; existing email invite targets use immutable user IDs; unresolved targets require verified email | Browser token handling, absent email delivery, and per-replica resource counters remain deployment caveats | High | Keep backend boundaries strong and document client/deployment limitations honestly |
+| 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) session-bound access checks, row-locked refresh rotation/replay detection, idle/absolute lifetime, and revocation; [`backend/app/core/browser_security.py`](backend/app/core/browser_security.py) and browser auth routes provide rotating `HttpOnly`/`Secure`/`SameSite` refresh cookies plus exact-Origin/double-submit CSRF; frontend access tokens are memory-only; one-time WebSocket tickets remain | No automated real-browser end-to-end test and no MFA/external identity provider | High | Add a browser smoke test and MFA only if the deployment threat model requires them |
+| 7. Authorization/permissions | Complete for university MVP | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership/avatar/wallpaper-reference rules before returning bytes; existing email invite targets use immutable user IDs; unresolved targets require verified email | Absent email delivery and per-replica resource counters remain deployment caveats | High | Keep backend boundaries strong and document deployment limitations honestly |
 | 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; encryption key must stay out of tracked files | High | Treat encryption key as an external secret only and keep the env story explicit |
 | 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message/upload services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py) hash-chain verification | Event logging is not guaranteed if the logging path fails; event visibility and integrity verification are limited to channel managers | Medium | Keep the log path best-effort, document the limitation, and backfill legacy event hashes before final demos |
 | 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | Bounded topology; versioned desired state/migration `0019`; worker generation check plus row lock/current DB authorization; reconnect and global repair command; demo/delivery verifiers; Delivery Monitor | Current state dominates stale commands, but asynchronous current reconciliation can remain retrying/dead-lettered during a prolonged outage and still needs a live outage test | High | Keep the verifiers and add live broker outage/recovery coverage later |
-| 11. Docker/environment setup | Complete for MVP | Direct [`docker-compose.yml`](docker-compose.yml) plus Nginx-fronted [`docker-compose.hardened.yml`](docker-compose.hardened.yml); backend/worker/frontend Dockerfiles; backend startup requires an explicit `ENVIRONMENT` | Hardened path is HTTP-only and still uses demo service credentials/root-oriented images; it is scoped to P5V-02 rather than full AV-11 production hardening | Medium | Use direct Compose locally or the proxy-bounded path for recommended HTTP exposure; do not claim full production deployment |
+| 11. Docker/environment setup | Complete for MVP; production-oriented single-host profile validated | Direct development Compose, local/demo hardened Compose, and [`docker-compose.production.yml`](docker-compose.production.yml); production TLS/security headers, internal-only services, explicit migrations, separate database roles, authenticated infrastructure, non-root/read-only app containers, and required secrets were live-validated | Public certificate lifecycle, centralized secrets/KMS, multi-host HA, and load certification remain outside this profile | Medium | Use the production profile only with deployment-owned secrets and a trusted certificate; keep development profiles clearly separated |
 | 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md); [`docs/SECURITY.md`](docs/SECURITY.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
-| 13. Testing | Mostly complete | P0 plus Phase 1–7 and post-Phase-7 security suites cover auth/session, authorization, uploads/media, identifiers, broker desired state, bounded sync/download/socket work, invite races/identity binding, trusted proxy bucket isolation, explicit environment selection, and rate-limit failure behavior; [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py) is a manual verifier | No frontend tests, no live broker/Redis outage integration tests, and no slow-client TCP load test | High | Add one RabbitMQ/WebSocket integration test, one frontend smoke test, and controlled proxy slow-reader testing; keep the demo verifier separate |
-| 14. Monitoring/message-flow visibility | Mostly complete for MVP | [`backend/app/api/routes/health.py`](backend/app/api/routes/health.py) `health`; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; frontend event log panel; `/v1/admin/delivery/*`; frontend Delivery Monitor | No metrics dashboard, tracing, or real broker dashboard integration; delivery monitor is scoped to managed channels | Medium | Add full-stack broker/DLQ integration tests and richer metrics only if needed |
+| 13. Testing | Mostly complete | P0 plus Phase 1–8 and post-Phase-7 security suites cover auth/session/CSRF, authorization, production configuration, uploads/media, identifiers, broker desired state, bounded sync/download/socket work, invite races/identity binding, trusted proxy isolation, and failure behavior. Phase 8 also live-ran the full RabbitMQ -> worker -> Redis -> WebSocket demo through the production network | No frontend browser-automation suite, live broker-outage CI job, or slow-client/load certification | High | Add one Playwright smoke test and controlled broker-outage/slow-reader tests later |
+| 14. Monitoring/message-flow visibility | Mostly complete for MVP | Minimal `/health`, dependency-aware `/ready`, channel event APIs, frontend event log, `/v1/admin/delivery/*`, and Delivery Monitor | No metrics dashboard or tracing; delivery monitor is scoped to managed channels | Medium | Add metrics/tracing only if deployment operations require them |
 | 15. Merkle-tree or hashing/data-integrity feature | Mostly complete for hash-chain v1 | SHA-256 event hash chain in [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py); migration `0013_event_integrity`; endpoint `GET /v1/channels/{id}/events/integrity`; script [`scripts/backfill_event_integrity.py`](scripts/backfill_event_integrity.py); frontend Event Log integrity badge/check | No full Merkle tree, no external notarization, and legacy rows need explicit backfill | Low | Keep the hash-chain explanation honest; add optional Merkle batch roots or external anchoring only if requested |
 | 16. Optional anomaly detection / AI feature | Missing | Repo-wide search found no anomaly/AI module | Not present | Low | Only add this if your supervisor explicitly expects it; otherwise do not spend time here |
 
@@ -301,8 +306,9 @@ flowchart LR
 ### Secrets / Env Handling
 
 - A real `.env` is present locally but is not tracked in git; only `.env.example` is versioned.
-- Refresh tokens are stored in browser-managed localStorage; access tokens are mirrored into a JS-managed cookie.
-- Access tokens are stored in JavaScript-managed cookies.
+- Production requires deployment-supplied secrets; `.env.production.example` contains placeholders and generation guidance only.
+- Refresh tokens are stored in rotating `HttpOnly`, `Secure`, `SameSite` cookies; the paired readable CSRF cookie must match the request header and allowed Origin.
+- Access tokens are held in frontend memory only and disappear on reload; the browser then rotates its refresh cookie to restore the session.
 - WebSocket URLs contain only a short-lived one-time opaque ticket; raw access JWT query authentication is rejected.
 
 ### Code Duplication
@@ -421,16 +427,15 @@ flowchart LR
 
 ### Weak Security
 
-- Refresh tokens are stored in localStorage.
-- Access tokens are stored in JavaScript-managed cookies.
+- Access tokens are intentionally available to the running frontend JavaScript process, although they are no longer persisted.
+- The production CSP permits framework-required inline script/style execution; it does not permit `unsafe-eval`.
 - A real encryption key must remain outside tracked files and be provided through the environment.
 
 ### Missing / Limited Security
 
 - No centralized secret store, KMS integration, or automated key rotation; production-like startup validation now rejects unsafe local secret configuration.
-- No httpOnly cookie auth flow.
-- No explicit CSRF strategy.
 - No key rotation or KMS integration.
+- No automated real-browser test of the cookie/CSRF flow.
 - No external notarization or off-database anchoring for event hashes.
 
 ### Recommended Minimal Security
@@ -439,7 +444,7 @@ flowchart LR
 - Keep upload authorization documented and covered by tests.
 - Keep `.env` untracked and `.env.example` authoritative.
 - Keep the safe identifier policy documented and covered by tests.
-- If possible, move to httpOnly cookies for the final version.
+- Keep the `HttpOnly` refresh-cookie, exact-Origin, and double-submit CSRF controls covered by regression tests.
 
 ## 8. Database and Persistence Review
 
@@ -549,6 +554,7 @@ The frontend is real and fairly complete.
 - Event integrity tests: [`backend/tests/test_event_integrity.py`](backend/tests/test_event_integrity.py)
 - Phase 1 security regression tests: [`backend/tests/security/test_phase1_hardening.py`](backend/tests/security/test_phase1_hardening.py)
 - Phase 7 security regression tests: [`backend/tests/security/test_phase7_final_app_hardening.py`](backend/tests/security/test_phase7_final_app_hardening.py)
+- Phase 8 production-hardening regressions: [`backend/tests/security/test_phase8_production_hardening.py`](backend/tests/security/test_phase8_production_hardening.py)
 - Demo verifier: [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py)
 - WebSocket helper: [`scripts/ws_client.py`](scripts/ws_client.py)
 
@@ -556,7 +562,7 @@ The frontend is real and fairly complete.
 
 - No frontend test suite.
 - No real broker failure/DLQ integration test suite.
-- WebSocket subscription filtering has focused manager-level regressions, but there is still no automated real RabbitMQ -> Redis -> WebSocket integration suite.
+- WebSocket subscription filtering has focused manager-level regressions and the full live RabbitMQ -> Redis -> WebSocket verifier passed in Phase 8, but it is not yet an automated CI suite.
 - No load/stress tests.
 - No CI workflow visible in the repository.
 
@@ -573,6 +579,8 @@ The frontend is real and fairly complete.
 - On 2026-08-10, Phase 6 regressions passed `19` tests, Phase 1–5 security suites passed `98`, and the complete backend suite passed `195` tests against disposable PostgreSQL 16. Fresh and representative 0019→0020 migrations passed; frontend typecheck, both Compose render checks, and containerized Nginx syntax validation passed. Email verification completion was simulated, and no live proxy slow-reader load test was run.
 - On 2026-08-10, Phase 7 regressions passed `23` tests, Phase 1–6 security suites passed `117`, and the complete backend suite passed `218` tests against disposable PostgreSQL 16. Fresh and representative 0020→0021 migrations passed; one historical attachment mismatch was normalized without deleting either relation and PostgreSQL rejected a later mismatch. The historical advisory/binding cycle and channel/member serialization used independent real PostgreSQL sessions; RabbitMQ failure was mocked. Frontend typecheck and both Compose render checks passed.
 
+- On 2026-08-11, Phase 8 regressions passed `13` tests, the requested Phase 1-8/post-Phase-7 set passed `128 tests, 1 warning`, and the complete backend suite passed `252 tests, 1 warning`. Frontend typecheck/build, all Compose renders, and production image builds passed. A live disposable production stack passed TLS redirect/header/host/docs/health checks, default-credential rejection, runtime database privilege denials, port-isolation inspection, and the full RabbitMQ -> worker -> Redis -> WebSocket demo verifier. Its certificate was deliberately self-signed; no public trust or load certification is claimed.
+
 ### Practical Testing Plan
 
 - Keep the current backend P0, delivery reliability, and event integrity tests.
@@ -586,8 +594,9 @@ The frontend is real and fairly complete.
 ### What Is Good
 
 - Docker Compose defines all required services.
-- Backend Dockerfile runs migrations before app startup.
+- The backend image defaults to Uvicorn only; production migrations and runtime grants run in an explicit one-shot administrative service.
 - Frontend Dockerfile builds a standalone app.
+- The production profile exposes only the TLS proxy and runs application containers as UID 10001 with read-only roots, dropped capabilities, and narrow writable mounts.
 - README and demo guide explain the run flow.
 
 ### What Is Missing / Risky
@@ -639,12 +648,12 @@ The frontend is real and fairly complete.
 | Architecture | 72 | Clear service separation and realistic distributed components, but some consistency and routing risks remain |
 | Backend quality | 68 | Solid domain logic and validation, but large services, a thin repo layer, and a few risky shortcuts |
 | Frontend/UI | 82 | Surprisingly complete for a graduation project, with actual channel, membership, publishing, and event-log flows |
-| Security | 78 | Session-bound auth, replay detection, one-time WebSocket tickets, distributed revocation, bounded established-socket work, atomic/fail-safe rate limiting, immutable invite identity binding, layered protected-download admission, encryption, and lifecycle-aware uploads exist; browser credentials, email delivery, and full production posture remain demo-grade |
+| Security | 86 | Session-bound auth, replay detection, `HttpOnly` rotating refresh cookies with Origin/CSRF controls, memory-only access tokens, one-time WebSocket tickets, distributed revocation, fail-safe limits, protected downloads, encryption, and lifecycle-aware uploads exist; MFA, email delivery, centralized secrets, and browser automation remain |
 | Persistence/database | 84 | Strong schema coverage and durable storage, with only a few schema-quality improvements needed |
-| Testing | 55 | Backend regression tests exist and pass here, but frontend/broker integration coverage is still thin |
-| Deployment | 76 | Dockerized with direct and proxy-bounded paths, but TLS, managed secrets, least privilege, and multi-replica policy remain future work |
-| Documentation | 68 | Good docs set overall, but still missing final-report polish and deliverable packaging |
-| Overall graduation-project readiness | 73 | Functionally strong, with the main remaining gap being test depth and demo-grade auth storage |
+| Testing | 68 | Full backend regressions and a live production-network broker/WebSocket verifier pass, but browser automation, outage CI, and load testing remain thin |
+| Deployment | 86 | Development/demo paths remain separate from a live-validated TLS, least-privilege, internal-network production profile; managed secrets, public certificate lifecycle, and multi-host HA remain operator work |
+| Documentation | 78 | Core architecture/security/testing/demo/status docs and a dedicated Phase 8 report are synchronized; screenshots and final submission packaging can still improve |
+| Overall graduation-project readiness | 82 | Functionally strong and production-oriented for a single-host university deployment, with remaining gaps stated explicitly |
 
 ## 14. Final MVP Status
 
@@ -659,11 +668,11 @@ The frontend is real and fairly complete.
 
 ### Demo-Grade
 
-- Frontend token handling. Access tokens are mirrored into a JavaScript-managed cookie and refresh tokens live in `localStorage`, which is acceptable for a university demo but not production-grade session security.
+- Protected media object-URL rendering, Arabic visual verification, and the absence of an automated browser smoke suite remain demo-grade; browser credential persistence itself was hardened in Phase 8.
 
 ### Future Work
 
-- Frontend smoke tests, broader broker/WebSocket integration coverage, a production-grade session strategy, and any advanced non-MVP features.
+- Frontend smoke tests, broker-outage/load coverage, centralized secret and certificate lifecycle automation, multi-host HA, and any advanced non-MVP features.
 
 ## 15. Priority Roadmap
 
@@ -673,7 +682,7 @@ The frontend is real and fairly complete.
 |---|---|---:|---|---|
 | Add a stronger broker/WebSocket integration test | The project's main selling point still deserves direct proof | Medium | [`backend/tests/`](backend/tests), [`scripts/verify_demo_flow.py`](scripts/verify_demo_flow.py), [`scripts/verify_approval_flow.py`](scripts/verify_approval_flow.py) | Keep the supervisor verifiers and add at least one CI RabbitMQ/WebSocket integration test later |
 | Keep safe identifier policy documented and covered by tests | Routing-key safety is already implemented, but it still needs to stay explicit and regression-tested | Low | [`backend/app/schemas/channels.py`](backend/app/schemas/channels.py), [`backend/app/schemas/auth.py`](backend/app/schemas/auth.py), [`backend/tests/test_p0_requirements.py`](backend/tests/test_p0_requirements.py) | Keep the safe identifier policy documented and covered by the existing validation tests |
-| Keep browser-side token storage clearly labeled as demo-grade | Prevents overclaiming security | Medium | frontend auth hooks/store/docs | If you cannot move to httpOnly cookies, clearly mark it as demo-only and harden UI inputs/SOP |
+| Keep the Phase 8 browser-session boundary regression-tested | Prevents cookie/CSRF regressions | Medium | frontend auth hooks/store, browser auth routes, Phase 8 tests | Preserve memory-only access tokens and rotating `HttpOnly` refresh cookies with exact-Origin/double-submit CSRF checks |
 
 ### Should Finish Next
 
@@ -707,7 +716,7 @@ The frontend is real and fairly complete.
 ### Is the project currently acceptable for minimum submission?
 
 - Functionally, probably yes for a university demo, because the core publish/subscribe, auth, permissions, event logging, persistence, and UI flows are present.
-- As a secure or polished system, not fully. Browser token handling and the still-thin integration test story are the main remaining concerns.
+- As a secure or polished system, it now has a credible single-host baseline. Public certificate/secret lifecycle, browser automation, broker-outage testing, and multi-host/load behavior remain the main concerns.
 
 ### What would make it acceptable?
 
@@ -725,8 +734,8 @@ The frontend is real and fairly complete.
 
 ### Top 5 Concrete Next Actions
 
-1. Add one real integration test for outbox -> RabbitMQ -> Redis -> WebSocket delivery.
-2. Keep browser-stored tokens clearly labeled as demo-grade in the documentation.
-3. Produce the final report package: README cleanup, screenshots, demo script, and a short architecture/security explanation.
+1. Automate the already-passing outbox -> RabbitMQ -> Redis -> WebSocket verifier in CI.
+2. Add a real-browser smoke test for the cookie/CSRF login-refresh-logout flow.
+3. Complete the final submission package with screenshots and deployment-owned certificate/secret procedures.
 4. Keep the safe identifier policy documented for routing keys and Redis channels.
 5. If time allows, add a small frontend smoke test for the main channel flow.

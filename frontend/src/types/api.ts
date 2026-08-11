@@ -89,6 +89,11 @@ export interface TokenPair {
   token_type: string;
 }
 
+export interface BrowserAccessTokenResponse {
+  access_token: string;
+  token_type: "bearer";
+}
+
 export interface WebSocketTicketResponse {
   ticket: string;
   expires_at: string;

@@ -26,12 +26,16 @@ Global administration is modeled independently from channel membership. `users.i
   - Source of truth for users, channels, memberships, messages, normalized message/upload attachment links, outbox, and events.
 - Frontend (Next.js)
   - User workflows: auth, channels, join/leave, publish/read, event logs.
+  - Keeps access JWTs in memory only; browser refresh is an HttpOnly-cookie + CSRF flow.
   - Delivery Monitor for channel owners/admins to inspect and retry failed outbox delivery.
   - Event Log integrity check for channel owners/admins.
 - Nginx (recommended hardened Compose path)
   - Is the only published service in `docker-compose.hardened.yml`.
   - Overwrites the single forwarded client address and applies body/header,
     connection, buffering, and inactivity bounds before proxying REST/WebSocket/UI traffic.
+- Nginx (production path)
+  - Is the only host-published service in `docker-compose.production.yml`.
+  - Terminates TLS, redirects HTTP, validates the public host, blocks internal readiness/docs, and sets browser security headers/CSP.
 
 ## High-Level Architecture
 ```mermaid
@@ -66,6 +70,55 @@ connections that make no write progress for the configured interval. This is
 not a minimum-throughput guarantee; sustained trickle clients within the limits,
 OS file-descriptor/socket tuning, TLS, and multi-replica coordination remain
 operator/deployment responsibilities.
+
+## Production-oriented deployment
+
+`docker-compose.production.yml` adds a distinct single-host production boundary:
+
+```mermaid
+flowchart TD
+  CLIENT[Browser/API client] -->|HTTPS/WSS :443| PROXY[Nginx UID 101]
+  CLIENT -->|HTTP :80 redirect| PROXY
+  PROXY --> FE[Next.js UID 10001]
+  PROXY --> BE[FastAPI UID 10001]
+  BE --> PG[(PostgreSQL runtime role)]
+  BE --> REDIS[(Authenticated Redis)]
+  BE --> RMQ[(Authenticated RabbitMQ)]
+  WK[Worker UID 10001] --> PG
+  WK --> REDIS
+  WK --> RMQ
+  MIGRATE[One-shot migration/admin role] --> PG
+  BOOTSTRAP[Explicit bootstrap profile] --> PG
+```
+
+Only Nginx joins both `edge` and `internal` networks and only its 80/443 mappings
+are published. PostgreSQL, RabbitMQ, Redis, backend, worker, and frontend have no
+host port bindings. Internal AMQP and Redis are authenticated but remain
+plaintext on the host-local private network.
+
+PostgreSQL initialization creates a distinct runtime login. The `migrate`
+service connects with the administrative credential, applies Alembic and schema
+repair, then grants CRUD/schema/sequence use to the runtime role. Backend and
+worker share that non-superuser role and cannot create databases or roles.
+Backend startup itself is Uvicorn-only. Superadmin provisioning runs only from
+the explicit `bootstrap` profile.
+
+Backend, worker, frontend, migration/bootstrap, and proxy processes are
+non-root. Application/proxy roots are read-only with all capabilities dropped,
+`no-new-privileges`, resource limits, and narrow writable locations: uploads for
+backend, Next cache for frontend, rendered Nginx config, and per-service tmpfs.
+
+The public `/health` endpoint returns only `{"status":"ok"}`. Docker accesses
+the detailed `/ready` endpoint internally, while Nginx returns 404 for `/ready`
+and `/v1/ready`. Production FastAPI docs are disabled by default.
+
+The frontend calls the browser-specific auth routes. Login returns an access
+JWT only and sets a rotating HttpOnly refresh cookie plus readable random CSRF
+cookie. Refresh/logout require the cookie, exact allowed Origin, and matching
+`X-CSRF-Token`. Access tokens live only in the process-memory Zustand store;
+after reload the app refreshes before loading `/me`. WebSocket ticket issuance
+continues to use the memory bearer token and the socket URL contains only the
+existing opaque single-use ticket.
 
 ## Message Lifecycle
 ```mermaid

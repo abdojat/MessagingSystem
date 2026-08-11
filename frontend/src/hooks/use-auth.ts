@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@/services/api/client';
+import { apiClient, refreshAccessToken } from '@/services/api/client';
 import { getApiBaseUrl } from '@/services/api/runtime';
+import { browserLogoutRequest, type BrowserAccessTokenResponse } from '@/services/auth/browser-session';
 import { useAuthStore } from '../store/authStore';
-import { LoginRequest, RegisterRequest, TokenPair, MeResponse, SessionResponse } from '../types/api';
+import { LoginRequest, RegisterRequest, MeResponse, SessionResponse } from '../types/api';
 import { useEffect } from 'react';
 
 function redirectToHomeAndReload() {
@@ -21,33 +22,11 @@ export function useInitializeAuth() {
 
   useEffect(() => {
     const init = async () => {
-      const refreshToken = localStorage.getItem('chat_refresh_token');
-      if (!refreshToken) {
-        clearAuth();
-        return;
-      }
-
       try {
         const baseUrl = getApiBaseUrl();
-        const refreshRes = await fetch(`${baseUrl}/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refreshToken })
-        });
-
-        if (!refreshRes.ok) {
-          clearAuth();
-          return;
-        }
-
-        const tokens: TokenPair = await refreshRes.json();
-        // Store the refreshed access token before /me so the API client can
-        // authenticate the profile request.
-        useAuthStore.setState({ accessToken: tokens.access_token });
-        localStorage.setItem('chat_refresh_token', tokens.refresh_token);
-
+        const accessToken = await refreshAccessToken(baseUrl);
         const user = await apiClient<MeResponse>('/me');
-        setAuth(user, tokens.access_token, tokens.refresh_token);
+        setAuth(user, accessToken);
       } catch (e) {
         clearAuth();
       } finally {
@@ -62,13 +41,13 @@ export function useLogin() {
   const { setAuth } = useAuthStore();
   return useMutation({
     mutationFn: async (data: LoginRequest) => {
-      const tokens = await apiClient<TokenPair>('/auth/login', {
+      const tokens = await apiClient<BrowserAccessTokenResponse>('/auth/browser/login', {
         method: 'POST',
         body: JSON.stringify(data)
       });
-      useAuthStore.setState({ accessToken: tokens.access_token });
+      useAuthStore.getState().setAccessToken(tokens.access_token);
       const user = await apiClient<MeResponse>('/me');
-      setAuth(user, tokens.access_token, tokens.refresh_token);
+      setAuth(user, tokens.access_token);
       return user;
     }
   });
@@ -82,13 +61,13 @@ export function useRegister() {
         method: 'POST',
         body: JSON.stringify(data)
       });
-      const tokens = await apiClient<TokenPair>('/auth/login', {
+      const tokens = await apiClient<BrowserAccessTokenResponse>('/auth/browser/login', {
         method: 'POST',
         body: JSON.stringify({ username_or_email: data.username, password: data.password })
       });
-      useAuthStore.setState({ accessToken: tokens.access_token });
+      useAuthStore.getState().setAccessToken(tokens.access_token);
       const user = await apiClient<MeResponse>('/me');
-      setAuth(user, tokens.access_token, tokens.refresh_token);
+      setAuth(user, tokens.access_token);
       return user;
     }
   });
@@ -99,12 +78,9 @@ export function useLogout() {
   
   return useMutation({
     mutationFn: async () => {
-      const refreshToken = localStorage.getItem('chat_refresh_token');
-      if (refreshToken) {
-        try {
-          await apiClient('/auth/logout', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) });
-        } catch (e) { }
-      }
+      try {
+        await browserLogoutRequest(getApiBaseUrl());
+      } catch (e) { }
       completeClientLogout(queryClient);
       redirectToHomeAndReload();
     }

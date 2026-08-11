@@ -1,3 +1,5 @@
+# DEVELOPMENT ONLY: localhost ports, demo credentials, HTTP, automatic
+# migrations, and optional superadmin bootstrap are intentionally convenient.
 services:
   postgres:
     image: postgres:16
@@ -48,6 +50,11 @@ services:
       - "8000:8000"
     volumes:
       - uploads_data:/data/uploads
+    command: >-
+      sh -c "alembic upgrade head && python -m app.db.bootstrap_schema &&
+      python -m app.db.bootstrap_superadmin &&
+      exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+      --ws-max-size $${WS_MAX_INBOUND_MESSAGE_BYTES:-16384}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,7 +66,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\"",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=3)\"",
         ]
       interval: 5s
       timeout: 5s
