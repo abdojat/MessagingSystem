@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
@@ -8,6 +9,11 @@ from app.api.deps import CurrentUserDep, DBDep, RedisDep
 from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
 from app.core.errors import AppError, to_http_exception
+from app.core.upload_encryption import (
+    UploadEncryptionError,
+    file_has_encrypted_upload_magic,
+    read_upload_encryption_header_from_path,
+)
 from app.db.models import Upload, User
 from app.schemas.messages import (
     MessageAroundResponse,
@@ -26,7 +32,7 @@ from app.schemas.messages import (
     UploadCreateResponse,
 )
 from app.services.message_service import MessageService
-from app.services.download_service import LeasedFileResponse, protected_download_limiter
+from app.services.download_service import LeasedEncryptedFileResponse, LeasedFileResponse, protected_download_limiter
 from app.services.rate_limit_service import enforce_rate_limit
 from app.services.event_service import log_event
 
@@ -473,6 +479,66 @@ async def get_upload_content(
     path = MessageService._resolve_upload_path(settings.uploads_base_dir, upload.storage_path)
     if not path.exists():
         raise to_http_exception(AppError("upload content not found", 404, code="NOT_FOUND"))
+
+    storage_version = int(upload.storage_encryption_version or 0)
+    encrypted_storage = storage_version == 1
+    encrypted_key_id = upload.storage_key_id if encrypted_storage else None
+    if storage_version not in {0, 1} or (encrypted_storage and not encrypted_key_id):
+        await MessageService._safe_log_event(
+            db,
+            "security.upload_storage_integrity_failure",
+            {"upload_id": str(file_id), "reason": "invalid_database_metadata"},
+            actor_user_id=user.id,
+            commit=True,
+        )
+        raise to_http_exception(AppError("upload storage metadata is invalid", 500, code="DECRYPTION_FAILED"))
+
+    # A valid encrypted header is self-identifying so the migration command can
+    # recover the crash window where the file replacement completed before the
+    # version-0 database row committed its new metadata.
+    if storage_version == 0:
+        encrypted_storage = await asyncio.to_thread(file_has_encrypted_upload_magic, path)
+        if not encrypted_storage and not settings.allow_legacy_plaintext_uploads:
+            await MessageService._safe_log_event(
+                db,
+                "security.upload_storage_integrity_failure",
+                {"upload_id": str(file_id), "reason": "legacy_plaintext_disabled"},
+                actor_user_id=user.id,
+                commit=True,
+            )
+            raise to_http_exception(AppError("plaintext upload storage is not permitted", 500, code="DECRYPTION_FAILED"))
+
+    if encrypted_storage and request.headers.get("range"):
+        raise to_http_exception(
+            AppError(
+                "range requests are not supported for encrypted uploads",
+                416,
+                code="RANGE_NOT_SUPPORTED",
+            )
+        )
+
+    if encrypted_storage:
+        try:
+            header = await asyncio.to_thread(
+                read_upload_encryption_header_from_path,
+                path,
+                expected_upload_id=file_id,
+                expected_key_id=encrypted_key_id,
+            )
+            if header.plaintext_size != int(upload.size_bytes):
+                raise UploadEncryptionError("encrypted upload size metadata mismatch")
+            # Version-0 crash recovery takes the authenticated header key ID.
+            encrypted_key_id = header.key_id
+        except (UploadEncryptionError, OSError):
+            await MessageService._safe_log_event(
+                db,
+                "security.upload_storage_integrity_failure",
+                {"upload_id": str(file_id), "reason": "header_validation_failed"},
+                actor_user_id=user.id,
+                commit=True,
+            )
+            raise to_http_exception(AppError("upload storage integrity validation failed", 500, code="DECRYPTION_FAILED"))
+
     lease = await protected_download_limiter.try_acquire(
         user.id,
         get_client_ip(request),
@@ -507,6 +573,30 @@ async def get_upload_content(
         await lease.release()
         raise
     try:
+        if encrypted_storage:
+            async def log_stream_integrity_failure(reason: str) -> None:
+                # The request-scoped session was deliberately closed before the
+                # slow stream. Use a short independent best-effort transaction.
+                from app.db.session import SessionLocal
+
+                async with SessionLocal() as event_db:
+                    await MessageService._safe_log_event(
+                        event_db,
+                        "security.upload_storage_integrity_failure",
+                        {"upload_id": str(file_id), "reason": reason},
+                        actor_user_id=user.id,
+                        commit=True,
+                    )
+
+            return LeasedEncryptedFileResponse(
+                path,
+                lease,
+                upload_id=file_id,
+                key_id=encrypted_key_id,
+                plaintext_size=int(upload.size_bytes),
+                media_type=upload.content_type,
+                on_integrity_failure=log_stream_integrity_failure,
+            )
         return LeasedFileResponse(path, lease, media_type=upload.content_type)
     except BaseException:
         # Constructor/header failures occur before ASGI invokes the response's

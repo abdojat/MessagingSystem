@@ -16,19 +16,33 @@ os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@postgres:5432/channels")
 os.environ.setdefault("MESSAGE_ENCRYPTION_ENABLED", "true")
 os.environ.setdefault("MESSAGE_ENCRYPTION_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+os.environ.setdefault("DATA_ENCRYPTION_ACTIVE_KEY_ID", "test-key")
+os.environ.setdefault(
+    "DATA_ENCRYPTION_KEYS",
+    '{"test-key":"MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="}',
+)
 os.environ.setdefault("JWT_SECRET", "test-secret")
 
 
 @pytest.fixture(autouse=True)
 def _clear_settings_cache() -> None:
     get_settings.cache_clear()
+    encryption._build_key_ring.cache_clear()
     encryption._build_fernet.cache_clear()
+    encryption._build_legacy_fernet.cache_clear()
     RateLimitService.reset_local_for_tests()
     protected_download_limiter.reset_for_tests()
 
 
 @pytest_asyncio.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
+async def db_session(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncSession, None]:
+    # Historical fixtures intentionally create a few pre-Phase-9 plaintext
+    # rows/files. Scope compatibility to database tests instead of weakening
+    # production Settings instances constructed by configuration tests.
+    monkeypatch.setenv("ALLOW_LEGACY_PLAINTEXT_MESSAGES", "true")
+    monkeypatch.setenv("ALLOW_LEGACY_PLAINTEXT_UPLOADS", "true")
+    get_settings.cache_clear()
+    encryption._build_key_ring.cache_clear()
     database_url = os.environ.get("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@postgres:5432/channels")
     engine = create_async_engine(database_url, future=True)
     try:

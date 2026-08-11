@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.api.routes.messages import put_upload_content
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
+from app.core.upload_encryption import iter_decrypted_upload_file
 from app.core.utils import utcnow
 from app.db.models import UserChannelState
 from app.realtime.ws_manager import WSManager
@@ -142,14 +143,16 @@ def test_production_like_environments_reject_known_default_jwt_secrets(
         )
 
 
-def test_production_rejects_missing_encryption_key_when_enabled() -> None:
-    with pytest.raises(ValidationError, match="MESSAGE_ENCRYPTION_KEY is required"):
+def test_production_rejects_missing_data_encryption_key_ring() -> None:
+    with pytest.raises(ValidationError, match="DATA_ENCRYPTION_KEYS"):
         Settings(
             _env_file=None,
             environment="production",
             jwt_secret=SECURE_JWT_SECRET,
             message_encryption_enabled=True,
             message_encryption_key="",
+            data_encryption_active_key_id="",
+            data_encryption_keys="",
         )
 
 
@@ -220,7 +223,16 @@ async def test_streamed_upload_is_immutable_and_attachment_reference_still_works
     )
     target = MessageService._resolve_upload_path(str(tmp_path), upload.storage_path)
     assert stored.public_url == f"/v1/uploads/{upload.id}/content"
-    assert target.read_bytes() == original
+    finalized_ciphertext = target.read_bytes()
+    assert original not in finalized_ciphertext
+    assert b"".join(
+        iter_decrypted_upload_file(
+            target,
+            expected_upload_id=upload.id,
+            expected_key_id=stored.storage_key_id,
+            expected_plaintext_size=len(original),
+        )
+    ) == original
 
     message = await MessageService.publish_message(
         db_session,
@@ -242,7 +254,7 @@ async def test_streamed_upload_is_immutable_and_attachment_reference_still_works
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.code == "UPLOAD_IMMUTABLE"
-    assert target.read_bytes() == original
+    assert target.read_bytes() == finalized_ciphertext
     assert await MessageService.can_access_upload(db_session, owner_id, upload_id) is True
 
 

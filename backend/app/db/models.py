@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -324,9 +325,23 @@ class Upload(Base):
     checksum: Mapped[str | None] = mapped_column(String(255), nullable=True)
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
     public_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 0 is a pending or historical plaintext row; finalized Phase 9 uploads use
+    # authenticated chunked storage version 1 and an explicit data key ID.
+    storage_encryption_version: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=0, server_default="0"
+    )
+    storage_key_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    __table_args__ = (Index("ix_uploads_created_at", "created_at"),)
+    __table_args__ = (
+        CheckConstraint(
+            "(storage_encryption_version = 0 AND storage_key_id IS NULL) OR "
+            "(storage_encryption_version = 1 AND storage_key_id IS NOT NULL)",
+            name="ck_uploads_storage_encryption_metadata",
+        ),
+        Index("ix_uploads_created_at", "created_at"),
+        Index("ix_uploads_storage_encryption", "storage_encryption_version", "storage_key_id"),
+    )
 
 
 class UserChannelState(Base):

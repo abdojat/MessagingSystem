@@ -1,11 +1,13 @@
 from collections.abc import AsyncIterable, AsyncIterator
 from pathlib import Path
 from datetime import timedelta
+import asyncio
 import hashlib
 import logging
 import os
 from uuid import UUID, uuid4
 
+import anyio
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +16,8 @@ from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.identifiers import extract_upload_id_from_url, normalize_upload_filename
 from app.core.encryption import decrypt_json_payload, decrypt_message, encrypt_json_payload, encrypt_message
+from app.core.encryption import get_data_encryption_key_ring
+from app.core.upload_encryption import UPLOAD_ENCRYPTION_CHUNK_SIZE, UploadChunkEncryptor
 from app.core.utils import utcnow
 from app.db.models import (
     Channel,
@@ -1068,6 +1072,8 @@ class MessageService:
         digest = hashlib.sha256()
         finalized_here = False
         failure_reason = "storage_error"
+        key_id = get_data_encryption_key_ring().active_key_id
+        encryptor = UploadChunkEncryptor(upload.id, key_id, expected_size)
 
         try:
             # public_url is the existing persisted lifecycle marker: None means
@@ -1079,7 +1085,9 @@ class MessageService:
                 failure_reason = "configured_size_exceeded"
                 raise AppError("file too large", 413, code="PAYLOAD_TOO_LARGE")
 
-            with temp_path.open("xb") as destination:
+            pending = bytearray()
+            async with await anyio.open_file(temp_path, "xb") as destination:
+                await destination.write(encryptor.header.encoded)
                 async for received in MessageService._iter_upload_chunks(content):
                     if not isinstance(received, (bytes, bytearray, memoryview)):
                         failure_reason = "invalid_stream_chunk"
@@ -1087,8 +1095,8 @@ class MessageService:
                     # Keep write/hash operations bounded even if an ASGI server
                     # supplies an unusually large receive chunk.
                     view = memoryview(received)
-                    for offset in range(0, len(view), 64 * 1024):
-                        chunk = view[offset : offset + 64 * 1024]
+                    for offset in range(0, len(view), UPLOAD_ENCRYPTION_CHUNK_SIZE):
+                        chunk = view[offset : offset + UPLOAD_ENCRYPTION_CHUNK_SIZE]
                         next_total = total_size + len(chunk)
                         if next_total > configured_max:
                             failure_reason = "configured_size_exceeded"
@@ -1096,30 +1104,43 @@ class MessageService:
                         if next_total > expected_size:
                             failure_reason = "size_mismatch"
                             raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
-                        destination.write(chunk)
                         digest.update(chunk)
+                        pending.extend(chunk)
+                        while len(pending) >= UPLOAD_ENCRYPTION_CHUNK_SIZE:
+                            plaintext_chunk = bytes(pending[:UPLOAD_ENCRYPTION_CHUNK_SIZE])
+                            del pending[:UPLOAD_ENCRYPTION_CHUNK_SIZE]
+                            await destination.write(encryptor.encrypt_chunk(plaintext_chunk))
                         total_size = next_total
-                destination.flush()
-                os.fsync(destination.fileno())
+                if total_size != expected_size:
+                    failure_reason = "size_mismatch"
+                    raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
+                if upload.checksum and digest.hexdigest().lower() != upload.checksum.strip().lower():
+                    failure_reason = "checksum_mismatch"
+                    raise AppError("checksum mismatch", 400, code="VALIDATION_ERROR")
+                if pending:
+                    await destination.write(encryptor.encrypt_chunk(pending))
+                    pending.clear()
+                encryptor.finalize()
+                await destination.flush()
 
-            if total_size != expected_size:
-                failure_reason = "size_mismatch"
-                raise AppError("uploaded size mismatch", 400, code="VALIDATION_ERROR")
-            if upload.checksum and digest.hexdigest().lower() != upload.checksum.strip().lower():
-                failure_reason = "checksum_mismatch"
-                raise AppError("checksum mismatch", 400, code="VALIDATION_ERROR")
+            # Complete encrypted bytes reach stable storage before the atomic
+            # create-only finalization. The plaintext request body was never
+            # written to a sibling file.
+            await asyncio.to_thread(MessageService._fsync_file_path, temp_path)
 
             # A same-directory hard link atomically exposes only the complete
             # file and fails rather than overwriting an existing finalized path.
             try:
-                os.link(temp_path, full_path)
+                await asyncio.to_thread(os.link, temp_path, full_path)
             except FileExistsError as exc:
                 failure_reason = "already_stored"
                 raise AppError("upload content is already stored", 409, code="UPLOAD_IMMUTABLE") from exc
             finalized_here = True
-            temp_path.unlink()
+            await asyncio.to_thread(temp_path.unlink)
 
             upload.public_url = f"/v1/uploads/{upload.id}/content"
+            upload.storage_encryption_version = 1
+            upload.storage_key_id = key_id
             await log_event(
                 db,
                 "upload.content_stored",
@@ -1185,6 +1206,13 @@ class MessageService:
             return
         async for chunk in content:
             yield chunk
+
+    @staticmethod
+    def _fsync_file_path(path: Path) -> None:
+        # Windows requires a writable descriptor for FlushFileBuffers, while
+        # POSIX fsync accepts this mode as well.
+        with path.open("r+b") as stored:
+            os.fsync(stored.fileno())
 
     @staticmethod
     def _membership_event_new_role(event_type: str, payload: dict) -> str:

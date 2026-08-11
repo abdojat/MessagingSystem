@@ -1,4 +1,5 @@
 from datetime import timedelta
+import json
 from pathlib import Path
 
 import pytest
@@ -548,8 +549,13 @@ async def test_list_channels_keeps_channels_visible_when_last_preview_key_is_una
         PublishMessageRequest(content_text="encrypted with the original key"),
     )
 
-    monkeypatch.setenv("MESSAGE_ENCRYPTION_KEY", Fernet.generate_key().decode("utf-8"))
+    monkeypatch.setenv("DATA_ENCRYPTION_ACTIVE_KEY_ID", "rotated-key")
+    monkeypatch.setenv(
+        "DATA_ENCRYPTION_KEYS",
+        json.dumps({"rotated-key": Fernet.generate_key().decode("utf-8")}),
+    )
     get_settings.cache_clear()
+    encryption._build_key_ring.cache_clear()
     encryption._build_fernet.cache_clear()
 
     items, next_cursor, has_more = await ChannelService.list_channels(

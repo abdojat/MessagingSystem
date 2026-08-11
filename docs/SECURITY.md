@@ -35,7 +35,7 @@
 - Channel list/detail payloads withhold decrypted last-message previews, seen markers, and unread counts unless the caller has an approved readable membership (`owner`, `admin`, or `member`). Public discovery can still expose basic channel metadata and last-activity time.
 - Channel list search treats `%`, `_`, and `\` as literal text instead of SQL wildcards, and `#channel-slug` search is resolved against the safe stored slug.
 - Private upload downloads require authentication and an authorization check before any file bytes are returned.
-- Authorized upload bytes are served with chunked `FileResponse` streaming after database authorization/audit work is complete. One atomic lease checks and reserves `MAX_CONCURRENT_DOWNLOADS_PER_USER` (3), `MAX_CONCURRENT_DOWNLOADS_PER_IP` (12), and `MAX_CONCURRENT_DOWNLOADS_GLOBAL` (100) in each backend process. Failed admission changes no counter. Idempotent cleanup releases every dimension on completion, cancellation, file/stat failure, ASGI send failure, and response construction failure.
+- Authorized encrypted upload bytes are served through bounded authenticated `LeasedEncryptedFileResponse` decryption after database authorization/audit work is complete; temporary migration-window plaintext uses the legacy `FileResponse`. One atomic lease checks and reserves `MAX_CONCURRENT_DOWNLOADS_PER_USER` (3), `MAX_CONCURRENT_DOWNLOADS_PER_IP` (12), and `MAX_CONCURRENT_DOWNLOADS_GLOBAL` (100) in each backend process. Failed admission changes no counter. Idempotent cleanup releases every dimension on completion, cancellation, file/stat/integrity failure, ASGI send failure, and response construction failure.
 - The upload route allows content only to the owner. The download route always permits the upload owner; ordinary message-attachment access requires an active channel, a non-deleted message, and a current approved owner/admin/member membership. Soft-deleting a channel suspends channel-derived attachment access, and restoring it restores access only for current approved members. Pending, removed, outsider, and superadmin identities have no implicit channel-media bypass. Message attachment authorization uses the indexed `message_attachments(upload_id, channel_id, message_id)` relation rather than scanning message-history JSON; migration `0018_phase3_abuse_hardening` backfills historical attachment references, and migration `0021_phase7_attachment_integrity` normalizes historical channel IDs then enforces that every relation's `(message_id, channel_id)` matches the authoritative message row.
 - Upload request bodies are streamed in bounded chunks to a same-directory temporary file while size and SHA-256 are checked incrementally. Failed, interrupted, oversized, short, or checksum-mismatched uploads are cleaned up and remain pending.
 - Successful upload storage is immutable. The existing protected `public_url` is the persisted pending/stored lifecycle marker, the upload row is locked during finalization, and a second PUT returns `409 Conflict` without replacing historical bytes.
@@ -84,18 +84,37 @@
 - Superadmin status does **not** grant blanket read access to private message bodies or protected uploads. Platform administration and private channel content remain deliberately separate.
 
 ## Message Encryption
-- Message content is encrypted at rest on the server side with Fernet.
-- The backend decrypts content only for authorized readers.
-- The encryption key must come from environment variables for demo and deployment runs.
-- Channel navigation remains available if an old last-message preview cannot be decrypted after a key change: the API logs a warning and omits that optional preview instead of returning ciphertext or failing the complete channel list. Direct message reads still fail until the original key is restored or a deliberate key-rotation migration is performed.
+- New text/JSON content uses a strict v2 envelope with an explicit key ID. The active 32-byte master key is domain-separated with HKDF-SHA256 (`MessagingSystem/message/v2`) before Fernet is constructed.
+- `DATA_ENCRYPTION_KEYS` contains at most 32 validated historical/current keys and `DATA_ENCRYPTION_ACTIVE_KEY_ID` selects new writes. Unknown IDs and tampered tokens fail closed; the runtime never silently tries every key.
+- `MESSAGE_ENCRYPTION_KEY` is deprecated and used only to decrypt/migrate legacy-v1 bare Fernet rows. New writes never use it.
+- Plaintext message compatibility is controlled by `ALLOW_LEGACY_PLAINTEXT_MESSAGES`. Production-like environments reject `true`; migration/test environments must opt in deliberately.
+- The backend decrypts only after channel authorization. The worker/broker outbox carries encrypted payloads, and every supplied Compose worker receives only database/broker/fanout settings—not JWT, legacy-Fernet, or data-at-rest keys.
+- Channel navigation remains available if an optional last-message preview cannot be decrypted: the API logs a bounded warning and omits the preview. Direct message reads fail closed.
+
+## Upload Encryption
+- New finalized upload paths contain authenticated ciphertext only. AES-256-GCM frames use 64 KiB logical chunks and a file key derived with HKDF-SHA256 from the selected master key plus upload UUID (`MessagingSystem/upload/v1`).
+- The strict v1 header authenticates magic, version, upload UUID, key ID, logical plaintext size, chunk size, and random eight-byte nonce prefix. Each frame authenticates the header digest, upload context, monotonic index, and plaintext length.
+- Upload PUT preserves streaming, logical SHA-256/size validation, immutable first write, encrypted sibling temporary storage, fsync, and atomic create-only finalization. It never writes a complete plaintext temporary file.
+- Download authorization and path containment happen before header authentication/decryption. `LeasedEncryptedFileResponse` streams bounded authenticated plaintext chunks and releases its user/IP/global lease on completion, cancellation, send failure, or integrity failure. Encrypted Range requests return 416.
+- `uploads.storage_encryption_version` and `storage_key_id` record storage metadata. Version 0 is a pending/historical plaintext row; version 1 requires a key ID. `ALLOW_LEGACY_PLAINTEXT_UPLOADS` is an explicit migration-window flag and is forbidden in production-like environments.
+- A valid encrypted self-identifying header can be read when database metadata still says version 0, making file-replaced/DB-not-committed migration crashes recoverable. Unknown/corrupt encrypted files never downgrade to plaintext.
+- Migration replacement means active application storage no longer retains that plaintext file. It is not a secure-erasure guarantee for SSD remanence, filesystem snapshots, or backups; encrypted volumes and backup lifecycle controls remain operational requirements.
+
+## Key Rotation Operations
+- Inspect without exposing content or key material: `python -m app.db.crypto_tool status`.
+- Convert legacy storage in bounded idempotent batches: `migrate-messages`, then `migrate-uploads` while only the required compatibility flags are deliberately enabled.
+- Production application processes reject those flags. If historical plaintext exists, use a one-shot, non-listening maintenance process with the production database/upload volume and real key ring but an explicit `ENVIRONMENT=local`; enable only the needed flag, run migration/status, destroy that process, and restore production with both flags false. Never serve HTTP or run the worker from this maintenance environment.
+- Add the new key, set it active, restart backend, and run `rotate-messages --to-key-id <active-id>` plus `rotate-uploads --to-key-id <active-id>`.
+- Run status again. Remove the historical key only when it has zero references and unreadable/unknown/missing/invalid/metadata-mismatch counts are zero.
+- The key ring is deployment-injected. No external KMS/HSM integration or automated rotation scheduler is claimed.
 
 ## Secret Handling
 - Do not commit real `.env` files, database passwords, JWT secrets, or encryption keys.
 - The repository keeps `.env.example` as documentation for required settings.
 - A local `.env` file may be used for development, but it should remain untracked.
 - In the current repository state, `git ls-files` does not show any tracked `.env` file.
-- `ENVIRONMENT` is required and normalized; missing or empty values fail configuration instead of selecting a default. Only `dev`, `development`, `local`, and `test` opt into development secret behavior. Every other normalized label is production-like, so values such as `live`, `release`, `prod-eu`, or an arbitrary typo refuse startup when `JWT_SECRET` is absent/placeholder/weak or when enabled message encryption lacks a valid Fernet key. The deterministic development Fernet fallback is therefore unreachable unless a development-like environment is explicitly selected.
-- `.env.production.example` contains placeholders only. Production Compose requires explicit PostgreSQL admin/runtime, RabbitMQ, Redis, JWT, Fernet, public-host, and TLS-path values through `${VARIABLE:?required}` interpolation. `.env.production`, `secrets/`, `*.key`, and `*.pem` remain ignored.
+- `ENVIRONMENT` is required and normalized; missing or empty values fail configuration instead of selecting a default. Only `dev`, `development`, `local`, and `test` opt into the warned deterministic development data key. Every other normalized label is production-like, so values such as `live`, `release`, `prod-eu`, or a typo refuse startup when JWT or data-key-ring requirements are not satisfied.
+- `.env.production.example` contains placeholders only. Production Compose requires explicit PostgreSQL admin/runtime, RabbitMQ, Redis, JWT, data-encryption key ring, public-host, and TLS-path values through `${VARIABLE:?required}` interpolation. The legacy Fernet key is optional after migration. `.env.production`, `secrets/`, `*.key`, and `*.pem` remain ignored.
 - Production PostgreSQL uses a one-shot admin/migration credential and a separate application role shared by backend/worker. The role is forced `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION` and receives maintainable schema/table/sequence runtime grants. Stronger backend/worker role separation remains future work.
 - Production RabbitMQ has an explicit non-default user and no published management/AMQP port. Redis requires a password and has no published port. Internal AMQP/Redis transport remains plaintext inside the host-local private Docker network; no claim of internal TLS is made.
 
@@ -175,13 +194,13 @@ This protects against accidental or unauthorized event modification, insertion, 
 - This project is a production-oriented single-host university MVP, not an enterprise identity, HA, backup, or secret-management platform.
 - Browser refresh credentials are HttpOnly and access tokens are memory-only, but no automated Playwright/browser suite currently exercises the complete UI cookie lifecycle. Focused backend tests and static frontend inspection cover the boundary. WebSocket transport continues to use short-lived one-time tickets rather than access JWT URLs.
 - The project does not claim end-to-end encryption; it uses server-side encryption at rest.
-- There is no automatic encryption-key rotation or historical-key ring. Replacing `MESSAGE_ENCRYPTION_KEY` makes existing encrypted message bodies unreadable; retain the original key or migrate ciphertext deliberately before rotating it.
+- Key rotation is explicit operator work rather than automatic scheduling, and keys are environment-injected rather than KMS/HSM-backed.
 - Event integrity is tamper-evident inside PostgreSQL, but it does not prove that the database itself was never rewritten by a fully privileged operator.
 - The verifier does not prove tail deletion unless the previous last hash was stored or witnessed outside the database.
 - Successful upload access logging is best-effort so a temporary audit-log failure does not break protected media playback; unauthorized access logging still blocks the request with `403 Forbidden`.
 - Protected upload-backed avatars, wallpapers, and message media are fetched by the frontend with the bearer token and rendered through temporary object URLs. This is suitable for the local demo, but it is not a production CDN/media pipeline.
-- Upload attachments are protected and immutable after storage, but their file bytes are not encrypted by the message-body Fernet layer; attachment encryption remains future work.
-- Secrets are injected through required environment values rather than a managed secret store. External KMS integration, advanced message-key rotation, attachment encryption, and automatic credential rotation remain future work.
+- Upload attachments are encrypted at rest with the Phase 9 chunked AES-GCM format but remain server-decryptable after authorization; this is not E2EE.
+- Secrets are injected through required environment values rather than a managed secret store. External KMS integration and automatic credential/key rotation remain future work.
 - PostgreSQL/RabbitMQ/Redis are single instances with named volumes. Production operators still need backup/restore procedures, monitoring, upgrades, capacity tuning, and HA appropriate to their environment.
 - Superadmin activity is application-audited but does not replace external administrator monitoring, MFA, a hardware-backed secret store, or separation-of-duties controls.
 - Cross-instance socket termination is best-effort realtime control. If Redis is unavailable during revocation, the database revocation still commits and blocks subsequent HTTP authentication, refresh, ticket validation, and reconnects, but a socket on another instance may remain until its captured authentication expiry.

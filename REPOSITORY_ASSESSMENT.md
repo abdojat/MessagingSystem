@@ -4,11 +4,11 @@ Assessment of the current repository state for the graduation project:
 
 `Building a Distributed Messaging System Based on the Publish/Subscribe Model`
 
-This report is evidence-based and references the current codebase. Last updated after Security Hardening Phase 8 on 2026-08-11.
+This report is evidence-based and references the current codebase. Last updated after Security Hardening Phase 9 on 2026-08-11.
 
 ## 1. Executive Summary
 
-This repository is a **late-stage university MVP with a production-oriented single-host deployment boundary**. Phase 8 materially hardens deployment, but this is not a certification of Internet-scale, highly available production readiness.
+This repository is a **late-stage university MVP with a production-oriented single-host deployment boundary**. Phases 8/9 materially harden deployment and stored-data protection, but this is not a certification of Internet-scale, highly available production readiness.
 
 It does more than a toy chat app:
 - It has real REST APIs for channels, memberships, messages, auth, events, users, uploads, and sync.
@@ -17,10 +17,11 @@ It does more than a toy chat app:
 - It now has explicit outbox delivery status tracking, retry scheduling, dead-letter state, RabbitMQ DLQ topology, and a frontend Delivery Monitor.
 - It now has a tamper-evident event audit hash chain with a verification API, backfill script, and frontend integrity badge/check.
 - It has a substantial Next.js frontend for login, channel management, publishing, membership control, and event logs.
-- It implements password hashing, JWT auth, role-based authorization, and Fernet message encryption at rest.
+- It implements password hashing, JWT auth, role-based authorization, explicit-key-ID message encryption, and chunked authenticated upload encryption at rest.
 - Browser refresh credentials use rotating `HttpOnly`, `Secure`, `SameSite` cookies with exact-Origin/double-submit CSRF validation; access JWTs are memory-only.
 - A separate production Compose profile uses TLS termination, security headers, internal-only data/broker services, non-root/read-only application containers, authenticated Redis/RabbitMQ, an explicit migration job, and separate administrative/runtime PostgreSQL roles.
 - It supports protected photo/video/audio attachments with server-derived attachment metadata and upload audit events.
+- Phase 9 adds a bounded historical data-key ring, HKDF domain separation, fail-closed plaintext/tamper policy, migration 0022, encrypted upload streaming, and bounded status/migration/rotation tooling. Production workers route encrypted payloads without receiving data-encryption keys.
 - It now has atomic Redis counters with non-evicting fail-safe outage limiting, shared trusted client-IP semantics for HTTP and WebSocket connection controls, mandatory explicit environment selection, bounded auth/raw ordinary request bodies, bounded logical messages/protocol arrays and `/sync` materialization, established-socket frame/command/history budgets, idempotent seen/reaction changes, active-channel attachment lifecycle authorization with database-enforced message/channel consistency, streamed downloads with atomic per-user/IP/process admission, immutable existing-account invite targets plus explicit pre-registration verification state, locked targeted/reusable invite lifecycles, a documented database lock order, basic account quotas, bounded broker queues, versioned broker desired state, pre-decryption WebSocket membership generations, and paced Redis fanout retries.
 - It has a separate, environment-bootstrapped global superadmin privilege with guarded global audit, account/session, channel lifecycle, and delivery controls. The console API now returns allowlisted event summaries instead of raw payloads, marks sensitive list responses non-cacheable, and supports ranked/escaped search plus server-side filters and selectable pagination. Audit rows recover channel context from safe message/outbox/upload references where the canonical event field is absent, show the unique slug alongside the channel name, link channels to their existing view route, and link actor identities to the appropriate profile page.
 
@@ -35,7 +36,7 @@ Biggest strengths:
 
 Biggest risks:
 - The production profile is a hardened single-host baseline, not a multi-host HA design or third-party security certification.
-- Certificate issuance/renewal, centralized secret management/KMS, audited rotation, MFA, and automated browser security coverage remain deployment work.
+- Certificate issuance/renewal, external KMS/HSM custody, automated rotation scheduling, MFA, and automated browser security coverage remain deployment work; Phase 9 supplies explicit operator rotation commands.
 - Runtime verification still depends on the full Docker stack, even though the demo verifier now exercises the live WebSocket path when available with REST backfill fallback.
 - Phase 4 broker ordering/missed-Redis-removal, Phase 5 WebSocket/Redis-outage abuse, Phase 6 download concurrency, and post-Phase-7 proxy bucket isolation are deterministic application/component tests rather than live multi-worker/multi-backend/TCP load runs. Phase 7 lock concurrency uses real independent PostgreSQL sessions, but RabbitMQ failure is mocked rather than a live broker outage. Download and socket work limits remain per backend process; the Nginx path bounds one proxy instance but does not coordinate replicas or guarantee minimum client throughput. Email verification delivery is not implemented, and multi-socket presence can still mark a user offline when one of several sockets closes.
 - There is no full Merkle tree, external hash anchoring, or anomaly detection feature in the codebase.
@@ -174,12 +175,12 @@ flowchart LR
 | 5. Subscriber management interface/API | Complete | [`backend/app/api/routes/memberships.py`](backend/app/api/routes/memberships.py) `join_channel`, `leave_channel`, `list_members`, `list_pending_requests`, `create_invite`, `accept_invite`, `approve_member`, `add_member_direct`, `promote_member`, `demote_member`, `update_admin_permissions`, `remove_member`; Phase 5 covers invite races; Phase 6 binds existing email targets to immutable accounts and requires proof for unresolved targets | Email verification issuance/delivery is not implemented; non-invite flows are not all concurrency-tested | Medium | Use generic/user-ID invites in the demo and add a real verification provider only if pre-registration email delivery is required |
 | 6. Authentication | Complete | [`backend/app/services/auth_service.py`](backend/app/services/auth_service.py) session-bound access checks, row-locked refresh rotation/replay detection, idle/absolute lifetime, and revocation; [`backend/app/core/browser_security.py`](backend/app/core/browser_security.py) and browser auth routes provide rotating `HttpOnly`/`Secure`/`SameSite` refresh cookies plus exact-Origin/double-submit CSRF; frontend access tokens are memory-only; one-time WebSocket tickets remain | No automated real-browser end-to-end test and no MFA/external identity provider | High | Add a browser smoke test and MFA only if the deployment threat model requires them |
 | 7. Authorization/permissions | Complete for university MVP | [`backend/app/services/rbac.py`](backend/app/services/rbac.py); permission checks in channel and message services; upload download route checks membership/ownership/avatar/wallpaper-reference rules before returning bytes; existing email invite targets use immutable user IDs; unresolved targets require verified email | Absent email delivery and per-replica resource counters remain deployment caveats | High | Keep backend boundaries strong and document deployment limitations honestly |
-| 8. Message encryption | Mostly complete | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) `encrypt_message`, `decrypt_message`, `encrypt_json_payload`, `decrypt_json_payload`; used in message service | Dev fallback key exists; encryption key must stay out of tracked files | High | Treat encryption key as an external secret only and keep the env story explicit |
+| 8. Message/upload encryption | Mostly complete operationally | [`backend/app/core/encryption.py`](backend/app/core/encryption.py) v2 envelopes/key ring; [`backend/app/core/upload_encryption.py`](backend/app/core/upload_encryption.py) chunked AES-GCM format; [`backend/app/db/crypto_tool.py`](backend/app/db/crypto_tool.py) status/migration/rotation; migration 0022; 35 focused Phase 9 tests | Server holds decryption keys; no external KMS/HSM or automatic scheduler; backups/physical remanence remain operator concerns | High | Run status/migration/rotation deliberately, keep keys external, and remove old keys only at zero references/errors |
 | 9. Event/activity logging | Mostly complete | [`backend/app/services/event_service.py`](backend/app/services/event_service.py) `log_event`; calls from auth/channel/message/upload services; [`backend/app/api/routes/events.py`](backend/app/api/routes/events.py) `list_channel_events`; [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py) hash-chain verification | Event logging is not guaranteed if the logging path fails; event visibility and integrity verification are limited to channel managers | Medium | Keep the log path best-effort, document the limitation, and backfill legacy event hashes before final demos |
 | 10. Distributed messaging via RabbitMQ/AMQP/etc. | Mostly complete | Bounded topology; versioned desired state/migration `0019`; worker generation check plus row lock/current DB authorization; reconnect and global repair command; demo/delivery verifiers; Delivery Monitor | Current state dominates stale commands, but asynchronous current reconciliation can remain retrying/dead-lettered during a prolonged outage and still needs a live outage test | High | Keep the verifiers and add live broker outage/recovery coverage later |
 | 11. Docker/environment setup | Complete for MVP; production-oriented single-host profile validated | Direct development Compose, local/demo hardened Compose, and [`docker-compose.production.yml`](docker-compose.production.yml); production TLS/security headers, internal-only services, explicit migrations, separate database roles, authenticated infrastructure, non-root/read-only app containers, and required secrets were live-validated | Public certificate lifecycle, centralized secrets/KMS, multi-host HA, and load certification remain outside this profile | Medium | Use the production profile only with deployment-owned secrets and a trusted certificate; keep development profiles clearly separated |
 | 12. Documentation | Mostly complete | [`README.md`](README.md); [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md); [`docs/TESTING.md`](docs/TESTING.md); [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md); [`docs/SECURITY.md`](docs/SECURITY.md) | No final report, no screenshot pack, no polished API reference, no user manual beyond demo notes | Medium | Add a final report, screenshots, and a concise API/deployment/user manual bundle |
-| 13. Testing | Mostly complete | P0 plus Phase 1–8 and post-Phase-7 security suites cover auth/session/CSRF, authorization, production configuration, uploads/media, identifiers, broker desired state, bounded sync/download/socket work, invite races/identity binding, trusted proxy isolation, and failure behavior. Phase 8 also live-ran the full RabbitMQ -> worker -> Redis -> WebSocket demo through the production network | No frontend browser-automation suite, live broker-outage CI job, or slow-client/load certification | High | Add one Playwright smoke test and controlled broker-outage/slow-reader tests later |
+| 13. Testing | Mostly complete | P0 plus Phase 1-9 and post-Phase-7 suites cover auth/session/CSRF, authorization, production configuration, encrypted messages/uploads, migration/rotation/tamper/crash recovery, identifiers, broker desired state, bounded sync/download/socket work, invite identity, trusted proxy isolation, and failure behavior. Phase 8 also live-ran the full RabbitMQ -> worker -> Redis -> WebSocket demo through the production network | No frontend browser-automation suite, live broker-outage CI job, or slow-client/load certification | High | Add one Playwright smoke test and controlled broker-outage/slow-reader tests later |
 | 14. Monitoring/message-flow visibility | Mostly complete for MVP | Minimal `/health`, dependency-aware `/ready`, channel event APIs, frontend event log, `/v1/admin/delivery/*`, and Delivery Monitor | No metrics dashboard or tracing; delivery monitor is scoped to managed channels | Medium | Add metrics/tracing only if deployment operations require them |
 | 15. Merkle-tree or hashing/data-integrity feature | Mostly complete for hash-chain v1 | SHA-256 event hash chain in [`backend/app/services/event_integrity_service.py`](backend/app/services/event_integrity_service.py); migration `0013_event_integrity`; endpoint `GET /v1/channels/{id}/events/integrity`; script [`scripts/backfill_event_integrity.py`](scripts/backfill_event_integrity.py); frontend Event Log integrity badge/check | No full Merkle tree, no external notarization, and legacy rows need explicit backfill | Low | Keep the hash-chain explanation honest; add optional Merkle batch roots or external anchoring only if requested |
 | 16. Optional anomaly detection / AI feature | Missing | Repo-wide search found no anomaly/AI module | Not present | Low | Only add this if your supervisor explicitly expects it; otherwise do not spend time here |
@@ -410,18 +411,19 @@ flowchart LR
 - Short-lived hashed Redis WebSocket tickets with atomic single-use consumption in [`backend/app/services/ws_ticket_service.py`](backend/app/services/ws_ticket_service.py).
 - Local and Redis-distributed socket revocation plus access-expiry closure in [`backend/app/realtime/auth_control.py`](backend/app/realtime/auth_control.py) and [`backend/app/realtime/ws_manager.py`](backend/app/realtime/ws_manager.py).
 - Role/permission checks in [`backend/app/services/rbac.py`](backend/app/services/rbac.py).
-- Message encryption at rest in [`backend/app/core/encryption.py`](backend/app/core/encryption.py).
+- Versioned message encryption and historical-key selection in [`backend/app/core/encryption.py`](backend/app/core/encryption.py).
+- Chunked authenticated upload storage/decryption in [`backend/app/core/upload_encryption.py`](backend/app/core/upload_encryption.py).
 - Rate limiting on auth and publish endpoints.
 - Unauthorized publish/read events are logged.
 - Upload downloads are authenticated and authorized; owners and members of the attached channel can access content.
 - Upload creation, content storage, content access, and size/checksum store failures are logged; attachment publish requests only accept upload IDs and derive metadata server-side.
 - Upload PUT bodies are streamed with bounded size/checksum validation, failure cleanup, row-locked finalization, and immutable stored bytes.
-- Upload GET bodies use `FileResponse` streaming and atomic per-user/client-IP/process-global leases that release every dimension on completion/cancellation/failure; a separate Nginx path adds bounded proxy admission/timeouts.
+- New upload paths contain AES-GCM ciphertext; GET uses bounded authenticated decryption plus atomic per-user/client-IP/process-global leases that release every dimension on completion/cancellation/integrity/send failure. Historical plaintext `FileResponse` exists only during an explicit compatibility window.
 - Existing-account email invitations resolve to immutable user IDs. Unresolved email targets require explicit verification, and profile email changes clear prior verification.
 - REST `/sync` membership updates are scoped to approved channels plus self-targeted membership changes, including post-removal notification.
 - REST `/sync` message queries use one decreasing global row budget and SQL `LIMIT`, with deterministic channel/sequence cursors.
 - Empty WebSocket subscription sets reject ordinary channel traffic while self-targeted membership removal remains deliverable.
-- Pending members are denied private read-derived state. `ENVIRONMENT` is required; only explicit dev/development/local/test labels permit development secrets, while missing/empty values and unsafe production-like JWT or encryption-key configuration fail startup.
+- Pending members are denied private read-derived state. `ENVIRONMENT` is required; only explicit dev/development/local/test labels permit the warned deterministic data key, while production-like JWT/key-ring/plaintext-policy violations fail startup.
 - SVG uploads are rejected to keep protected media rendering focused on ordinary photo/video/audio content.
 - Event audit rows are tamper-evident through a per-scope SHA-256 hash chain with an authorized verification endpoint.
 
@@ -429,12 +431,11 @@ flowchart LR
 
 - Access tokens are intentionally available to the running frontend JavaScript process, although they are no longer persisted.
 - The production CSP permits framework-required inline script/style execution; it does not permit `unsafe-eval`.
-- A real encryption key must remain outside tracked files and be provided through the environment.
+- Every real current/historical master key must remain outside tracked files and be provided through deployment secrets.
 
 ### Missing / Limited Security
 
-- No centralized secret store, KMS integration, or automated key rotation; production-like startup validation now rejects unsafe local secret configuration.
-- No key rotation or KMS integration.
+- No centralized KMS/HSM integration or automatic rotation scheduler; production-like startup validation rejects unsafe key-ring/plaintext configuration, and Phase 9 provides explicit bounded rotation commands.
 - No automated real-browser test of the cookie/CSRF flow.
 - No external notarization or off-database anchoring for event hashes.
 
@@ -580,6 +581,7 @@ The frontend is real and fairly complete.
 - On 2026-08-10, Phase 7 regressions passed `23` tests, Phase 1–6 security suites passed `117`, and the complete backend suite passed `218` tests against disposable PostgreSQL 16. Fresh and representative 0020→0021 migrations passed; one historical attachment mismatch was normalized without deleting either relation and PostgreSQL rejected a later mismatch. The historical advisory/binding cycle and channel/member serialization used independent real PostgreSQL sessions; RabbitMQ failure was mocked. Frontend typecheck and both Compose render checks passed.
 
 - On 2026-08-11, Phase 8 regressions passed `13` tests, the requested Phase 1-8/post-Phase-7 set passed `128 tests, 1 warning`, and the complete backend suite passed `252 tests, 1 warning`. Frontend typecheck/build, all Compose renders, and production image builds passed. A live disposable production stack passed TLS redirect/header/host/docs/health checks, default-credential rejection, runtime database privilege denials, port-isolation inspection, and the full RabbitMQ -> worker -> Redis -> WebSocket demo verifier. Its certificate was deliberately self-signed; no public trust or load certification is claimed.
+- On 2026-08-11, Phase 9 focused tests passed `35` cases and the complete backend suite passed `287 tests, 1 warning` against disposable PostgreSQL 16. Frontend typecheck/build and all three Compose renders passed. Real filesystem tests covered multi-megabyte bounded reads, ciphertext marker absence, malformed/tampered framing, exact download, migration crash recovery, idempotency, rotation, and old-key removal. Fresh `->0022` and representative `0021->0022` schema upgrades passed. A fresh production-profile stack passed the complete RabbitMQ/worker/Redis/WebSocket verifier; direct inspection proved encrypted message/upload storage, exact authorized download, Range rejection, idempotent migration reruns, HTTPS health/redirect behavior, and absence of JWT/data keys in the worker.
 
 ### Practical Testing Plan
 
@@ -607,7 +609,7 @@ The frontend is real and fairly complete.
 
 ### Common Failure Points
 
-- Missing `MESSAGE_ENCRYPTION_KEY`.
+- Missing/invalid `DATA_ENCRYPTION_ACTIVE_KEY_ID` or `DATA_ENCRYPTION_KEYS`; removing a still-referenced historical key also fails reads by design.
 - RabbitMQ not ready when backend starts.
 - PostgreSQL not ready when migrations run.
 - Windows build differences.
@@ -648,12 +650,12 @@ The frontend is real and fairly complete.
 | Architecture | 72 | Clear service separation and realistic distributed components, but some consistency and routing risks remain |
 | Backend quality | 68 | Solid domain logic and validation, but large services, a thin repo layer, and a few risky shortcuts |
 | Frontend/UI | 82 | Surprisingly complete for a graduation project, with actual channel, membership, publishing, and event-log flows |
-| Security | 86 | Session-bound auth, replay detection, `HttpOnly` rotating refresh cookies with Origin/CSRF controls, memory-only access tokens, one-time WebSocket tickets, distributed revocation, fail-safe limits, protected downloads, encryption, and lifecycle-aware uploads exist; MFA, email delivery, centralized secrets, and browser automation remain |
+| Security | 89 | Session-bound auth, replay detection, `HttpOnly` rotating refresh cookies with Origin/CSRF controls, memory-only access tokens, one-time WebSocket tickets, distributed revocation, fail-safe limits, versioned message/upload encryption, rotation tooling, and lifecycle-aware authorization exist; MFA, email delivery, external KMS, and browser automation remain |
 | Persistence/database | 84 | Strong schema coverage and durable storage, with only a few schema-quality improvements needed |
-| Testing | 68 | Full backend regressions and a live production-network broker/WebSocket verifier pass, but browser automation, outage CI, and load testing remain thin |
+| Testing | 72 | Full backend regressions, 35 Phase 9 storage/tamper/rotation tests, and a live production-network broker/WebSocket verifier pass, but browser automation, outage CI, and load testing remain thin |
 | Deployment | 86 | Development/demo paths remain separate from a live-validated TLS, least-privilege, internal-network production profile; managed secrets, public certificate lifecycle, and multi-host HA remain operator work |
-| Documentation | 78 | Core architecture/security/testing/demo/status docs and a dedicated Phase 8 report are synchronized; screenshots and final submission packaging can still improve |
-| Overall graduation-project readiness | 82 | Functionally strong and production-oriented for a single-host university deployment, with remaining gaps stated explicitly |
+| Documentation | 81 | Core architecture/security/testing/demo/status docs and dedicated Phase 8/9 reports are synchronized; screenshots and final submission packaging can still improve |
+| Overall graduation-project readiness | 84 | Functionally strong and production-oriented for a single-host university deployment, with remaining gaps stated explicitly |
 
 ## 14. Final MVP Status
 

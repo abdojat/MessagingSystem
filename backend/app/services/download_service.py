@@ -1,11 +1,17 @@
 """Bounded protected-file streaming primitives."""
 
 import asyncio
+import logging
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, StreamingResponse
+
+from app.core.upload_encryption import UploadEncryptionError, iter_decrypted_upload_async
+
+logger = logging.getLogger(__name__)
 
 
 class DownloadLease:
@@ -108,6 +114,63 @@ class LeasedFileResponse(FileResponse):
     def __init__(self, path: str | Path, lease: DownloadLease, **kwargs: Any) -> None:
         super().__init__(path=path, **kwargs)
         self._download_lease = lease
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self._download_lease.release()
+
+
+class LeasedEncryptedFileResponse(StreamingResponse):
+    """Authenticated plaintext stream backed only by encrypted file bytes."""
+
+    def __init__(
+        self,
+        path: str | Path,
+        lease: DownloadLease,
+        *,
+        upload_id: UUID,
+        key_id: str | None,
+        plaintext_size: int,
+        media_type: str,
+        on_integrity_failure: Callable[[str], Awaitable[None]] | None = None,
+    ) -> None:
+        self._encrypted_path = Path(path)
+        self._download_lease = lease
+        self._upload_id = upload_id
+        self._key_id = key_id
+        self._plaintext_size = int(plaintext_size)
+        self._on_integrity_failure = on_integrity_failure
+        super().__init__(
+            self._body_iterator(),
+            media_type=media_type,
+            headers={
+                "Content-Length": str(self._plaintext_size),
+                "Cache-Control": "private, no-store",
+                "Accept-Ranges": "none",
+            },
+        )
+
+    async def _body_iterator(self):
+        try:
+            async for chunk in iter_decrypted_upload_async(
+                self._encrypted_path,
+                expected_upload_id=self._upload_id,
+                expected_key_id=self._key_id,
+                expected_plaintext_size=self._plaintext_size,
+            ):
+                yield chunk
+        except (UploadEncryptionError, OSError):
+            logger.warning("protected upload integrity failure upload_id=%s", self._upload_id)
+            if self._on_integrity_failure is not None:
+                try:
+                    await self._on_integrity_failure("storage_integrity_failure")
+                except Exception:
+                    logger.warning("failed to persist upload integrity event upload_id=%s", self._upload_id)
+            # Headers may already have been sent. Abort the transfer with a
+            # bounded application exception and never expose crypto details.
+            raise RuntimeError("protected upload transfer failed integrity validation") from None
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         try:

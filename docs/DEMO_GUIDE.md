@@ -13,9 +13,11 @@ docker compose down -v
 Prepare environment:
 ```bash
 cp .env.example .env
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 ```
-Paste the generated value into `MESSAGE_ENCRYPTION_KEY` in `.env`. Replace `JWT_SECRET` with a non-default demo secret.
+Choose a safe ID such as `demo-key`, paste the value into a one-entry
+`DATA_ENCRYPTION_KEYS` JSON object, and set `DATA_ENCRYPTION_ACTIVE_KEY_ID` to
+that ID in `.env`. Replace `JWT_SECRET` with a non-default demo secret.
 
 Start and inspect the stack:
 ```bash
@@ -105,11 +107,12 @@ What to show the supervisor:
 - The language switcher can show the same demo surfaces in English and Arabic, with Arabic using RTL layout.
 - User C is blocked from private channel/upload access.
 - PostgreSQL stores message ciphertext, not plaintext.
+- Finalized upload storage contains authenticated ciphertext, while authorized download reproduces the original file.
 
 ## 1) Start Services
 ```bash
 cp .env.example .env
-# set MESSAGE_ENCRYPTION_KEY in .env (recommended even for demo)
+# set DATA_ENCRYPTION_ACTIVE_KEY_ID and DATA_ENCRYPTION_KEYS in .env
 # optional initial admin: set SUPERADMIN_USERNAME and a unique 12+ character SUPERADMIN_PASSWORD
 docker compose up -d --build
 docker compose ps -a
@@ -166,9 +169,14 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
    - Optionally show a private channel where non-member read/publish is denied.
 16. Show ciphertext at rest:
 ```bash
-docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
+docker compose exec postgres psql -U postgres -d channels -c "select id, left(content_text, 40), content_json from messages order by created_at desc limit 5;"
+docker compose exec backend sh -lc "cd /app && python -m app.db.crypto_tool status"
 ```
-Expected: `content_text` is Fernet ciphertext (e.g., starts with `gAAAA`), not plaintext.
+Expected: new text starts with `enc:v2:<key-id>:` and status reports no
+plaintext/legacy/unreadable message or upload storage. Do not print keys or
+message plaintext. For a disposable upload marker proof, inspect only that the
+unique marker is absent from the finalized storage file, then show the
+authorized browser download matches it.
 17. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
 18. Optional superadmin proof:
    - Log in with the explicitly bootstrapped superadmin account and open the shield link (`/app/admin`).

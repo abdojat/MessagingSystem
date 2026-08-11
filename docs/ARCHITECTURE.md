@@ -8,7 +8,8 @@ Global administration is modeled independently from channel membership. `users.i
 - Backend (FastAPI)
   - Exposes REST + WebSocket endpoints.
   - Enforces authentication/authorization.
-  - Encrypts/decrypts message content.
+  - Encrypts/decrypts authorized message content through the versioned data-key ring.
+  - Encrypts upload bytes into authenticated chunk frames and streams authorized decryption.
   - Persists domain data and emits outbox/event entries.
 - Worker
   - Polls outbox entries.
@@ -134,7 +135,7 @@ sequenceDiagram
   C->>FE: Publish message
   FE->>BE: POST /v1/channels/{id}/messages (JWT)
   BE->>BE: AuthN + membership AuthZ check
-  BE->>BE: Encrypt message payload (Fernet)
+  BE->>BE: Encrypt message payload (v2 envelope + active key ID)
   BE->>PG: Save encrypted message + outbox + event log
   BE-->>FE: 201 message response (decrypted for authorized caller)
 
@@ -155,6 +156,51 @@ sequenceDiagram
   BE->>BE: AuthZ check + decrypt authorized message content
   BE-->>FE: Plaintext response for authorized users
 ```
+
+## Phase 9 data-at-rest architecture
+
+`DATA_ENCRYPTION_KEYS` is a bounded deployment-injected map of at most 32 safe
+key IDs to URL-safe base64 32-byte master keys. `DATA_ENCRYPTION_ACTIVE_KEY_ID`
+selects all new writes. Historical IDs remain readable while configured; the
+runtime never tries every key when a referenced ID is unknown.
+
+Master keys are domain-separated with HKDF-SHA256:
+
+- message v2: `info = MessagingSystem/message/v2`, then Fernet for the bounded message payload;
+- upload v1: `salt = upload UUID`, `info = MessagingSystem/upload/v1`, then AES-256-GCM for file chunks.
+
+Text rows use `enc:v2:<key-id>:<fernet-token>`. JSON rows use the strict single
+field envelope `{"_enc_v2":{"kid":"...","token":"..."}}`. The worker and
+RabbitMQ carry those encrypted fields unchanged. Only an authorized backend
+REST/WebSocket boundary decrypts them.
+
+New uploads are encrypted during the original request stream. No complete
+plaintext temporary file is created:
+
+```text
+request.stream -> 64 KiB plaintext buffer -> SHA-256 + AES-GCM frame
+               -> encrypted sibling temp -> fsync -> create-only finalization
+```
+
+`size_bytes`, `checksum`, and quota calculations retain logical plaintext
+semantics. Physical ciphertext is larger because every frame carries an AEAD
+tag and framing. After authorization, path containment, and download admission,
+the backend authenticates the header and yields decrypted 64 KiB chunks through
+`LeasedEncryptedFileResponse`. Database/audit work finishes before the slow
+transfer, and the existing lease releases exactly once on completion,
+cancellation, send failure, or integrity failure. Encrypted downloads reject
+HTTP Range because ciphertext offsets are not plaintext offsets.
+
+Migration `0022_phase9_upload_encryption` adds only metadata. Existing data is
+converted explicitly with `python -m app.db.crypto_tool`; message batches update
+storage fields without outbox/audit publication, and upload batches use fsynced
+same-directory ciphertext plus atomic replacement. The encrypted header is
+self-identifying, so a restart repairs the recoverable window where file
+replacement succeeded before the database metadata commit.
+
+Production injects the key ring into backend/migration/bootstrap processes.
+The worker receives database, RabbitMQ, and Redis configuration only; Nginx and
+the frontend never receive data-at-rest keys.
 
 ## Event Logging Points
 - `channel.created`
@@ -193,7 +239,7 @@ This is a practical hash-chain integrity layer, not a blockchain and not externa
 - Channel membership generations are serialized on the channel row and copied into realtime outbox events. Before decrypting a channel message, the WebSocket layer compares the event generation with its short-lived authorization cache and refreshes PostgreSQL immediately for newer or legacy events. A missed Redis removal signal therefore cannot authorize a newly published post-removal message.
 - Established WebSockets have a repository-controlled 16 KiB inbound frame/message ceiling at both Docker Uvicorn and application parsing. Each socket owns fixed-cardinality command/history token buckets and one dispatch lock. Subscribe/resume history shares one total per-command row cap rather than multiplying it per channel; a repeated identical subscribe/cursor returns an empty acknowledgement without repeating history work. Socket budget/cache state is removed on disconnect.
 - REST `/sync` preserves `(channel UUID, sequence)` ordering and uses `LIMIT remaining` per channel under one global page budget. It performs at most 100 bounded message queries and materializes at most the requested limit (maximum 500), rather than loading all missed history.
-- Protected upload GET responses authorize and finish database work first, then stream with Starlette `FileResponse`. One per-process atomic admission decision reserves user, trusted client-IP, and backend-global capacity; its idempotent lease releases every dimension on completion, cancellation, file/stat failure, ASGI send failure, or response construction failure. Active-key maps are bounded by the process-global cap because zero-count entries are removed.
+- Protected upload GET responses authorize and finish database work first, then stream bounded authenticated plaintext from encrypted storage through `LeasedEncryptedFileResponse` (legacy migration-window plaintext alone uses `FileResponse`). One per-process atomic admission decision reserves user, trusted client-IP, and backend-global capacity; its idempotent lease releases every dimension on completion, cancellation, file/stat/integrity failure, ASGI send failure, or response construction failure. Active-key maps are bounded by the process-global cap because zero-count entries are removed.
 - Message-attachment reads inherit channel lifecycle: channel-derived authorization requires an active channel, non-deleted message, and approved current membership. Upload ownership remains an independent authorization source across channel/message deletion; superadmin status alone is not a private-media read grant. Migration `0021_phase7_attachment_integrity` makes `messages.channel_id` authoritative through a composite `(message_id, channel_id)` foreign key after normalizing historical relation rows.
 - Targeted invites are one-use; generic invite links are reusable until revoke, expiry, or channel deletion. Acceptance/revocation/deletion lock the channel before the invite row, establishing one database ordering. An email target that belongs to an existing account is resolved at issuance and stores authoritative immutable `invited_user_id` plus a normalized email snapshot. An unresolved/pre-registration email target can be accepted only by an account whose exact normalized current email has non-null `email_verified_at`; profile email changes clear that timestamp. Generic acceptances are audited per effective membership transition and do not consume global `accepted_at` state.
 - Per-user RabbitMQ queues are bounded realtime buffers: default unused expiry is seven days, message TTL is 24 hours, and maximum length is 10,000 with oldest-message eviction. PostgreSQL message history and REST `/sync` recover anything missed or evicted.

@@ -1,7 +1,9 @@
 from functools import lru_cache
 import base64
+import hashlib
 from ipaddress import ip_network
 import json
+import re
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -12,6 +14,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Development conveniences must be selected explicitly. Every other label is
 # production-like so deployment aliases and typos fail safe.
 DEVELOPMENT_ENVIRONMENTS = {"dev", "development", "local", "test"}
+DATA_ENCRYPTION_KEY_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+MAX_DATA_ENCRYPTION_KEYS = 32
+DEVELOPMENT_DATA_KEY_ID = "development-only"
+DEVELOPMENT_DATA_KEY_SEED = b"MessagingSystem/development/data-encryption-key/v1"
 INSECURE_JWT_SECRETS = {
     "change-me",
     "change-this-jwt-secret",
@@ -23,8 +29,71 @@ INSECURE_JWT_SECRETS = {
 }
 
 
+def _decode_32_byte_key(value: str, *, setting_name: str) -> bytes:
+    try:
+        decoded = base64.b64decode(value.encode("ascii"), altchars=b"-_", validate=True)
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise ValueError(f"{setting_name} must contain URL-safe base64-encoded 32-byte keys") from exc
+    if len(decoded) != 32:
+        raise ValueError(f"{setting_name} must contain URL-safe base64-encoded 32-byte keys")
+    return decoded
+
+
+def _parse_data_encryption_keys(value: Any) -> dict[str, str]:
+    if value in (None, ""):
+        return {}
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+
+        def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, item in pairs:
+                if key in result:
+                    raise ValueError("DATA_ENCRYPTION_KEYS contains a duplicate key ID")
+                result[key] = item
+            return result
+
+        try:
+            parsed = json.loads(raw, object_pairs_hook=reject_duplicates)
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ValueError("DATA_ENCRYPTION_KEYS must be a JSON object with unique key IDs") from exc
+    elif isinstance(value, dict):
+        parsed = dict(value)
+    else:
+        raise ValueError("DATA_ENCRYPTION_KEYS must be a JSON object")
+
+    if not isinstance(parsed, dict):
+        raise ValueError("DATA_ENCRYPTION_KEYS must be a JSON object")
+    if len(parsed) > MAX_DATA_ENCRYPTION_KEYS:
+        raise ValueError(f"DATA_ENCRYPTION_KEYS may contain at most {MAX_DATA_ENCRYPTION_KEYS} keys")
+
+    normalized: dict[str, str] = {}
+    for raw_key_id, raw_key in parsed.items():
+        key_id = str(raw_key_id)
+        if not DATA_ENCRYPTION_KEY_ID_RE.fullmatch(key_id):
+            raise ValueError("DATA_ENCRYPTION_KEYS contains an invalid key ID")
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            raise ValueError("DATA_ENCRYPTION_KEYS values must be URL-safe base64 strings")
+        key_value = raw_key.strip()
+        _decode_32_byte_key(key_value, setting_name="DATA_ENCRYPTION_KEYS")
+        normalized[key_id] = key_value
+    return normalized
+
+
+def _development_data_key() -> str:
+    digest = hashlib.sha256(DEVELOPMENT_DATA_KEY_SEED).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii")
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
 
     app_name: str = "channels-backend"
     environment: str
@@ -116,6 +185,14 @@ class Settings(BaseSettings):
     api_request_body_max_bytes: int = Field(default=128 * 1024, ge=1024, le=10 * 1024 * 1024)
     uploads_base_dir: str = "/data/uploads"
     api_v1_prefix: str = "/v1"
+    data_encryption_active_key_id: str = ""
+    # Kept as Any so environment JSON reaches the duplicate-aware parser
+    # without pydantic-settings decoding duplicate object keys first.
+    data_encryption_keys: Any = ""
+    allow_legacy_plaintext_messages: bool = False
+    allow_legacy_plaintext_uploads: bool = False
+    # Deprecated Phase 1 compatibility inputs. New writes always use the data
+    # key ring; MESSAGE_ENCRYPTION_KEY is legacy-v1 decryption/migration only.
     message_encryption_enabled: bool = True
     message_encryption_key: str = ""
     superadmin_username: str = ""
@@ -170,6 +247,33 @@ class Settings(BaseSettings):
             raise ValueError("ENVIRONMENT must not be empty")
         return normalized
 
+    @model_validator(mode="after")
+    def _validate_data_encryption_configuration(self) -> "Settings":
+        key_map = _parse_data_encryption_keys(self.data_encryption_keys)
+        active_key_id = self.data_encryption_active_key_id.strip()
+
+        if not key_map and not active_key_id and self.environment in DEVELOPMENT_ENVIRONMENTS:
+            active_key_id = DEVELOPMENT_DATA_KEY_ID
+            key_map = {DEVELOPMENT_DATA_KEY_ID: _development_data_key()}
+        else:
+            if not key_map:
+                raise ValueError("DATA_ENCRYPTION_KEYS must configure at least one key")
+            if not active_key_id:
+                raise ValueError("DATA_ENCRYPTION_ACTIVE_KEY_ID is required")
+
+        if not DATA_ENCRYPTION_KEY_ID_RE.fullmatch(active_key_id):
+            raise ValueError("DATA_ENCRYPTION_ACTIVE_KEY_ID has an invalid format")
+        if active_key_id not in key_map:
+            raise ValueError("DATA_ENCRYPTION_ACTIVE_KEY_ID must reference a configured key")
+
+        legacy_key = self.message_encryption_key.strip()
+        if legacy_key:
+            _decode_32_byte_key(legacy_key, setting_name="MESSAGE_ENCRYPTION_KEY")
+
+        self.data_encryption_active_key_id = active_key_id
+        self.data_encryption_keys = key_map
+        return self
+
     @field_validator("trusted_proxy_cidrs", mode="before")
     @classmethod
     def _parse_trusted_proxy_cidrs(cls, value: Any) -> list[str]:
@@ -200,6 +304,11 @@ class Settings(BaseSettings):
         if self.auth_cookie_secure is False:
             raise ValueError("AUTH_COOKIE_SECURE cannot be disabled in production-like environments")
 
+        if self.allow_legacy_plaintext_messages:
+            raise ValueError("ALLOW_LEGACY_PLAINTEXT_MESSAGES cannot be enabled in production-like environments")
+        if self.allow_legacy_plaintext_uploads:
+            raise ValueError("ALLOW_LEGACY_PLAINTEXT_UPLOADS cannot be enabled in production-like environments")
+
         for origin in self.cors_origins:
             if origin == "*":
                 raise ValueError("credentialed wildcard CORS is forbidden in production-like environments")
@@ -226,17 +335,6 @@ class Settings(BaseSettings):
         # deployment secrets before the application starts.
         if len(jwt_secret) < 32 or len(set(jwt_secret)) < 8:
             raise ValueError("JWT_SECRET must be at least 32 characters with reasonable entropy")
-
-        if self.message_encryption_enabled:
-            encryption_key = self.message_encryption_key.strip()
-            if not encryption_key:
-                raise ValueError("MESSAGE_ENCRYPTION_KEY is required when encryption is enabled")
-            try:
-                decoded_key = base64.b64decode(encryption_key.encode("ascii"), altchars=b"-_", validate=True)
-            except (ValueError, UnicodeEncodeError) as exc:
-                raise ValueError("MESSAGE_ENCRYPTION_KEY must be a valid Fernet key") from exc
-            if len(decoded_key) != 32:
-                raise ValueError("MESSAGE_ENCRYPTION_KEY must be a valid Fernet key")
 
         return self
 

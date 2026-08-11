@@ -255,6 +255,62 @@ cd backend
 python -B -m pytest -q tests/security/test_phase8_production_hardening.py
 ```
 
+## Security Hardening Phase 9
+
+`backend/tests/security/test_phase9_data_protection.py` contains 35 focused
+tests covering:
+
+- production key-ring requirements, active-key membership, safe IDs, strict
+  base64/32-byte length, duplicate JSON keys, the 32-key bound, development-only
+  fallback, plaintext-policy rejection, and secret-free validation errors;
+- v2 text/JSON envelopes, active-key switching, historical-key reads, unknown
+  key/tamper failure, legacy-v1 migration compatibility, and plaintext failure;
+- real multi-megabyte filesystem ciphertext inspection, byte-exact bounded
+  decrypt streaming, logical SHA-256/size preservation, malformed header/frame
+  bounds, AES-GCM tamper rejection, response send/integrity lease cleanup, and
+  encrypted Range rejection;
+- message migration/rotation idempotency with unchanged IDs/sequence/type/time
+  and no new outbox/audit rows;
+- plaintext upload migration, file-replaced/DB-version-0 crash recovery without
+  double encryption, upload rotation, crypto status, and old-key removal proof.
+
+Run:
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_phase9_data_protection.py
+python -B -m pytest -q
+```
+
+Verified on 2026-08-11 against disposable PostgreSQL 16: Phase 9 focused
+`35 passed`. A fresh database upgraded through
+`0022_phase9_upload_encryption`; a representative 0021 database retained its
+historical upload with `storage_encryption_version=0` and null key ID after the
+schema upgrade. Cryptographic conversion remained a separate operator action.
+The complete backend suite passed `287 passed, 1 warning`; the warning remains
+the existing passlib/argon2 metadata deprecation. Frontend typecheck and
+production build passed, as did development, hardened-demo, and production
+Compose rendering. A disposable production-profile stack passed the full demo
+verifier over the real PostgreSQL/outbox -> RabbitMQ -> worker -> Redis ->
+WebSocket path. Direct storage inspection found no upload/message plaintext
+marker, authorized download was byte-exact, encrypted Range returned 416, both
+migration commands were idempotent, and the running worker had no JWT or
+data-encryption environment keys.
+
+Operator preflight/postflight:
+
+```bash
+python -m app.db.crypto_tool status
+python -m app.db.crypto_tool migrate-messages
+python -m app.db.crypto_tool migrate-uploads
+python -m app.db.crypto_tool rotate-messages --to-key-id <active-id>
+python -m app.db.crypto_tool rotate-uploads --to-key-id <active-id>
+python -m app.db.crypto_tool status
+```
+
+Do not run database-resetting tests, crypto maintenance, or the live demo
+verifier concurrently against the same database/storage volume.
+
 ## Automated Tests
 Backend P0 tests:
 - `test_channel_creation_generates_slug_and_logs_event`

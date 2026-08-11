@@ -42,7 +42,7 @@ Pub/Sub decouples producers from consumers:
 - JWT signing secret is env-based (`JWT_SECRET`).
 - Protected routes require auth dependencies.
 - Channel actions are guarded by role/permission checks.
-- Message content is encrypted at rest with `MESSAGE_ENCRYPTION_KEY`.
+- New message content uses explicit-key-ID v2 encryption from the bounded data key ring; new upload files use chunked authenticated AES-GCM storage. `MESSAGE_ENCRYPTION_KEY` is legacy-v1 migration/decryption only.
 - Unauthorized publish/read attempts generate security event records.
 
 ## Event Logging

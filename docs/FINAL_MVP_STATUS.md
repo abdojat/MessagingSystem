@@ -8,20 +8,21 @@
 - Publish/subscribe message persistence with PostgreSQL as the source of truth.
 - Event logging for the key channel, membership, message, and security flows.
 - Tamper-evident audit log integrity for new events through a per-scope SHA-256 hash chain.
-- Message encryption at rest on the server side.
+- Message encryption v2 with an explicit key ID, bounded historical key ring, HKDF-SHA256 domain separation, and fail-closed authenticated Fernet decryption.
 - Private upload download protection with authentication and authorization checks.
-- Uploaded content is streamed with bounded size/checksum validation and becomes immutable after the first successful store.
-- Authorized upload downloads are streamed with backpressure and one atomic per-user/per-client-IP/process-global boundary in each backend; authorization and audit DB work finishes before the file transfer.
+- New upload bytes are stored only as versioned chunked AES-256-GCM ciphertext; upload UUID/key ID/header/frame context is authenticated while logical size/checksum/quota semantics remain unchanged.
+- Authorized upload downloads authenticate/decrypt in bounded 64 KiB chunks with one atomic per-user/per-client-IP/process-global boundary in each backend; authorization and audit DB work finishes before the file transfer, encrypted Range requests are rejected, and integrity/send/cancellation paths release the lease.
 - Message attachments support protected photo, video, and audio publishing, including attachment-only messages.
 - Attachment publish requests accept only upload `file_id` references, with trusted attachment metadata generated server-side.
 - Upload create/store/access and upload store failure events are logged for audit visibility.
 - Profile and channel avatar uploads use validated image references and protected-media access rules.
 - Profile chat wallpaper uploads are stored through the backend upload API and saved on the current user's profile.
 - Safe identifier validation for usernames, channel slugs, and broker-facing routing identifiers.
-- `ENVIRONMENT` is mandatory: missing/empty values fail configuration, only explicit `dev`/`development`/`local`/`test` labels permit development secret behavior, and every other label rejects missing, placeholder, weak, or invalid JWT/message-encryption secrets.
+- `ENVIRONMENT` is mandatory: only explicit development/test labels permit the warned deterministic data key; every production-like label requires a valid bounded key ring/active ID and rejects plaintext compatibility.
 - Login/password/refresh/logout inputs and ordinary raw request bodies are bounded before expensive authentication work; protected upload content remains separately streamed and bounded.
 - Security-sensitive database transactions use a documented lock order, and worker delivery diagnostics are isolated from authoritative retry/dead-letter commits.
 - PostgreSQL enforces that each message attachment's channel matches its authoritative message through migration `0021_phase7_attachment_integrity`.
+- Migration `0022_phase9_upload_encryption` adds constrained upload storage version/key metadata; bounded explicit CLI commands provide crypto status, legacy migration, crash recovery, and message/upload key rotation without republishing messages.
 - REST membership-event sync is channel-scoped while retaining self-targeted removal notifications; empty WebSocket subscriptions do not act as wildcards; pending memberships do not gain private read-derived privileges.
 - RabbitMQ membership topology uses versioned PostgreSQL desired state; stale opposite commands are rejected, obsolete slug keys are removed, and reconnect/global reconciliation covers desired bindings and stale undesired bindings.
 - Realtime message events carry membership generations and are authorized before WebSocket decryption; `/sync` message materialization is bounded by its global page limit.
@@ -49,6 +50,7 @@
 - Verified during Phase 7 final application/database hardening on 2026-08-10 against disposable PostgreSQL 16: the focused Phase 7 suite passed (`23 passed, 1 warning`), Phase 1–6 security suites passed (`117 passed, 1 warning`), and the complete backend suite passed (`218 passed, 1 warning`). Fresh and representative 0020→0021 upgrades passed, including normalization of one deliberately inconsistent attachment without relation loss and PostgreSQL rejection of a later mismatch. Independent database sessions exercised the historical lock cycle and channel/member concurrency; RabbitMQ failure was mocked. Frontend typecheck and both Compose render checks passed.
 - Verified during the post-Phase-7 targeted repair on 2026-08-11 against disposable PostgreSQL 16: the new focused suite passed (`21 passed`), Phase 6–7 passed (`42 passed, 1 warning`), and the complete backend suite passed (`239 passed, 1 warning`). Frontend typecheck and direct/hardened Compose render checks passed. Nginx configuration was unchanged and no new proxy load or production-hardening claim is made.
 - Verified during Phase 8 production hardening on 2026-08-11: the focused suite passed (`13 passed`), the requested Phase 1-8/post-Phase-7 regression set passed (`128 passed, 1 warning`), and the complete backend suite passed (`252 passed, 1 warning`). Frontend typecheck and production build passed; development, hardened-demo, and production Compose rendering passed; production images built; the live TLS profile enforced redirect/security headers/host filtering/docs denial/minimal health, rejected default unauthenticated infrastructure credentials, denied runtime database role escalation, exposed only proxy ports, and passed the complete RabbitMQ -> worker -> Redis -> WebSocket demo verifier.
+- Verified during Phase 9 data protection on 2026-08-11: the focused suite passed (`35 passed`) and the complete backend passed (`287 passed, 1 warning`) against disposable PostgreSQL 16; frontend typecheck/build and all three Compose renders passed. Real filesystem tests proved plaintext markers absent from finalized upload bytes, exact bounded download, tamper rejection, crash recovery, rotation, and old-key removal. Fresh `->0022` and representative `0021->0022` schema upgrades passed. A disposable production-profile stack passed the full RabbitMQ/worker/Redis/WebSocket demo, exact encrypted-upload boundary inspection, 416 Range policy, HTTPS health/redirect checks, and idempotent migration reruns. Every supplied Compose worker receives only database/broker/fanout settings, not JWT/data-encryption keys.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 - Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.
@@ -97,7 +99,7 @@
 - A real email-verification delivery and completion flow for pre-registration email invites.
 - Full RabbitMQ outage/DLQ integration tests in CI.
 - Frontend automated smoke coverage.
-- Publicly trusted certificate automation, centralized secret management/KMS, and audited secret rotation.
+- Publicly trusted certificate automation, centralized KMS/HSM-backed secret management, and automated/audited rotation scheduling. Phase 9 rotation itself is an explicit operator command.
 - Optional operational dashboards or extra advanced features only if the supervisor explicitly wants them.
 
 ## Exact Verification Commands

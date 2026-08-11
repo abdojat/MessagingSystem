@@ -14,6 +14,7 @@ University final-year project implementing a secure distributed channel messagin
 - Reliability: PostgreSQL outbox status tracking, worker retry/backoff, RabbitMQ DLQ, admin Delivery Monitor
 - Abuse resistance: atomic Redis/local-fallback rate limits, WebSocket frame/command/history budgets, message/protocol bounds, account quotas, bounded RabbitMQ user queues, and paced Redis fanout retries
 - Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
+- Data protection: versioned message encryption, authenticated chunked upload storage, bounded migration/status tooling, and explicit historical-key rotation
 - Platform administration: environment-bootstrapped superadmin, global audit view, user/session controls, channel suspension/restoration, and global delivery recovery
 
 ## Services
@@ -27,8 +28,9 @@ University final-year project implementing a secure distributed channel messagin
 ## Quick Start
 ```bash
 cp .env.example .env
-# set MESSAGE_ENCRYPTION_KEY in .env
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# For non-development data, generate a 32-byte master key, assign a safe key ID,
+# and place both values in DATA_ENCRYPTION_* in the untracked .env:
+python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 
 docker compose config
 docker compose up -d --build
@@ -90,8 +92,10 @@ Important:
 - `WS_TICKET_TTL_SECONDS` (single-use Redis-backed WebSocket ticket lifetime, default `30` seconds)
 - `WS_MAX_INBOUND_MESSAGE_BYTES` (default `16384`; enforced by Docker Uvicorn and again before application JSON parsing)
 - `WS_COMMAND_BUDGET_CAPACITY`, `WS_COMMAND_BUDGET_REFILL_PER_SECOND`, `WS_HISTORY_BUDGET_CAPACITY`, `WS_HISTORY_BUDGET_REFILL_PER_SECOND`, and `WS_HISTORY_BATCH_LIMIT` (per-socket weighted work and history-row bounds)
-- `MESSAGE_ENCRYPTION_ENABLED=true`
-- `MESSAGE_ENCRYPTION_KEY` (Fernet key)
+- `DATA_ENCRYPTION_ACTIVE_KEY_ID` (safe ID for all new message/upload writes)
+- `DATA_ENCRYPTION_KEYS` (JSON object containing at most 32 historical/current URL-safe base64 32-byte master keys)
+- `MESSAGE_ENCRYPTION_KEY` (deprecated legacy-v1 Fernet decryption/migration key only; new writes never use it)
+- `ALLOW_LEGACY_PLAINTEXT_MESSAGES`, `ALLOW_LEGACY_PLAINTEXT_UPLOADS` (explicit migration-window compatibility; production-like environments reject `true`)
 - `UPLOAD_MAX_SIZE_BYTES` (defaults to 25 MiB; upload bodies are streamed and bounded by this value)
 - `API_REQUEST_BODY_MAX_BYTES` (defaults to 128 KiB for ordinary `POST`/`PUT`/`PATCH`/`DELETE` bodies; the protected upload-content `PUT` keeps its separate streaming limit)
 - `MESSAGE_TEXT_MAX_BYTES`, `MESSAGE_JSON_MAX_BYTES`, `MESSAGE_JSON_MAX_DEPTH` (validated before encryption/outbox work)
@@ -114,8 +118,8 @@ Important:
 - Keep `.env` local only; the repository tracks `.env.example` for documentation.
 
 Development note:
-- In `dev`, `development`, `local`, and `test`, an empty `MESSAGE_ENCRYPTION_KEY` uses a fallback key.
-- Every other environment label, including unknown deployment aliases, is production-like: startup rejects missing/default/weak JWT secrets and a missing or invalid Fernet key while message encryption is enabled.
+- In explicit `dev`, `development`, `local`, and `test`, an empty data key ring uses a deterministic development-only master key and logs a warning. Never use that fallback for deployment data.
+- Every other environment label, including unknown deployment aliases, is production-like: startup rejects missing/default/weak JWT secrets, missing/invalid data key rings, unknown active IDs, and plaintext-compatibility flags.
 - Access JWTs are bound to their database session. Logout, explicit revocation, logout-all, replay detection, absolute expiry, and account deactivation invalidate later HTTP authentication immediately.
 - WebSocket clients obtain a short-lived, one-time opaque ticket with `POST /auth/ws-ticket`; long-lived access JWTs are not accepted in WebSocket URLs. Redis control events close matching sockets across backend instances when Redis is available.
 - Browser clients use `/auth/browser/login`, `/refresh`, `/logout`, and `/csrf`: the access JWT exists only in the in-memory Zustand store, the rotating refresh JWT is an HttpOnly cookie, and refresh/logout require an allowed Origin plus a constant-time double-submit CSRF check. Legacy JSON token endpoints remain available for scripts and non-browser clients.
@@ -124,17 +128,41 @@ Development note:
 - Membership topology is stored as versioned desired state in PostgreSQL and snapshotted through the outbox. The worker locks the user/channel state, rejects stale generations, re-derives current authorization, removes obsolete slug bindings, and retries a complete idempotent projection. Run `python -m app.db.reconcile_broker_bindings` in the backend environment to enqueue a full repair from PostgreSQL.
 - Security-sensitive database writes follow the documented global lock order in [`backend/docs/LOCK_ORDERING.md`](backend/docs/LOCK_ORDERING.md). Worker retry/dead-letter state commits before its best-effort diagnostic event transaction, avoiding the historical binding-row/event-advisory inversion.
 - RabbitMQ user queues are bounded realtime buffers (expiry, message TTL, maximum length). Missed or evicted events are recovered through PostgreSQL-backed REST sync.
-- Generate one with:
-```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
 For development/demo Compose, set `SUPERADMIN_USERNAME` and a unique 12+ character `SUPERADMIN_PASSWORD` in the untracked `.env` before startup. Production does not bootstrap during backend startup; use the explicit profile command above. `SUPERADMIN_EMAIL` is optional. Bootstrap never resets a password or auto-promotes an existing normal account.
 
 ## Migrations
 ```bash
 docker compose run --rm backend sh -lc "alembic upgrade head"
 ```
+
+Migration `0022_phase9_upload_encryption` adds upload storage version/key-ID
+metadata only. It never decrypts data. During an intentional legacy migration
+window, enable the relevant compatibility flag and run the bounded operator
+commands from the backend environment:
+
+```bash
+python -m app.db.crypto_tool status
+python -m app.db.crypto_tool migrate-messages
+python -m app.db.crypto_tool migrate-uploads
+python -m app.db.crypto_tool rotate-messages --to-key-id key-2026-08
+python -m app.db.crypto_tool rotate-uploads --to-key-id key-2026-08
+python -m app.db.crypto_tool status
+```
+
+Production server processes deliberately cannot enable either plaintext flag.
+For a one-time plaintext conversion, run only the CLI in an isolated,
+non-listening maintenance container/process that mounts the same database and
+upload volume, explicitly selects `ENVIRONMENT=local`, supplies the real key
+ring, and enables only the required compatibility flag. Never start Uvicorn or
+the worker with that maintenance environment. Return to `ENVIRONMENT=production`
+and both flags `false` immediately after status reports no plaintext rows/files.
+
+Change the active ID before rotation so new writes immediately use the target.
+Remove an old key only after status reports no message/upload references and no
+unknown, unreadable, missing, invalid, or metadata-mismatch state. Workers route
+encrypted payloads opaquely. Every supplied Compose profile gives the worker
+only database/broker/fanout settings, not JWT, legacy-Fernet, or data-at-rest
+keys.
 
 ## Tests
 Docker backend tests (verified):
@@ -209,7 +237,8 @@ This opens User B's WebSocket while pending, approves User B, verifies membershi
 12. Show private upload access is denied to a non-member.
 13. Show ciphertext at rest:
 ```bash
-docker compose exec postgres psql -U postgres -d channels -c "select id, content_text, content_json from messages order by created_at desc limit 5;"
+docker compose exec postgres psql -U postgres -d channels -c "select id, left(content_text, 32), content_json from messages order by created_at desc limit 5;"
+docker compose exec backend sh -lc "cd /app && python -m app.db.crypto_tool status"
 ```
 
 ## Final MVP Status
@@ -236,9 +265,9 @@ docker compose exec postgres psql -U postgres -d channels -c "select id, content
 - Password hashing enabled.
 - JWT auth on protected routes.
 - Membership/permission authorization checks.
-- Message encryption at rest (Fernet).
+- Message encryption v2 uses an explicit key ID plus domain-separated Fernet; historical configured keys remain readable during rotation.
 - Private uploads require authentication and channel/ownership checks before download.
-- Protected downloads use chunked `FileResponse` streaming and one atomic per-user/per-client-IP/process-global lease. `docker-compose.hardened.yml` adds Nginx connection, body/header, buffering, and inactivity bounds; application counters remain per backend replica and stock Nginx does not guarantee a minimum downstream throughput.
+- New upload files contain only chunked AES-256-GCM authenticated ciphertext. Authorized downloads decrypt in bounded 64 KiB chunks while retaining the existing atomic per-user/per-client-IP/process-global lease; encrypted byte ranges are explicitly rejected.
 - Message attachments support protected photo, video, and audio publishing through the existing upload API.
 - Profile/channel avatar uploads and profile chat wallpaper uploads use validated image references and protected authenticated media loading.
 - Upload storage paths are sanitized so raw filenames cannot escape the uploads directory.

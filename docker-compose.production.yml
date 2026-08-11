@@ -1,20 +1,26 @@
 name: messaging-production
 
-x-backend-environment: &backend-environment
+x-service-environment: &service-environment
   ENVIRONMENT: production
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:?POSTGRES_APP_USER required}:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD required}@postgres:5432/${POSTGRES_DB:-channels}
   RABBITMQ_URL: amqp://${RABBITMQ_USER:?RABBITMQ_USER required}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD required}@rabbitmq:5672/
   REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379/0
+  PYTHONDONTWRITEBYTECODE: "1"
+
+x-backend-environment: &backend-environment
+  <<: *service-environment
   JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
-  MESSAGE_ENCRYPTION_ENABLED: "true"
-  MESSAGE_ENCRYPTION_KEY: ${MESSAGE_ENCRYPTION_KEY:?MESSAGE_ENCRYPTION_KEY required}
+  DATA_ENCRYPTION_ACTIVE_KEY_ID: ${DATA_ENCRYPTION_ACTIVE_KEY_ID:?DATA_ENCRYPTION_ACTIVE_KEY_ID required}
+  DATA_ENCRYPTION_KEYS: ${DATA_ENCRYPTION_KEYS:?DATA_ENCRYPTION_KEYS required}
+  MESSAGE_ENCRYPTION_KEY: ${MESSAGE_ENCRYPTION_KEY:-}
+  ALLOW_LEGACY_PLAINTEXT_MESSAGES: "false"
+  ALLOW_LEGACY_PLAINTEXT_UPLOADS: "false"
   AUTH_COOKIE_SECURE: "true"
   ENABLE_API_DOCS: "false"
   CORS_ORIGINS: '["https://${PUBLIC_HOST:?PUBLIC_HOST required}"]'
   TRUSTED_HOSTS: '["${PUBLIC_HOST:?PUBLIC_HOST required}","localhost","backend"]'
   TRUSTED_PROXY_CIDRS: '["172.30.0.10/32"]'
   UPLOADS_BASE_DIR: /data/uploads
-  PYTHONDONTWRITEBYTECODE: "1"
 
 x-app-restrictions: &app-restrictions
   security_opt:
@@ -146,7 +152,9 @@ services:
       context: .
       dockerfile: worker/Dockerfile
     environment:
-      <<: *backend-environment
+      # The worker routes opaque encrypted payloads and intentionally receives
+      # no JWT, legacy Fernet, or data-at-rest encryption keys.
+      <<: *service-environment
     depends_on:
       migrate:
         condition: service_completed_successfully
