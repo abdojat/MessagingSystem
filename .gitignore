@@ -35,6 +35,9 @@ logs/
 tmp/
 temp/
 .cache/
+*.sql
+*.dump
+dump.rdb
 event-proof.json
 latest-audit-anchor.json
 *.audit-proof.json

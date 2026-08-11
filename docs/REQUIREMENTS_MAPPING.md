@@ -1,82 +1,43 @@
 # Requirements Mapping
 
-| Official requirement | Status | Implementation evidence | Demo step |
-|---|---|---|---|
-| Create channels/topics | Complete | `POST /v1/channels`, slug auto-generation/collision handling, safe identifier validation, and database constraints | User A creates a channel in UI/API |
-| Allow subscribers to publish and receive automatically | Complete | Membership join + text/media message publish + realtime pipeline (RabbitMQ/Redis/WebSocket + REST retrieval). Backend tests verify attachment-only photo/video/audio messages are syncable by a subscriber and that media attachment references are validated before publish. `scripts/verify_demo_flow.py` opens User B's WebSocket before join, explicitly subscribes/resyncs after join, checks live WebSocket delivery, and checks REST backfill fallback. Approval-after-connect is covered by `scripts/verify_approval_flow.py` | User B joins or is approved, User A publishes text and protected media, User B receives |
-| Interfaces for managing channels and subscribers | Complete | Frontend channel list/details, create dialog, membership actions, channel settings, approval route, approval verifier, and a permission-aware reusable generic invite-link action on the details page for every visibility/join-policy combination. Targeted invites remain one-use; generic links remain valid until revoked/expired/deleted. Phase 6 binds existing email targets to immutable account IDs; Phase 10 provides authenticated mailbox proof, profile verification controls, and `/verify-email` for unresolved pre-registration targets. | Open channel details as its owner, create/copy a reusable invite link, accept it as two users, revoke it, and show a later acceptance denied. For an unresolved email invite, show denial while Unverified, request/open the captured or SMTP link, then accept after the profile reports Verified. |
-| Security: encryption, authentication, permissions | Complete for university MVP; production-oriented single-host boundary validated | Session-bound access JWTs remain memory-only in the browser; refresh tokens use rotating `HttpOnly`, `Secure`, `SameSite` cookies with exact-Origin and double-submit CSRF validation. Phase 9 provides versioned message/upload encryption and rotation. Phase 10 adds hash-only exact-email verification challenges, authenticated confirmation, TLS-SMTP production validation, and email-change invalidation. Backend authorization occurs before decryption; presence remains non-authoritative metadata. Phase 1-10 regressions and schema upgrades provide evidence. | Show an Unverified profile becoming Verified through the fragment link, deny the same token twice/under another account, then demonstrate encrypted message/upload storage and outsider denial. Public certificate lifecycle, external KMS/HSM, MFA, multi-host HA, and browser automation remain limitations. |
-| Event log for tracking activity | Complete | Channel events API/UI plus global superadmin audit API `GET /v1/admin/events` and bilingual `/app/admin` console; raw payloads are replaced by typed allowlisted display details; denied superadmin access and all administrative mutations are audited | Open channel Event Log, then superadmin console -> All audit events; filter by category/actor and show human-readable details |
+This table maps the final university MVP to concrete implementation, tests/verifiers, and presentation evidence. “Complete” means complete for the defined project scope, not enterprise production certification.
 
-## Phase 12 Final Validation Map
+| Requirement | Status | Implementation evidence | Test/verification evidence | Supervisor demo |
+|---|---|---|---|---|
+| Create channels/topics | Complete | `backend/app/api/routes/channels.py`, `backend/app/services/channel_service.py`, `Channel`/membership models, frontend create/list/details pages | `backend/tests/test_p0_requirements.py`, channel/security suites, `scripts/verify_demo_flow.py` | A creates a private channel and shows safe slug/settings. |
+| Publish to a channel | Complete | `backend/app/api/routes/messages.py`, `backend/app/services/message_service.py`; authorization, validation, encryption, message/outbox/event transaction | P0/security/message tests and demo verifier | A publishes text/media to the channel. |
+| Automatic subscriber delivery | Complete for defined MVP | Transactional outbox, `worker/worker_app/outbox_runner.py`, RabbitMQ `ex.channels`, per-user queues, Redis fanout, `backend/app/realtime/`, frontend WebSocket hook | `backend/tests/test_delivery_reliability.py`, Phase 3/4/7 regressions, `verify_demo_flow.py`, `verify_approval_flow.py`, release-candidate scenario | B receives without refreshing; show worker/RabbitMQ evidence. |
+| Offline sync/backfill | Complete | PostgreSQL message history and delivery/sync routes; WebSocket is not authoritative | `backend/tests/test_delivery_reliability.py`, Phase 4 sync regressions, `verify_demo_flow.py`, release-candidate scenario | Disconnect B, publish, reconnect/refresh, recover message. |
+| Channel/subscriber management | Complete | `memberships.py`, `channel_service.py`, frontend channel details; join/leave/invite/approve/remove/role/permission flows | P0 plus Phase 5/6/7/10 tests; approval verifier | Invite/approve B, list members, change/remove membership. |
+| RabbitMQ publish/subscribe architecture | Complete for defined MVP | Topic exchange/topology in backend and worker, durable bounded queues/bindings, versioned desired binding projection, confirms/acks | Delivery/reliability and routing regressions; live demo/release-candidate verifier | Explain DB/outbox -> RabbitMQ -> worker -> Redis path and optionally show management/logs. |
+| Realtime WebSockets | Complete for defined MVP | One-use ticket route/service, `ws_manager.py`, Redis pub/sub/control, frontend `use-websocket.tsx` | Phase 4/8/10 tests, demo and approval verifiers | Keep B connected and show automatic delivery/presence. |
+| Authentication/session security | Complete university baseline | Argon2, session-bound JWTs, rotating refresh/replay detection, browser cookie/Origin/CSRF flow, revocation, one-use WebSocket tickets | Phase 2/5/7/8/10 security suites | Login, session page/logout, optional replay/revocation explanation. |
+| Channel-level RBAC and private access | Complete | Service-level owner/admin/member/pending/outsider checks before reads, writes, sync, events, and decrypt | P0 and Phase 1/4/5/6/7/8 tests; demo/release-candidate outsider checks | C is denied private history and upload; removed B loses access. |
+| Protected attachments | Complete | `download_service.py`, upload routes in `messages.py`, `upload_encryption.py`, protected frontend media | P0 plus Phase 1/4/5/6/7/9 tests; release-candidate upload scenario | B downloads exact media; C receives `403`; show encrypted storage status. |
+| Message/upload encryption at rest | Complete university baseline; operational key custody remains | `backend/app/core/encryption.py`, `upload_encryption.py`, `backend/app/db/crypto_tool.py`, migration `0022_phase9_upload_encryption.py` | `test_phase9_data_protection.py`, crypto status/rotation commands, release-candidate ciphertext checks | Show v2 envelope/status and exact authorized download; state not E2EE. |
+| Email verification and invite identity | Complete university baseline | `email_verification_service.py`, delivery service, auth/profile routes/UI, migration `0023_phase10_email_verification.py` | `test_phase10_identity_presence.py`, captured-SMTP release-candidate scenario | Verify B's exact email before unresolved invite acceptance. |
+| Distributed presence | Complete as non-authoritative metadata | Redis per-connection leases, heartbeat/reaper, aggregate transitions | `test_phase10_identity_presence.py`, cross-backend release-candidate scenario | Two sockets keep online until final socket closes. |
+| Event/activity log | Complete | `event_service.py`, events/channel/admin APIs, frontend Event Log/admin table | `test_event_integrity.py`, security tests, demo/release-candidate checks | Show channel/member/message/security activity. |
+| Event hash-chain integrity | Complete; legacy rows need explicit initialization | `event_integrity_service.py`, event integrity fields/migration `0013_event_integrity.py`, backfill tool | `test_event_integrity.py`, backfill dry-run, release-candidate scenario | Click Verify integrity and explain ordered per-scope continuity. |
+| Mandatory Merkle Tree | Implemented and validated | `backend/app/services/merkle_service.py`, `backend/app/services/merkle_audit_service.py`, `backend/app/db/merkle_tool.py`, `backend/alembic/versions/0024_phase11_merkle_audit.py`, superadmin Merkle API/UI, isolated `merkle-checkpoint` profile | `backend/tests/security/test_phase11_merkle_integrity.py`, `scripts/demo_merkle_integrity.py`, release-candidate proof/anchor checks | Create signed checkpoint, verify one inclusion proof/signature/chain, then show tampered proof copy fails. |
+| Delivery/event management interfaces | Complete for MVP operations | Frontend Delivery Monitor, channel Event Log, superadmin overview/events/users/channels, retry controls | `test_delivery_reliability.py`, `test_superadmin.py`, Phase 11 admin API tests | Inspect outbox status/events; optionally retry a disposable failed item. |
+| Dockerized run/deployment | Complete for development/demo and single-host reference | Three Compose files, backend/worker/frontend Dockerfiles, Nginx, PostgreSQL runtime-role init | Compose renders, image builds, Nginx syntax, release verifier, fresh migration/stack validation | Show healthy services and explain direct vs hardened vs production profiles. |
 
-The official requirements above were exercised together on a fresh disposable
-production-profile stack on 2026-08-11. The deterministic scenario in
-`scripts/verify_release_candidate.py` created identities and a private channel,
-completed a real locally captured SMTP verification and pre-registration invite,
-published through PostgreSQL outbox -> RabbitMQ -> worker -> Redis -> WebSocket,
-recovered an offline message through `/sync`, verified protected encrypted upload
-storage and outsider denial, proved two-backend aggregate presence, exercised
-refresh replay/logout, and verified event integrity/removal denial. The complete
-backend suite passed 352 tests and the requested focused security matrix passed
-213 tests.
+## Merkle requirement explanation
 
-| Supervisor feature | Final status | Concrete implementation and verification |
-|---|---|---|
-| Topics/channels | Complete | `backend/app/api/routes/channels.py`, `backend/app/services/channel_service.py`, frontend channel UI, final E2E |
-| Publish/subscribe delivery | Complete for the defined MVP | `backend/app/services/message_service.py`, transactional outbox, `worker/worker_app`, RabbitMQ/Redis/WebSocket, REST sync, final live/offline E2E |
-| Subscriber management | Complete | `backend/app/api/routes/memberships.py`, invite/approval/add/remove/role flows, real verified-email invite E2E |
-| Security | Complete for the defined university MVP | Session-bound auth, RBAC, browser refresh/CSRF, broker-safe IDs, encrypted message/upload storage, production boundary, focused/full regressions; deployment limitations remain documented |
-| Event/activity log | Complete | Channel/global APIs and UI, per-scope SHA-256 chains, final event/integrity E2E |
-| Mandatory Merkle Tree | Implemented and validated | `backend/app/services/merkle_service.py`, `backend/app/services/merkle_audit_service.py`, `backend/app/db/merkle_tool.py`, `backend/alembic/versions/0024_phase11_merkle_audit.py`, `backend/tests/security/test_phase11_merkle_integrity.py`, admin UI/API, and `scripts/demo_merkle_integrity.py`; signed checkpoint, inclusion proof, linked chain, tampered-copy rejection, offline proof/anchor, and database-history anchor verification passed |
+```text
+Audit event -> SHA-256 event hash -> per-scope hash chain
+            -> Merkle leaf/tree/root -> Ed25519-signed linked checkpoint
+            -> compact proof / optional independently retained anchor
+```
 
-## Platform Administration Enhancement
+- The hash chain preserves order within a scope.
+- The Merkle tree proves one event belongs to a batch with logarithmic proof size.
+- The signature prevents a database-only attacker from replacing the root without the signing key.
+- The exported anchor detects rollback only after independent retention.
 
-| Enhancement | Status | Implementation evidence | Demo step |
-|---|---|---|---|
-| Global superadmin oversight and controls | Mostly complete | `users.is_superadmin/is_active`; migration `0015_superadmin_controls`; safe environment bootstrap; `AdminService`; guarded/no-store `/v1/admin/overview`, `/events`, `/users`, and `/channels`; global delivery-monitor scope; bilingual frontend console with ranked search, filters, typed event display, confirmation gates, and selectable pagination; focused regression tests | Login as configured superadmin, search/filter global events, change page size, revoke a test user's sessions after confirmation, and suspend/restore a disposable channel |
+See [Security](SECURITY.md#audit-hash-chains-and-mandatory-merkle-tree), [Deployment](DEPLOYMENT.md#merkle-checkpoint-operations), and [Demo Guide](DEMO_GUIDE.md#mandatory-merkle-demonstration).
 
-The enhancement is intentionally bounded: superadmins administer accounts, channels, audit evidence, and delivery state but do not receive implicit access to private message bodies. MFA and automated third-party anchor custody remain future work; Phase 11 provides manual signed-anchor export and verification.
+## Remaining non-MVP gaps
 
-## Advanced Reliability Enhancement
-
-| Enhancement | Status | Implementation evidence | Demo step |
-|---|---|---|---|
-| Delivery Reliability Upgrade v1: outbox retry/dead-letter monitoring | Mostly complete | Outbox status fields and migration `0012_delivery_reliability`; worker retry/dead-letter logic; versioned `broker_binding_states` plus generation snapshots from migration `0019`; stale opposite-command rejection; obsolete-key removal; reconnect/global reconciliation; bounded per-user queues; paced Redis fanout retries; RabbitMQ DLQ topology; admin Delivery Monitor; Phase 3/4 tests; supervisor verifier `scripts/verify_delivery_reliability.py` | Open Delivery Monitor as a channel owner/admin; inspect counters; run delivery verifier for normal publish plus controlled dead-letter/manual retry; explain PostgreSQL desired state and REST sync recovery |
-
-This enhancement strengthens the distributed-system reliability story, but it is not one of the official minimum requirements. PostgreSQL outbox state remains authoritative; the RabbitMQ DLQ is an operational mirror when the worker can publish to it.
-
-## Advanced Security/Integrity Enhancement
-
-| Enhancement | Status | Implementation evidence | Demo step |
-|---|---|---|---|
-| Event Integrity Upgrade v1: tamper-evident audit hash chain | Mostly complete | Event columns and migration `0013_event_integrity`; canonical hash-chain service in `backend/app/services/event_integrity_service.py`; event logging integration in `backend/app/services/event_service.py`; worker delivery-event hashing in `worker/worker_app/outbox_runner.py`; verification endpoint `GET /v1/channels/{id}/events/integrity`; backfill script `scripts/backfill_event_integrity.py`; frontend Event Log integrity badge/check; tests in `backend/tests/test_event_integrity.py` | Open channel details -> Event Log -> Verify integrity; use the Docker backfill dry-run command before any real legacy backfill |
-| Phase 11 global Merkle audit checkpoints | Mostly complete operationally | Migration `0024`; domain-separated SHA-256 tree/proofs in `backend/app/services/merkle_service.py`; atomic signed checkpoint/anchor service; Ed25519 public-key ring and isolated signing profile; `merkle_tool` status/checkpoint/verify/proof/offline/anchor commands; superadmin no-store APIs and bilingual UI; deterministic demo and focused PostgreSQL/concurrency/tamper tests | Run checkpoint/status/verify; verify one proof in the admin UI and offline; tamper only a proof copy and show failure; export the latest anchor to separate storage |
-
-These are advanced integrity enhancements. Per-scope chains retain chronology;
-the real Merkle tree supplies compact membership proofs; signed checkpoint roots
-resist database-only rewriting without the Ed25519 private key. The export
-command is not automatic external notarization: rollback/tail-deletion evidence
-exists only after the latest anchor is copied to and protected in independent
-storage. The design is tamper-evident, not immutable and not a blockchain.
-
-## Data Protection Enhancement
-
-| Enhancement | Status | Implementation evidence | Demo step |
-|---|---|---|---|
-| Phase 9 versioned at-rest encryption and rotation | Mostly complete operationally | `backend/app/core/encryption.py`, `upload_encryption.py`, `crypto_tool.py`, migration `0022_phase9_upload_encryption`, production key-ring configuration, and `test_phase9_data_protection.py` (35 focused tests) cover active/historical keys, legacy conversion, authenticated streaming uploads/downloads, crash recovery, status, rotation, and old-key removal | Run status; publish a unique text marker and upload; inspect DB/file storage for absence; download exactly; rotate disposable data to a new active ID; remove the old test key and re-read |
-
-This is server-side encryption at rest, not E2EE. The backend and maintenance
-process possess keys and can decrypt authorized data. External KMS/HSM-backed
-key custody, automated rotation scheduling, physical secure erasure, and backup
-encryption/lifecycle remain operator/future work.
-
-## Identity and Presence Enhancement
-
-| Enhancement | Status | Implementation evidence | Demo step |
-|---|---|---|---|
-| Phase 10 email verification and distributed presence | Mostly complete operationally | Migration `0023`; `EmailVerificationService`; capture/console/SMTP transports; authenticated API and fragment frontend; Redis Lua leases/global expiration index; WebSocket heartbeat/reaper; 25 focused tests using PostgreSQL and real Redis | Request a verification email, open the link while signed in, show Verified and invite acceptance; open two tabs/sessions, close one and show aggregate online state remains until the final socket closes |
-
-Provider SMTP availability and browser automation remain operational/testing
-limitations. Presence is ephemeral UI/realtime metadata and is deliberately not
-used for authentication, membership, message access, or invitation decisions.
+Automated browser tests, sustained outage/load tests, external SMTP deliverability, managed KMS/HSM, automatic independent anchor custody, managed backup/restore, and multi-host HA remain outside the final university scope.

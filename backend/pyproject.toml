@@ -1,7 +1,7 @@
 [project]
 name = "channels-backend"
 version = "0.1.0"
-description = "Phase-3 Telegram-like channels backend"
+description = "Distributed publish/subscribe messaging system backend"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",

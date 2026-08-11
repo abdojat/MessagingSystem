@@ -11,8 +11,10 @@ runtime validation, supervisor evidence, documentation, and repository hygiene.
 ## 2. Release Baseline
 
 - Branch: `master`.
-- Baseline commit: `9dfc35b` (`feat: Implement Phase 11 Merkle audit integrity enhancements`).
-- Final working changes are intentionally staged but not committed.
+- Phase 11 baseline: `9dfc35ba710d5ca2a34c71ed0c1a61e5e2c4dfd0`
+  (`feat: Implement Phase 11 Merkle audit integrity enhancements`).
+- Phase 12 release-candidate commit:
+  `2365659559d5791e0e2899bf4b6a04f111290fac`.
 - Alembic head: `0024_phase11_merkle_audit` (one head).
 
 ## 3. Phase 12 Fixes
@@ -247,8 +249,9 @@ The final hygiene pass includes deterministic tracked-file secret patterns,
 generated-artifact checks, TODO/debug classification, Python syntax checks,
 `git diff --check`, full diff review, and explicit staging of Phase 12 files
 only. Disposable SMTP, databases, uploads, certificates, keys, and anchor data
-remain outside the repository and are removed after validation. No commit is
-created by this phase.
+remain outside the repository and are removed after validation. These Phase 12
+changes were subsequently committed as the release-candidate commit identified
+in Section 2.
 
 ## 16. Known Limitations
 

@@ -1,4 +1,4 @@
-.PHONY: up up-watch down logs migrate seed test
+.PHONY: up up-watch down reset logs migrate test release-verify
 
 up:
 	docker compose up --build
@@ -7,6 +7,9 @@ up-watch:
 	docker compose up --build --watch
 
 down:
+	docker compose down
+
+reset:
 	docker compose down -v
 
 logs:
@@ -15,8 +18,8 @@ logs:
 migrate:
 	docker compose run --rm backend alembic upgrade head
 
-seed:
-	python scripts/seed_demo.py
-
 test:
-	docker compose run --rm backend pytest -q
+	docker compose run --rm backend python -B -m pytest -q
+
+release-verify:
+	python scripts/verify_release.py

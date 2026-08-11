@@ -1,316 +1,171 @@
-# Demo Guide
+# Supervisor Demo Guide
 
-## Phase 12 Release-Candidate Demo
+This guide explains setup and presentation. Use [Final Demo Checklist](FINAL_DEMO_CHECKLIST.md) as the short checklist during the live session.
 
-Use `python scripts/verify_release.py` before the presentation for safe
-regression validation. Do not confuse it with
-`scripts/verify_release_candidate.py`: the latter creates demo users, channels,
-messages, invitations, uploads, and audit events and therefore belongs only on
-a disposable/demo stack.
+## Preparation
 
-The supervisor-facing Merkle command is:
+Use disposable demo accounts/data. From the repository root:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.production.yml \
-  --profile integrity run --rm merkle-checkpoint
+cp .env.example .env
+# Replace JWT_SECRET and configure DATA_ENCRYPTION_ACTIVE_KEY_ID/DATA_ENCRYPTION_KEYS.
+# Optionally configure a unique SUPERADMIN_* account before first startup.
+docker compose up -d --build
+docker compose ps -a
+```
+
+Wait for the backend to become healthy. Development URLs:
+
+- UI: `http://localhost:3000`
+- API/docs: `http://localhost:8000/v1`, `http://localhost:8000/docs`
+- RabbitMQ management: `http://localhost:15672` (`guest` / `guest`, local only)
+
+Prepare three browser profiles:
+
+- User A: channel owner/publisher.
+- User B: subscriber.
+- User C: outsider used to prove denial.
+
+Preflight the repository and application flow:
+
+```bash
+python scripts/verify_release.py
+python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
+```
+
+The release verifier is safe/disposable. The demo verifier creates application data, so use the prepared demo stack.
+
+## 10-15 minute demo
+
+### 1. Architecture (1 minute)
+
+Show the diagram in [Architecture](ARCHITECTURE.md). State:
+
+> PostgreSQL is the durable source of truth. FastAPI commits the encrypted message, outbox row, and audit event. The worker publishes through RabbitMQ, consumes the online subscriber queue, and uses Redis to reach the backend WebSocket. REST history and sync recover missed messages.
+
+### 2. Login and channel/topic management (1-2 minutes)
+
+Register/login A, B, and C. As A, create a private channel and show its safe slug, join policy, and member-management page.
+
+### 3. Subscriber workflow (1-2 minutes)
+
+A creates an invite or approves B's join request. Show B becomes a member. Explain that existing-user targeted invitations bind to the user ID; an unresolved pre-registration email invite requires later verification of the exact target email.
+
+If demonstrating mailbox proof, request verification from B's profile, read the development fragment URL from backend console/logs, open it while signed in as B, and show the profile becomes Verified before accepting the unresolved email invite.
+
+### 4. Live publish/subscribe and persistence (2 minutes)
+
+Keep B's channel open. A publishes a distinctive message. Show B receives it without refreshing. Refresh B and show the message is still present. Disconnect B, publish another message, reconnect, and show history/sync recovers it.
+
+Optionally show worker logs or RabbitMQ management to make broker involvement visible:
+
+```bash
+docker compose logs --tail=100 worker
+```
+
+### 5. Protected attachment (1 minute)
+
+A publishes a small photo/audio/video attachment. B downloads or opens the exact content. C attempts the private resource and receives `403 Forbidden`. Explain the path: streamed validation, AES-GCM encrypted storage, authorized bounded streaming decrypt.
+
+### 6. Encryption evidence (1 minute)
+
+Show storage status without printing secrets or plaintext:
+
+```bash
+docker compose exec backend python -B -m app.db.crypto_tool status
+docker compose exec postgres psql -U postgres -d channels \
+  -c "select id, left(content_text, 40), content_json from messages order by created_at desc limit 5;"
+```
+
+New text should use an `enc:v2:<key-id>:` envelope. State precisely that this is server-side encryption at rest, not end-to-end encryption.
+
+### 7. Event log and authorization (1 minute)
+
+Open Channel Details -> Event Log and run integrity verification. Show channel/member/message activity. Remove B or use C to show protected history remains denied. If legacy events are not initialized, explain that state honestly and use the documented dry-run before any real backfill.
+
+### 8. Email verification and presence (optional 1 minute)
+
+Show B's verified email state. With two tabs/sessions open, close one and show aggregate presence remains online until the final socket closes. Presence is metadata and never authorizes access.
+
+### 9. Mandatory Merkle demonstration (2-3 minutes)
+
+Run the prepared command in [Mandatory Merkle demonstration](#mandatory-merkle-demonstration). Point out the selected event, leaf index, sibling path length, Merkle root, signing key ID, valid event/root/checkpoint/signature/chain results, and the expected failure after changing a copy of one proof hash.
+
+Explain:
+
+- hash chain = ordered continuity inside one audit scope;
+- Merkle tree = compact batch membership proof;
+- signed checkpoint = database-only root replacement requires the external private signing key;
+- independently retained anchor = rollback/tail-deletion evidence.
+
+### 10. Close (30 seconds)
+
+State the limitations: PostgreSQL is authoritative; ordering is per channel; encryption is server-side; the production profile is a single-host reference; independent anchor retention and deployment operations are operator responsibilities.
+
+## Mandatory Merkle demonstration
+
+Generate a dedicated demo key pair in a private terminal before the presentation:
+
+```bash
+docker compose run --rm backend python -B -m app.db.merkle_tool \
+  generate-keypair --key-id audit-demo
+```
+
+Do not record or display the private seed. Put the three printed values into session-local environment variables, then pass only those variables to the one-shot container. Do not put the private seed in `.env`.
+
+```bash
+docker compose run --rm \
+  -e AUDIT_MERKLE_SIGNING_KEY_ID \
+  -e AUDIT_MERKLE_SIGNING_PRIVATE_KEY \
+  -e AUDIT_MERKLE_PUBLIC_KEYS \
+  backend python -B scripts/demo_merkle_integrity.py
+```
+
+Expected visible evidence:
+
+```text
+Event hash:              PASS
+Merkle inclusion:        PASS
+Checkpoint hash:         PASS
+Ed25519 signature:       PASS
+Checkpoint chain:        PASS
+Tampered proof:           FAILED (expected)
+```
+
+The demo creates 16 dedicated audit events, checkpoints eligible events in bounded batches, and tampers only with an in-memory proof copy. It does not alter persisted evidence.
+
+For the production-oriented profile, the isolated equivalent is:
+
+```bash
 docker compose --env-file .env.production -f docker-compose.production.yml \
   --profile integrity run --rm --entrypoint python merkle-checkpoint \
   -B scripts/demo_merkle_integrity.py
 ```
 
-The second command displays the batch sequence, leaf count, root, signing key
-ID, selected event/leaf, sibling count, event hash, inclusion proof, checkpoint
-hash, Ed25519 signature, checkpoint chain, and the expected failure of a
-tampered proof copy. It prints no signing private key.
+## Five-minute emergency demo
 
-For the concise timed sequence and five-minute fallback, use
-`docs/FINAL_DEMO_CHECKLIST.md`.
+1. Show the architecture and healthy Compose services.
+2. A creates a channel; B joins; A publishes; B receives live.
+3. Refresh B to prove persistence; show C denied from a private channel/upload.
+4. Show encrypted message status/storage evidence.
+5. Run the signed Merkle demo and show valid inclusion/signature/chain plus expected tampered-copy failure.
 
-## Golden Demo Path
+Merkle stays in the short path because it is supervisor-mandated.
 
-Run these commands from the repository root unless a step says otherwise.
+## Recovery options during a live demo
 
-Optional clean reset, destructive:
-```bash
-# WARNING: this deletes local Docker database, broker, and upload volumes.
-docker compose down -v
-```
+- If WebSocket delivery is delayed, show the persisted message through refresh or `/sync`, then inspect `docker compose logs --tail=100 backend worker`.
+- If RabbitMQ management is unavailable under the hardened profile, use worker logs; the management port is intentionally private there.
+- If SMTP is unavailable, use development console delivery and state that production requires TLS/STARTTLS SMTP.
+- If no event is eligible for a Merkle proof, run the deterministic demo; it creates its own audit events.
+- If a signing key is not configured, do not invent a result. Use the prepared session-local demo key variables or the production integrity profile.
 
-Prepare environment:
-```bash
-cp .env.example .env
-python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
-```
-Choose a safe ID such as `demo-key`, paste the value into a one-entry
-`DATA_ENCRYPTION_KEYS` JSON object, and set `DATA_ENCRYPTION_ACTIVE_KEY_ID` to
-that ID in `.env`. Replace `JWT_SECRET` with a non-default demo secret.
+## Statements to keep precise
 
-Start and inspect the stack:
-```bash
-docker compose config
-docker compose up -d --build
-docker compose ps -a
-```
-
-Optional recommended proxy-bounded path (use this instead of the commands above,
-not at the same time with the same project volumes):
-
-```bash
-docker compose -f docker-compose.hardened.yml config
-docker compose -f docker-compose.hardened.yml up -d --build
-```
-
-Open `http://localhost:8080`; only Nginx is published in this topology. The
-direct Compose path remains easier for showing RabbitMQ management locally.
-
-Optional production-boundary demonstration (separate project/volumes):
-
-```bash
-cp .env.production.example .env.production
-# Replace every placeholder and provide external TLS_CERT_PATH/TLS_KEY_PATH.
-docker compose --env-file .env.production -f docker-compose.production.yml config --quiet
-docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
-docker compose --env-file .env.production -f docker-compose.production.yml ps -a
-```
-
-Use a trusted certificate for a real deployment. A disposable self-signed
-certificate is acceptable only for local validation and must remain outside the
-repository. Show that HTTP redirects to HTTPS, `/health` is minimal,
-`/v1/ready` and `/openapi.json` return 404 through Nginx, browser security
-headers appear on HTTPS, and only ports 80/443 have host mappings. Do not confuse
-Docker's internal `5432/tcp`/`6379/tcp` display with host publication; a host
-binding contains `->` and can also be verified with `docker inspect`.
-
-Production backend startup does not migrate or bootstrap a superadmin. The
-one-shot `migrate` dependency must exit 0. If an initial admin is required, set
-the bootstrap values temporarily and run:
-
-```bash
-docker compose --env-file .env.production -f docker-compose.production.yml \
-  --profile bootstrap run --rm bootstrap-superadmin
-```
-
-Then remove the bootstrap password from the untracked environment. The normal
-supervisor feature demo remains easier through development Compose; the
-production profile demonstrates the deployment boundary rather than exposing
-RabbitMQ management UI.
-
-Run backend and frontend checks:
-```bash
-docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
-cd frontend
-npm run typecheck
-npm run build
-node -e "JSON.parse(require('fs').readFileSync('src/locales/en.json','utf8')); JSON.parse(require('fs').readFileSync('src/locales/ar.json','utf8')); console.log('locale json ok')"
-cd ..
-```
-
-Run supervisor-safe verifiers:
-```bash
-python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
-python scripts/verify_approval_flow.py --base-url http://localhost:8000/v1
-docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
-docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"
-```
-
-Canonical event-integrity commands:
-```bash
-# Dry-run; safe for final demo.
-docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
-
-# Real backfill; use only when you intentionally want to initialize legacy event rows.
-docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
-```
-
-What to show the supervisor:
-- User A creates a channel/topic.
-- User B joins or is approved after a pending request.
-- User A publishes and User B receives the message live.
-- REST sync/backfill returns the same persisted message.
-- Event Log shows channel, membership, approval, and message events.
-- Audit integrity verifies initialized event rows.
-- Delivery Monitor shows outbox status and manual retry behavior.
-- The language switcher can show the same demo surfaces in English and Arabic, with Arabic using RTL layout.
-- User C is blocked from private channel/upload access.
-- PostgreSQL stores message ciphertext, not plaintext.
-- Finalized upload storage contains authenticated ciphertext, while authorized download reproduces the original file.
-
-## 1) Start Services
-```bash
-cp .env.example .env
-# set DATA_ENCRYPTION_ACTIVE_KEY_ID and DATA_ENCRYPTION_KEYS in .env
-# optional initial admin: set SUPERADMIN_USERNAME and a unique 12+ character SUPERADMIN_PASSWORD
-docker compose up -d --build
-docker compose ps -a
-```
-Wait until backend status is healthy.
-
-## 2) Run Migrations
-```bash
-docker compose run --rm backend sh -lc "alembic upgrade head"
-```
-
-## 3) Run Backend Tests
-```bash
-docker compose run --rm backend sh -lc "cd /app && PYTHONPATH=/app pytest -q"
-```
-Expected: backend regression tests pass; the current P0 slice includes upload authorization, routing-key-safe identifier validation, encryption, authorization, and smoke-flow checks.
-
-## 4) Run Demo Verifier Script
-```bash
-python scripts/verify_demo_flow.py --base-url http://localhost:8000/v1
-```
-The script waits for API health before running flow checks and verifies the live publish/WebSocket/sync demo path, plus the unauthorized upload access check.
-The current verifier intentionally opens User B's WebSocket before User B joins, then sends an explicit subscribe/resync after the join. This covers the join-after-connect edge case that can otherwise make demos look flaky.
-
-## 5) Manual UI Demo (Instructor)
-1. Open `http://localhost:3000`.
-2. Use the language switcher to toggle between English and Arabic; confirm Arabic pages switch to RTL before continuing.
-3. Register/login User A.
-4. Register/login User B (incognito or second browser profile).
-5. Register/login User C in a third window or separate profile.
-6. User A creates a channel.
-7. User A opens Channel Details and clicks **Create and copy invite link**. The generic link is reusable until revoked or expired and is available to the owner for public/private channels with any join policy; targeted invites remain one-use. Existing-account email targets bind to that account ID. For a pre-registration email target, show the future account as **Unverified**, request verification from Profile, open the configured development-capture/SMTP fragment link while signed in, then show **Verified** before accepting the invite.
-8. User B opens the copied link and accepts the invitation (or joins/subscribes through the configured join flow).
-9. User A publishes a text message.
-10. User A uses the paperclip composer button to attach and publish a small photo, video, or audio file; caption text is optional.
-11. User B receives/reads the text and media messages.
-12. Open channel details -> Event Log.
-13. Click Verify integrity and show `Audit integrity: Verified`.
-    - If the database contains pre-upgrade legacy events, run the canonical Docker backfill command first or explain the Not initialized state honestly.
-    - Dry-run first:
-      ```bash
-      docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
-      ```
-    - Real backfill when intentional:
-      ```bash
-      docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py"
-      ```
-14. Open the Delivery Monitor from User A's Profile page.
-    - Normal demo state should show published/pending counters and empty failed/dead-lettered tables.
-    - If a delivery has failed in the environment, use the per-row Retry button or Retry all button to move it back to pending.
-    - Worker logs show retry scheduling and dead-letter transitions when RabbitMQ publish failures occur.
-15. Show unauthorized behavior:
-   - Use a private upload download blocked for User C.
-   - Optionally show a private channel where non-member read/publish is denied.
-16. Show ciphertext at rest:
-```bash
-docker compose exec postgres psql -U postgres -d channels -c "select id, left(content_text, 40), content_json from messages order by created_at desc limit 5;"
-docker compose exec backend sh -lc "cd /app && python -m app.db.crypto_tool status"
-```
-Expected: new text starts with `enc:v2:<key-id>:` and status reports no
-plaintext/legacy/unreadable message or upload storage. Do not print keys or
-message plaintext. For a disposable upload marker proof, inspect only that the
-unique marker is absent from the finalized storage file, then show the
-authorized browser download matches it.
-17. Optional: open the RabbitMQ management UI or worker logs if available to show the broker path and the `q.dead.messages` queue.
-18. Optional superadmin proof:
-   - Log in with the explicitly bootstrapped superadmin account and open the shield link (`/app/admin`).
-   - Show that the global event table includes system and cross-channel events.
-   - Revoke a disposable user's sessions, then demonstrate that their next protected request/login is blocked if the account is deactivated.
-   - Suspend and restore a disposable channel, and show the corresponding audit events.
-   - Explain that the superadmin does not automatically read private message bodies.
-
-Developer-only tamper test:
-```bash
-docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/backfill_event_integrity.py --dry-run"
-```
-Host command, optional when local PostgreSQL credentials match the Docker database:
-```bash
-python scripts/backfill_event_integrity.py --dry-run
-```
-For a real tamper demonstration, modify a non-production event payload directly in PostgreSQL, then click Verify integrity again. The UI should report Broken. Do not include manual database tampering in the normal supervisor demo unless asked.
-
-Useful delivery reliability checks:
-```bash
-docker compose exec backend sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_delivery_reliability.py --base-url http://localhost:8000/v1"
-docker compose logs -f worker
-docker compose exec postgres psql -U postgres -d channels -c "select status, count(*) from outbox group by status order by status;"
-docker compose exec postgres psql -U postgres -d channels -c "select id, status, attempts, max_attempts, next_retry_at, dead_lettered_at from outbox order by created_at desc limit 10;"
-```
-
-## Phase 11 Merkle Supervisor Proof
-
-Generate one Ed25519 keypair in a private operator terminal, store the printed
-private seed as a secret, and place only its public half in the backend verifier
-configuration:
-
-```bash
-cd backend
-python -m app.db.merkle_tool generate-keypair
-```
-
-Do not record, screenshot, commit, or paste the private value into the report.
-In production Compose, provide it only to the explicit `integrity` profile:
-
-```bash
-docker compose --env-file .env.production -f docker-compose.production.yml \
-  --profile integrity run --rm merkle-checkpoint
-```
-
-For a local backend process with the checkpoint environment configured, run:
-
-```bash
-python -m app.db.merkle_tool status
-python -m app.db.merkle_tool checkpoint --all
-python -m app.db.merkle_tool verify --verify-event-chains
-python scripts/demo_merkle_integrity.py
-```
-
-Then open the superadmin console. The Audit Integrity card shows the latest
-batch, event count, shortened root, signature state, and checkpoint-chain state.
-Choose an audit event and click **Verify Merkle Proof** to show its leaf index,
-left/right proof path, signed root, and compact verification result. No event
-payload or signing secret is returned by these endpoints.
-
-For an offline demonstration, export and verify one proof, then change a copy of
-one sibling hash and show failure:
-
-```bash
-python -m app.db.merkle_tool proof --event-id <uuid> --output event-proof.json
-python -m app.db.merkle_tool verify-proof --proof event-proof.json
-python -m app.db.merkle_tool export-anchor --output latest-audit-anchor.json
-python -m app.db.merkle_tool verify-anchor --file latest-audit-anchor.json
-```
-
-The repository demo script performs the tampered-copy step in memory and never
-modifies real evidence.
-
-### Supervisor explanation
-
-- Why a Merkle tree? It proves one event belongs to a committed batch with
-  `O(log n)` sibling hashes—about 8 for a balanced 256-leaf batch and 10 for
-  1,024—rather than all events.
-- Why keep the hash chain? It supplies ordered continuity within each
-  `system` or `channel:<uuid>` integrity scope. Merkle order is batch processing
-  order, not authoritative channel chronology.
-- Why sign the root? Without a signature, a database-only attacker could rewrite
-  events, leaf snapshots, and the root together. The Ed25519 signature binds the
-  canonical checkpoint to an independently held private key.
-- Why export an anchor? A valid signed newest tail can still be deleted from the
-  same database. A separately retained latest anchor detects rollback before or
-  deletion of that checkpoint. Export alone is not protection unless the file is
-  actually stored outside the database/server.
-
-## Final Acceptance Checklist
-- [ ] Docker stack starts
-- [ ] Migrations run
-- [ ] Backend tests pass
-- [ ] Frontend container builds
-- [ ] Demo script passes
-- [ ] User A can create channel
-- [ ] User B can subscribe
-- [ ] User A can publish
-- [ ] User B can receive
-- [ ] Event log shows activity
-- [ ] Event integrity check shows Verified or an honestly explained Not initialized state
-- [ ] Merkle status/checkpoint verification passes and a signed inclusion proof verifies offline
-- [ ] A tampered proof copy fails, while the database evidence remains unchanged
-- [ ] Latest anchor is copied outside the server if rollback evidence is claimed
-- [ ] Delivery Monitor loads for a channel owner/admin
-- [ ] English/Arabic language switch works and Arabic renders RTL
-- [ ] Normal user cannot open `/app/admin`; superadmin can see global audit events and perform audited controls
-- [ ] Unauthorized access denied
-- [ ] Unauthorized upload access denied
-- [ ] DB stores ciphertext, not plaintext
-- [ ] README explains full run flow
+- PostgreSQL, not RabbitMQ or Redis, is the source of truth.
+- RabbitMQ/Redis/WebSockets provide asynchronous realtime delivery; REST sync is durable recovery.
+- Ordering is per channel, not global.
+- Browser access tokens are memory-only; rotating refresh credentials use protected cookies.
+- Messages/uploads are encrypted at rest but remain server-decryptable.
+- Signed Merkle checkpoints are tamper evidence under key/anchor assumptions, not immutable storage or blockchain.
+- The production-oriented profile is a validated single-host reference, not HA or production certification.
