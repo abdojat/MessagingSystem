@@ -508,6 +508,31 @@
       "updatedTitle": "تم تحديث الملف"
     }
   },
+  "emailVerification": {
+    "alreadyVerifiedDescription": "عنوان البريد الحالي موثّق بالفعل.",
+    "alreadyVerifiedTitle": "البريد موثّق",
+    "authRequiredDescription": "سجّل الدخول إلى الحساب الذي طلب الرابط ثم أعد فتح رابط البريد. لم يتم حفظ الرمز في هذا المتصفح.",
+    "authRequiredTitle": "تسجيل الدخول مطلوب",
+    "confirmingDescription": "تتم مطابقة الرابط الآمن مع حسابك المسجّل وعنوان بريدك الحالي.",
+    "confirmingTitle": "جارٍ توثيق البريد",
+    "failedDescription": "قد يكون الرابط غير صالح أو منتهيًا أو ملغيًا أو مستخدمًا أو تابعًا لحساب آخر.",
+    "failedTitle": "تعذّر توثيق البريد",
+    "missingToken": "رمز التحقق مفقود من الرابط.",
+    "openProfile": "فتح الملف الشخصي",
+    "resend": "إعادة إرسال رسالة التحقق",
+    "resendCooldown": "إعادة الإرسال خلال {seconds}ث",
+    "send": "إرسال رسالة التحقق",
+    "sendFailedDescription": "تعذّر إرسال رسالة التحقق الآن.",
+    "sendFailedTitle": "فشل إرسال التحقق",
+    "sending": "جارٍ الإرسال...",
+    "sentDescription": "افتح الرابط الجديد في بريدك وأنت مسجّل الدخول إلى هذا الحساب.",
+    "sentTitle": "تم إرسال رسالة التحقق",
+    "signIn": "تسجيل الدخول",
+    "unverifiedStatus": "غير موثّق",
+    "verifiedDescription": "تم توثيق عنوان بريدك الحالي وتحديث ملفك الشخصي.",
+    "verifiedStatus": "موثّق",
+    "verifiedTitle": "تم توثيق البريد"
+  },
   "publicProfile": {
     "badges": {
       "public": "ملف مساحة العمل"

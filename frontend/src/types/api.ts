@@ -16,6 +16,16 @@ export interface MeResponse extends User {
   is_active: boolean;
 }
 
+export interface EmailVerificationRequestResponse {
+  status: "sent" | "already_verified";
+  expires_at?: string | null;
+}
+
+export interface EmailVerificationConfirmResponse {
+  status: "verified";
+  verified_at: string;
+}
+
 export interface AdminOverviewResponse {
   total_users: number;
   active_users: number;

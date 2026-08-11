@@ -24,6 +24,8 @@
 - WebSocket URLs carry only that short-lived opaque ticket. Raw access JWT query parameters, authorization headers, and first-frame JWT authentication are not accepted.
 - An authenticated socket closes when the access/session authentication lifetime captured by its ticket expires. Logout, session revocation, logout-all, replay detection, and account deactivation publish minimal Redis control events so every listening backend instance can close matching sockets without per-socket database polling.
 - Realtime outbox events carry a channel membership generation. The WebSocket layer checks this generation before decryption and refreshes current PostgreSQL membership immediately when a newer generation arrives or a legacy event has no generation. Matching/older generations use a deliberately short cache (`WS_MEMBERSHIP_AUTH_CACHE_TTL_SECONDS`, default one second), so a missed ephemeral Redis removal notification cannot expose a newly published post-removal message.
+- Active presence is represented by one random Redis lease per admitted WebSocket connection, not one boolean per user. Atomic Lua connect/heartbeat/disconnect operations update a per-user sorted set, global expiration index, and the worker-facing online-user set. A second tab/session does not emit another effective online transition, and closing one socket cannot emit offline while another lease remains.
+- Quiet sockets refresh their lease on a dedicated bounded task. A bounded, duplicate-safe reaper processes only due global-index entries, so process crashes and missing disconnect handlers eventually transition the final stale connection offline without an unbounded key scan. Redis failure leaves presence stale/unknown rather than inferring false offline; presence never participates in authentication, membership, message reads, invitations, or any other authorization decision.
 - Targeted `membership_update` events are forwarded to the authenticated user even when the affected channel is not yet in that socket's subscription set. This supports approval-required joins without exposing message payloads to unauthorized users.
 - An empty WebSocket subscription set receives no ordinary channel events. A membership change bypasses that filter only when its `user_id` targets the authenticated user; removal/leave updates also clear the affected channel from the socket's local subscription set.
 - Docker starts Uvicorn with `--ws-max-size` from `WS_MAX_INBOUND_MESSAGE_BYTES` (default 16 KiB). The inbound loop applies the same UTF-8 byte limit before JSON parsing, returns `MESSAGE_TOO_LARGE`, and closes that socket with code 1009. Alternate ASGI launch paths still receive the application check, but should configure an equivalent server-side raw-frame bound.
@@ -61,10 +63,26 @@
   plus an unverified profile value is denied with `EMAIL_VERIFICATION_REQUIRED`.
   Migration `0020_phase6_invite_identity` normalizes historical values and binds
   unambiguous existing-account invites without marking any historical email verified.
-- The repository does not send verification email or expose a shortcut that marks
-  arbitrary addresses verified. A deployment/product email-verification flow must
-  establish `email_verified_at` after mailbox proof before unresolved
-  pre-registration invites become usable.
+- The authenticated `/auth/email-verification/request` endpoint operates only on
+  the current account's normalized email. It stores SHA-256 of a cryptographically
+  random token in `email_verification_challenges`; the raw token is delivered only
+  through the configured development capture/console or generic SMTP transport.
+- Confirmation is authenticated and locks the user before the unique challenge.
+  The challenge user, exact email snapshot, unconsumed/unrevoked state, and bounded
+  expiry must all match before `email_verified_at` is set. Concurrent confirmation
+  has one effective success. Profile email changes clear proof and revoke every
+  outstanding challenge in the same transaction, so an old link cannot verify a
+  replacement address.
+- Verification links use an explicit public URL and a `#token=` fragment; the
+  frontend removes the fragment from history, keeps the token only transiently,
+  submits it to the authenticated API, and refreshes `/me`. Production verification
+  requires an HTTPS public URL and generic SMTP with implicit TLS or STARTTLS.
+  SMTP runs off the FastAPI event loop and uses Python's default certificate
+  verification. Provider failures revoke the attempted challenge and expose only
+  `EMAIL_DELIVERY_FAILED`, never provider credentials/details.
+- Request and confirmation attempts use per-user/per-IP Redis rate limits with the
+  existing bounded fail-safe local fallback. Audit events contain only user IDs and
+  bounded reason codes, never raw tokens, token-bearing URLs, or SMTP secrets.
 
 ### Global superadmin
 - `users.is_superadmin` is a separate platform privilege; it is not a channel membership role and cannot be requested through registration or profile APIs.
@@ -215,10 +233,10 @@ This protects against accidental or unauthorized event modification, insertion, 
   validated, but slow-client behavior was configuration-reviewed rather than
   exercised under TCP load. Stock Nginx does not enforce a guaranteed minimum
   downstream throughput in this configuration.
-- Email verification delivery/issuance is intentionally not implemented. Tests
-  simulate the trusted external completion boundary by persisting
-  `email_verified_at`; unresolved pre-registration invitations remain denied
-  until a real deployment flow supplies that proof.
+- Email verification depends on operator-configured SMTP availability and mailbox
+  delivery; there is no provider-specific bounce/complaint webhook or account
+  recovery workflow. Tests use capture transport and a disposable local SMTP sink,
+  never an external mailbox provider.
 - A matching/older queued realtime event can use a cached authorization decision for at most one second by default. Newly committed post-membership-change events carry the newer generation and force immediate PostgreSQL revalidation before decryption.
 - Broker ordering and Redis-loss scenarios are covered deterministically with fake Rabbit/Redis components, not a live multi-worker outage run.
 - Existing RabbitMQ user queues created before Phase 3 have immutable declaration arguments. An upgraded environment must recreate those legacy queues (or reset the demo RabbitMQ volume) once so the new expiry/TTL/length arguments can be declared; PostgreSQL/REST sync protects message recovery, but operators should plan this transition rather than discovering a queue precondition error during the demo.

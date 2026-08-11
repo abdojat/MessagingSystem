@@ -2,14 +2,15 @@ import base64
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUserDep, DBDep, RedisDep
 from app.core.config import get_settings
 from app.core.email_identity import normalize_email
 from app.core.errors import AppError, to_http_exception
-from app.db.models import User
+from app.core.utils import utcnow
+from app.db.models import EmailVerificationChallenge, User
 from app.schemas.auth import MeResponse
 from app.schemas.users import UpdateMeRequest, UserPublicProfile, UserSearchItem, UserSearchResponse
 from app.services.message_service import MessageService
@@ -58,6 +59,13 @@ async def update_me(req: UpdateMeRequest, db: DBDep, user: CurrentUserDep) -> Me
         raise to_http_exception(exc) from exc
 
     if "email" in payload:
+        # Serialize an address change with verification request/confirmation.
+        # User is the first lock in the repository-wide ordering; challenges
+        # are dependent rows invalidated inside this same transaction.
+        locked_user = (
+            await db.execute(select(User).where(User.id == user.id).with_for_update())
+        ).scalar_one()
+        user = locked_user
         new_email = normalize_email(payload["email"]) if payload["email"] is not None else None
         old_email = normalize_email(user.email) if user.email is not None else None
         payload["email"] = new_email
@@ -65,6 +73,15 @@ async def update_me(req: UpdateMeRequest, db: DBDep, user: CurrentUserDep) -> Me
             # Verification belongs to the exact mailbox value. A mutable
             # profile field must never inherit the prior address's proof.
             user.email_verified_at = None
+            await db.execute(
+                update(EmailVerificationChallenge)
+                .where(
+                    EmailVerificationChallenge.user_id == user.id,
+                    EmailVerificationChallenge.consumed_at.is_(None),
+                    EmailVerificationChallenge.revoked_at.is_(None),
+                )
+                .values(revoked_at=utcnow())
+            )
 
     for field, value in payload.items():
         setattr(user, field, value)

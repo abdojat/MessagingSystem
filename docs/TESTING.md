@@ -138,7 +138,13 @@ python -B -m pytest -q tests/security/test_phase6_medium_hardening.py
 
 Verified on 2026-08-10 against disposable PostgreSQL 16: `19 passed, 1 warning`. Phase 1–5 security suites passed `98 passed, 1 warning`; the complete backend suite passed `195 passed, 1 warning`. Fresh migration and a representative 0019→0020 upgrade passed. The upgrade fixture contained an existing-user email invite, unresolved email invite, user-ID invite, and generic invite. Frontend typecheck, both Compose render checks, and containerized Nginx syntax validation passed.
 
-The test suite sets `email_verified_at` directly to model the trusted completion boundary; no email is sent and no production verification delivery is claimed. Download concurrency tests exercise the application/ASGI boundary, not a live many-account TCP slow-reader load. Nginx slow-client controls were syntax/configuration-validated rather than load-tested.
+These Phase 6 tests predate the real mailbox-verification lifecycle and retain a
+few direct timestamp fixtures for their narrow invite-identity cases. Phase 10
+adds the end-to-end challenge/capture/confirmation path and proves the same
+pre-registration invitation remains denied before genuine confirmation and is
+accepted afterward. Download concurrency tests exercise the application/ASGI
+boundary, not a live many-account TCP slow-reader load. Nginx slow-client
+controls were syntax/configuration-validated rather than load-tested.
 
 Proxy validation:
 
@@ -310,6 +316,59 @@ python -m app.db.crypto_tool status
 
 Do not run database-resetting tests, crypto maintenance, or the live demo
 verifier concurrently against the same database/storage volume.
+
+## Security Hardening Phase 10
+
+`backend/tests/security/test_phase10_identity_presence.py` contains 25 focused
+tests grouped around email verification and distributed presence. They cover:
+
+- unverified registration, raw-token capture with hash-only PostgreSQL storage,
+  exact current-email confirmation, single consumption, expiry, revocation,
+  cross-user denial, email-change invalidation, challenge supersession, and
+  two-session confirmation concurrency;
+- controlled SMTP failure, production console/capture rejection, production
+  plaintext SMTP rejection, resend rate limiting, and absence of raw tokens in
+  audit payloads/log records;
+- the complete unresolved email invite sequence: denial before verification,
+  real challenge confirmation, then successful acceptance;
+- first/second socket semantics, local and two-backend final disconnect,
+  heartbeat extension, crash/lease expiry, stale/live mixed leases, duplicate
+  reapers, rapid reconnect, multiple sessions, Redis failure degradation, and
+  heartbeat-task cleanup.
+
+Run with disposable PostgreSQL and Redis:
+
+```bash
+cd backend
+set DATABASE_URL=postgresql+asyncpg://postgres:...@127.0.0.1:.../channels
+set PHASE10_TEST_REDIS_URL=redis://127.0.0.1:.../0
+python -B -m pytest -q tests/security/test_phase10_identity_presence.py
+```
+
+Verified on 2026-08-11: the focused suite passed `25 passed, 1 warning` against
+disposable PostgreSQL 16 and real Redis 7 Lua execution. The requested Phase
+2/5/6/8/9, post-Phase-7, and Phase 10 regression group passed `150 passed, 1
+warning`. A fresh database upgraded through `0023`; a representative
+`0022 -> 0023` database preserved verified/unverified users, unresolved and
+existing-user invitations, and began with zero challenge rows. The warning is
+the existing passlib/argon2 version-metadata deprecation.
+
+The complete backend suite then passed `312 passed, 1 warning`. Frontend
+`npm run typecheck` and `npm run build` passed; the build emitted only the
+existing Next.js middleware-filename deprecation notice. English and Arabic
+catalog parsing/key alignment passed with 825 aligned keys. Development,
+hardened-demo, and production Compose renders passed, and production rendering
+confirmed that SMTP settings are injected only into the backend.
+
+A disposable Mailpit SMTP sink received a verification message from the generic
+SMTP transport without external delivery. This proves the application-to-SMTP
+boundary, not a real provider, public DNS, or TLS mailbox-delivery path. A fresh
+isolated hardened stack also passed `scripts/verify_demo_flow.py` through the
+PostgreSQL/outbox/RabbitMQ/worker/Redis/WebSocket route. A supplemental live
+check passed authorized encrypted-upload download, message/upload ciphertext
+inspection, and logout-all access-token revocation. The run also caught and
+fixed missing inherited proxy identity headers in the WebSocket locations;
+containerized `nginx -t` passed after the fix.
 
 ## Automated Tests
 Backend P0 tests:

@@ -32,7 +32,8 @@ from app.realtime.protocol import (
     parse_client_envelope,
 )
 from app.realtime.auth_control import AuthControlEvent, auth_control_channel
-from app.realtime.redis_pubsub import mark_user_offline, mark_user_online, user_pubsub_channel
+from app.realtime.presence import PresenceService
+from app.realtime.redis_pubsub import user_pubsub_channel
 from app.realtime.ws_abuse_control import WebSocketWorkBudget
 from app.schemas.messages import SeenRequest
 from app.services.message_service import MessageService
@@ -53,24 +54,37 @@ class WSManager:
         self._connections: dict[UUID, dict[int, WebSocket]] = {}
         self._session_connections: dict[UUID, dict[int, WebSocket]] = {}
         self._socket_sessions: dict[int, UUID] = {}
+        self._socket_users: dict[int, tuple[UUID, str]] = {}
+        self._presence_connection_ids: dict[int, str] = {}
+        self._presence_heartbeat_tasks: dict[int, asyncio.Task[None]] = {}
         self._closing_sockets: set[int] = set()
         self._socket_work_budgets: dict[int, WebSocketWorkBudget] = {}
         self._command_locks: dict[int, asyncio.Lock] = {}
         self._last_subscribe_history_requests: dict[int, tuple[tuple[str, ...], int | None]] = {}
         self._control_task: asyncio.Task[None] | None = None
+        self._presence_reaper_task: asyncio.Task[None] | None = None
         self._connection_lock = asyncio.Lock()
+        self._presence = PresenceService(redis)
 
     async def start(self) -> None:
         if self._control_task is None or self._control_task.done():
             self._control_task = asyncio.create_task(self._auth_control_loop())
+        if self._presence_reaper_task is None or self._presence_reaper_task.done():
+            self._presence_reaper_task = asyncio.create_task(self._presence_reaper_loop())
 
     async def stop(self) -> None:
-        if self._control_task is None:
-            return
-        self._control_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await self._control_task
+        tasks = [
+            task
+            for task in [self._control_task, self._presence_reaper_task, *self._presence_heartbeat_tasks.values()]
+            if task is not None
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self._control_task = None
+        self._presence_reaper_task = None
+        self._presence_heartbeat_tasks.clear()
 
     async def connect(
         self,
@@ -91,10 +105,13 @@ class WSManager:
             # cannot all pass the quota check.
             self._connections.setdefault(user_id, {})[id(websocket)] = websocket
             self._initialize_socket_controls(websocket)
+            connection_id = PresenceService.new_connection_id()
+            self._presence_connection_ids[id(websocket)] = connection_id
+            self._socket_users[id(websocket)] = (user_id, username)
         try:
             if not pre_accepted:
                 await websocket.accept()
-            await mark_user_online(self._redis, username)
+            await self._presence.register(user_id, username, connection_id)
             # Refresh broker bindings on connect so users who were offline during a
             # membership change get a durable desired-state reconciliation row.
             await self._ensure_user_bindings(user_id, username)
@@ -110,12 +127,20 @@ class WSManager:
             sockets.pop(id(websocket), None)
             if not sockets:
                 self._connections.pop(user_id, None)
+            await self._presence.disconnect(user_id, username, connection_id)
+            self._presence_connection_ids.pop(id(websocket), None)
+            self._socket_users.pop(id(websocket), None)
             self._cleanup_socket_controls(websocket)
             raise
         self._session_connections.setdefault(session_id, {})[id(websocket)] = websocket
         self._socket_sessions[id(websocket)] = session_id
 
     async def disconnect(self, websocket: WebSocket, username: str) -> None:
+        socket_id = id(websocket)
+        heartbeat_task = self._presence_heartbeat_tasks.pop(socket_id, None)
+        if heartbeat_task is not None and heartbeat_task is not asyncio.current_task():
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
         self._subscriptions.pop(id(websocket), None)
         self._subscription_generations.pop(id(websocket), None)
         self._subscription_checked_at.pop(id(websocket), None)
@@ -131,7 +156,11 @@ class WSManager:
             session_sockets.pop(id(websocket), None)
             if not session_sockets:
                 self._session_connections.pop(session_id, None)
-        await mark_user_offline(self._redis, username)
+        user_identity = self._socket_users.pop(socket_id, None)
+        connection_id = self._presence_connection_ids.pop(socket_id, None)
+        if user_identity is not None and connection_id is not None:
+            user_id, registered_username = user_identity
+            await self._presence.disconnect(user_id, registered_username, connection_id)
 
     def _initialize_socket_controls(self, websocket: WebSocket) -> None:
         socket_id = id(websocket)
@@ -254,18 +283,38 @@ class WSManager:
         redis_task = asyncio.create_task(self._redis_forward_loop(websocket, username, user_id))
         inbound_task = asyncio.create_task(self._inbound_loop(websocket, user_id, session_id))
         expiry_task = asyncio.create_task(self._close_when_auth_expires(websocket, authentication_expires_at))
+        presence_task = asyncio.create_task(self._presence_heartbeat_loop(websocket, user_id, username))
+        self._presence_heartbeat_tasks[id(websocket)] = presence_task
+        tasks = {redis_task, inbound_task, expiry_task, presence_task}
         # The socket is alive while all three loops are alive. Token/session
         # lifetime is enforced without polling PostgreSQL per connection.
-        done, pending = await asyncio.wait(
-            {redis_task, inbound_task, expiry_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+        try:
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._presence_heartbeat_tasks.pop(id(websocket), None)
         for task in done:
             if not task.cancelled() and task.exception():
                 raise task.exception()
+
+    async def _presence_heartbeat_loop(self, websocket: WebSocket, user_id: UUID, username: str) -> None:
+        settings = get_settings()
+        socket_id = id(websocket)
+        while True:
+            await asyncio.sleep(settings.presence_refresh_seconds)
+            connection_id = self._presence_connection_ids.get(socket_id)
+            if connection_id is None:
+                return
+            await self._presence.refresh(user_id, username, connection_id)
+
+    async def _presence_reaper_loop(self) -> None:
+        interval = get_settings().presence_reaper_interval_seconds
+        while True:
+            await asyncio.sleep(interval)
+            await self._presence.reap_expired()
 
     async def _close_when_auth_expires(self, websocket: WebSocket, expires_at: datetime) -> None:
         delay = max(0.0, (expires_at - utcnow()).total_seconds())

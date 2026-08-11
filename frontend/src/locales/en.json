@@ -508,6 +508,31 @@
       "updatedTitle": "Profile updated"
     }
   },
+  "emailVerification": {
+    "alreadyVerifiedDescription": "The current email address is already verified.",
+    "alreadyVerifiedTitle": "Email already verified",
+    "authRequiredDescription": "Sign in to the account that requested this link, then reopen the email link. The token was not saved in this browser.",
+    "authRequiredTitle": "Sign in required",
+    "confirmingDescription": "This secure link is being matched to your signed-in account and current email address.",
+    "confirmingTitle": "Verifying your email",
+    "failedDescription": "This link may be invalid, expired, revoked, already used, or for another account.",
+    "failedTitle": "Email could not be verified",
+    "missingToken": "The verification token is missing from this link.",
+    "openProfile": "Open profile",
+    "resend": "Resend verification email",
+    "resendCooldown": "Resend in {seconds}s",
+    "send": "Send verification email",
+    "sendFailedDescription": "We couldn't send a verification email right now.",
+    "sendFailedTitle": "Verification email failed",
+    "sending": "Sending...",
+    "sentDescription": "Open the new link in your mailbox while signed in to this account.",
+    "sentTitle": "Verification email sent",
+    "signIn": "Sign in",
+    "unverifiedStatus": "Unverified",
+    "verifiedDescription": "Your current email address is now verified and your profile has been refreshed.",
+    "verifiedStatus": "Verified",
+    "verifiedTitle": "Email verified"
+  },
   "publicProfile": {
     "badges": {
       "public": "Workspace profile"

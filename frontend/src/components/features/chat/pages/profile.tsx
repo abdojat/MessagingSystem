@@ -32,7 +32,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/services/api/client";
 import { getApiBaseUrl } from "@/services/api/runtime";
 import { useAuthStore } from "@/store/authStore";
-import type { MeResponse, UpdateMeRequest } from "@/types/api";
+import type { EmailVerificationRequestResponse, MeResponse, UpdateMeRequest } from "@/types/api";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
 import {
@@ -202,6 +202,7 @@ export default function ProfilePage() {
   const localePath = useLocalePath();
   const locale = useLocale();
   const t = useTranslations("profile");
+  const verificationT = useTranslations("emailVerification");
   const commonT = useTranslations("common");
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -210,6 +211,8 @@ export default function ProfilePage() {
   const updateUser = useAuthStore((state) => state.updateUser);
   const { data: sessions = [], isLoading: isSessionsLoading } = useSessions(isAuthenticated);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [verificationRequested, setVerificationRequested] = useState(false);
+  const [verificationCooldown, setVerificationCooldown] = useState(0);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [formState, setFormState] = useState<ProfileFormState>({
     display_name: user?.display_name ?? "",
@@ -229,6 +232,14 @@ export default function ProfilePage() {
   useEffect(() => {
     setAvatarFile(null);
   }, [user?.avatar_url, user?.updated_at]);
+
+  useEffect(() => {
+    if (verificationCooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setVerificationCooldown((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [verificationCooldown > 0]);
 
   useEffect(() => {
     if (!isInitializing && (!isAuthenticated || !user)) {
@@ -292,6 +303,37 @@ export default function ProfilePage() {
       toast({
         title: t("toasts.updateFailedTitle"),
         description: getErrorMessage(error, t("toasts.updateFailedDescription")),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const requestEmailVerification = useMutation({
+    mutationFn: () =>
+      apiClient<EmailVerificationRequestResponse>("/auth/email-verification/request", {
+        method: "POST",
+      }),
+    onSuccess: async (result) => {
+      if (result.status === "already_verified") {
+        const freshUser = await apiClient<MeResponse>("/me");
+        updateUser(freshUser);
+        toast({
+          title: verificationT("alreadyVerifiedTitle"),
+          description: verificationT("alreadyVerifiedDescription"),
+        });
+        return;
+      }
+      setVerificationRequested(true);
+      setVerificationCooldown(30);
+      toast({
+        title: verificationT("sentTitle"),
+        description: verificationT("sentDescription"),
+      });
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: verificationT("sendFailedTitle"),
+        description: getErrorMessage(error, verificationT("sendFailedDescription")),
         variant: "destructive",
       });
     },
@@ -599,8 +641,31 @@ export default function ProfilePage() {
                 <Mail className="h-4 w-4" />
                 <span className="text-xs uppercase tracking-[0.18em]">{t("stats.emailStatus")}</span>
               </div>
-              <p className="mt-2 font-semibold">{user.email?.trim() ? t("status.configured") : t("status.missing")}</p>
+              <p className="mt-2 font-semibold">
+                {!user.email?.trim()
+                  ? t("status.missing")
+                  : user.email_verified_at
+                    ? verificationT("verifiedStatus")
+                    : verificationT("unverifiedStatus")}
+              </p>
               <p className="mt-2 text-xs text-muted-foreground break-all">{user.email?.trim() || t("empty.noEmailAddress")}</p>
+              {user.email?.trim() && !user.email_verified_at ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-3 w-full"
+                  disabled={requestEmailVerification.isPending || verificationCooldown > 0}
+                  onClick={() => requestEmailVerification.mutate()}
+                >
+                  {requestEmailVerification.isPending
+                    ? verificationT("sending")
+                    : verificationCooldown > 0
+                      ? verificationT("resendCooldown", { seconds: verificationCooldown })
+                      : verificationRequested
+                        ? verificationT("resend")
+                        : verificationT("send")}
+                </Button>
+              ) : null}
             </Card>
 
             <Card className="rounded-2xl p-4">

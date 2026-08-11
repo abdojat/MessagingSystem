@@ -7,7 +7,7 @@ import re
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import EmailStr, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -134,6 +134,9 @@ class Settings(BaseSettings):
     rate_limit_websocket_per_minute: int = Field(default=30, gt=0)
     rate_limit_sync_per_minute: int = Field(default=60, gt=0)
     rate_limit_admin_per_minute: int = Field(default=60, gt=0)
+    rate_limit_email_verification_user_per_15_minutes: int = Field(default=5, ge=1, le=100)
+    rate_limit_email_verification_ip_per_15_minutes: int = Field(default=10, ge=1, le=500)
+    rate_limit_email_verification_confirm_per_15_minutes: int = Field(default=20, ge=1, le=500)
     rate_limit_local_max_keys: int = Field(default=10_000, ge=1, le=1_000_000)
 
     message_text_max_bytes: int = Field(default=64 * 1024, ge=1024)
@@ -199,6 +202,23 @@ class Settings(BaseSettings):
     superadmin_email: str = ""
     superadmin_password: str = ""
 
+    email_verification_enabled: bool = False
+    email_verification_ttl_minutes: int = Field(default=30, ge=5, le=1440)
+    email_verification_public_url: str = "http://localhost:3000/en/verify-email"
+    email_delivery_mode: Literal["console", "capture", "smtp"] = "console"
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    smtp_from_email: EmailStr | None = None
+    smtp_use_tls: bool = False
+    smtp_use_starttls: bool = True
+
+    presence_lease_seconds: int = Field(default=60, ge=15, le=3600)
+    presence_refresh_seconds: int = Field(default=20, ge=5, le=1800)
+    presence_reaper_interval_seconds: int = Field(default=10, ge=1, le=300)
+    presence_reaper_batch_size: int = Field(default=200, ge=1, le=5000)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _parse_cors_origins(cls, value: Any) -> list[str]:
@@ -246,6 +266,14 @@ class Settings(BaseSettings):
         if not normalized:
             raise ValueError("ENVIRONMENT must not be empty")
         return normalized
+
+    @field_validator("smtp_from_email", mode="before")
+    @classmethod
+    def _empty_smtp_from_email_is_none(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
     @model_validator(mode="after")
     def _validate_data_encryption_configuration(self) -> "Settings":
@@ -298,6 +326,26 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
+        if self.presence_refresh_seconds >= self.presence_lease_seconds:
+            raise ValueError("PRESENCE_REFRESH_SECONDS must be less than PRESENCE_LEASE_SECONDS")
+
+        verification_url = urlsplit(self.email_verification_public_url)
+        if (
+            verification_url.scheme.lower() not in {"http", "https"}
+            or not verification_url.netloc
+            or verification_url.query
+            or verification_url.fragment
+        ):
+            raise ValueError("EMAIL_VERIFICATION_PUBLIC_URL must be an absolute HTTP(S) URL without query or fragment")
+
+        if self.smtp_use_tls and self.smtp_use_starttls:
+            raise ValueError("SMTP_USE_TLS and SMTP_USE_STARTTLS are mutually exclusive")
+        if bool(self.smtp_username.strip()) != bool(self.smtp_password.get_secret_value()):
+            raise ValueError("SMTP_USERNAME and SMTP_PASSWORD must be configured together")
+        if self.email_verification_enabled and self.email_delivery_mode == "smtp":
+            if not self.smtp_host.strip() or self.smtp_from_email is None:
+                raise ValueError("SMTP email verification requires SMTP_HOST and SMTP_FROM_EMAIL")
+
         if self.environment in DEVELOPMENT_ENVIRONMENTS:
             return self
 
@@ -308,6 +356,14 @@ class Settings(BaseSettings):
             raise ValueError("ALLOW_LEGACY_PLAINTEXT_MESSAGES cannot be enabled in production-like environments")
         if self.allow_legacy_plaintext_uploads:
             raise ValueError("ALLOW_LEGACY_PLAINTEXT_UPLOADS cannot be enabled in production-like environments")
+
+        if self.email_verification_enabled:
+            if self.email_delivery_mode != "smtp":
+                raise ValueError("production email verification requires EMAIL_DELIVERY_MODE=smtp")
+            if not (self.smtp_use_tls or self.smtp_use_starttls):
+                raise ValueError("production SMTP requires implicit TLS or STARTTLS")
+            if verification_url.scheme.lower() != "https":
+                raise ValueError("production EMAIL_VERIFICATION_PUBLIC_URL must use HTTPS")
 
         for origin in self.cors_origins:
             if origin == "*":

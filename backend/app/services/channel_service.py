@@ -817,6 +817,16 @@ class ChannelService:
             invited_user_id = await db.scalar(
                 select(User.id).where(func.lower(func.btrim(User.email)) == invited_email)
             )
+            if (
+                invited_user_id is None
+                and get_settings().is_production_like
+                and not get_settings().email_verification_enabled
+            ):
+                raise AppError(
+                    "pre-registration email invites require configured email verification",
+                    503,
+                    code="EMAIL_VERIFICATION_UNAVAILABLE",
+                )
 
         token = make_invite_token()
         # Store only a hash plus a short mask so leaked database rows cannot be

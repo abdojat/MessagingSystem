@@ -144,7 +144,7 @@ The current verifier intentionally opens User B's WebSocket before User B joins,
 4. Register/login User B (incognito or second browser profile).
 5. Register/login User C in a third window or separate profile.
 6. User A creates a channel.
-7. User A opens Channel Details and clicks **Create and copy invite link**. The generic link is reusable until revoked or expired and is available to the owner for public/private channels with any join policy; targeted invites remain one-use. Existing-account email targets bind to that account ID. Pre-registration email targets require verified ownership, but this repository does not implement email delivery/completion, so use generic or user-ID targets for the supervisor UI flow.
+7. User A opens Channel Details and clicks **Create and copy invite link**. The generic link is reusable until revoked or expired and is available to the owner for public/private channels with any join policy; targeted invites remain one-use. Existing-account email targets bind to that account ID. For a pre-registration email target, show the future account as **Unverified**, request verification from Profile, open the configured development-capture/SMTP fragment link while signed in, then show **Verified** before accepting the invite.
 8. User B opens the copied link and accepts the invitation (or joins/subscribes through the configured join flow).
 9. User A publishes a text message.
 10. User A uses the paperclip composer button to attach and publish a small photo, video, or audio file; caption text is optional.

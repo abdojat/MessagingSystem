@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -64,6 +65,20 @@ class BrowserCsrfResponse(BaseModel):
 class WebSocketTicketResponse(BaseModel):
     ticket: str
     expires_at: datetime
+
+
+class EmailVerificationConfirmRequest(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+
+
+class EmailVerificationRequestResponse(BaseModel):
+    status: Literal["sent", "already_verified"]
+    expires_at: datetime | None = None
+
+
+class EmailVerificationConfirmResponse(BaseModel):
+    status: Literal["verified"] = "verified"
+    verified_at: datetime
 
 
 class MeResponse(BaseModel):

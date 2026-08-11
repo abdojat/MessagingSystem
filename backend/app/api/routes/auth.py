@@ -17,6 +17,9 @@ from app.core.utils import sha256_hex
 from app.schemas.auth import (
     BrowserAccessTokenResponse,
     BrowserCsrfResponse,
+    EmailVerificationConfirmRequest,
+    EmailVerificationConfirmResponse,
+    EmailVerificationRequestResponse,
     LoginRequest,
     LogoutAllResponse,
     LogoutRequest,
@@ -29,6 +32,7 @@ from app.schemas.auth import (
 )
 from app.realtime.auth_control import AuthControlEvent, dispatch_auth_control
 from app.services.auth_service import AuthService, RefreshTokenReplayError
+from app.services.email_verification_service import EmailVerificationService
 from app.services.event_service import log_event
 from app.services.rate_limit_service import enforce_rate_limit
 from app.services.ws_ticket_service import WebSocketTicketService
@@ -53,6 +57,38 @@ async def _enforce_auth_rate_limits(redis: RedisDep, scope: str, ip: str, identi
         f"rl:auth:{scope}:identity:{identity_digest}",
         limit=settings.rate_limit_auth_identity_per_minute,
         window_seconds=60,
+    )
+
+
+async def _enforce_email_verification_request_limits(redis: RedisDep, user_id: UUID, ip: str) -> None:
+    settings = get_settings()
+    await enforce_rate_limit(
+        redis,
+        f"rl:email-verification:request:user:{user_id}",
+        limit=settings.rate_limit_email_verification_user_per_15_minutes,
+        window_seconds=15 * 60,
+    )
+    await enforce_rate_limit(
+        redis,
+        f"rl:email-verification:request:ip:{ip}",
+        limit=settings.rate_limit_email_verification_ip_per_15_minutes,
+        window_seconds=15 * 60,
+    )
+
+
+async def _enforce_email_verification_confirm_limits(redis: RedisDep, user_id: UUID, ip: str) -> None:
+    limit = get_settings().rate_limit_email_verification_confirm_per_15_minutes
+    await enforce_rate_limit(
+        redis,
+        f"rl:email-verification:confirm:user:{user_id}",
+        limit=limit,
+        window_seconds=15 * 60,
+    )
+    await enforce_rate_limit(
+        redis,
+        f"rl:email-verification:confirm:ip:{ip}",
+        limit=limit,
+        window_seconds=15 * 60,
     )
 
 
@@ -153,6 +189,43 @@ async def browser_csrf(request: Request, response: Response) -> BrowserCsrfRespo
             raise to_http_exception(exc) from exc
     token = set_csrf_cookie(response, settings=settings)
     return BrowserCsrfResponse(csrf_token=token)
+
+
+@router.post("/email-verification/request", response_model=EmailVerificationRequestResponse)
+async def request_email_verification(
+    db: DBDep,
+    auth: CurrentAuthDep,
+    request: Request,
+    redis: RedisDep,
+) -> EmailVerificationRequestResponse:
+    ip = get_client_ip(request)
+    await _enforce_email_verification_request_limits(redis, auth.user.id, ip)
+    try:
+        result = await EmailVerificationService.request_verification(
+            db,
+            auth.user.id,
+            request.app.state.verification_mailer,
+        )
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
+    return EmailVerificationRequestResponse(status=result.status, expires_at=result.expires_at)
+
+
+@router.post("/email-verification/confirm", response_model=EmailVerificationConfirmResponse)
+async def confirm_email_verification(
+    req: EmailVerificationConfirmRequest,
+    db: DBDep,
+    auth: CurrentAuthDep,
+    request: Request,
+    redis: RedisDep,
+) -> EmailVerificationConfirmResponse:
+    ip = get_client_ip(request)
+    await _enforce_email_verification_confirm_limits(redis, auth.user.id, ip)
+    try:
+        result = await EmailVerificationService.confirm(db, auth.user.id, req.token)
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
+    return EmailVerificationConfirmResponse(verified_at=result.verified_at)
 
 
 @router.post("/refresh", response_model=TokenPair)

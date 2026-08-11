@@ -22,6 +22,7 @@ from app.realtime.protocol import build_error
 from app.realtime.ws_manager import WSManager
 from app.schemas.common import ErrorResponse
 from app.services.auth_service import AuthService
+from app.services.email_delivery_service import build_verification_mailer
 from app.services.ws_ticket_service import WebSocketTicketService
 from app.services.rate_limit_service import RateLimitService
 
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI):
 
     app.state.redis = redis
     app.state.amqp = amqp
+    app.state.verification_mailer = build_verification_mailer(settings)
     app.state.ws_manager = WSManager(SessionLocal, redis, amqp)
     await app.state.ws_manager.start()
 

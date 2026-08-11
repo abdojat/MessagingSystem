@@ -111,6 +111,34 @@ class UserSession(Base):
     replay_detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class EmailVerificationChallenge(Base):
+    __tablename__ = "email_verification_challenges"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Snapshot the canonical mailbox value so a token can never verify a later
+    # address assigned to the same mutable user profile.
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_email_verification_challenges_token_hash"),
+        Index("ix_email_verification_challenges_expires_at", "expires_at"),
+        Index(
+            "ix_email_verification_challenges_active_user",
+            "user_id",
+            "expires_at",
+            postgresql_where=text("consumed_at IS NULL AND revoked_at IS NULL"),
+        ),
+    )
+
+
 class Channel(Base):
     __tablename__ = "channels"
 

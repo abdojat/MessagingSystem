@@ -117,6 +117,23 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       <<: *backend-environment
+      # SMTP credentials intentionally exist only in this API container. The
+      # worker, frontend, proxy, migration, and bootstrap services do not get them.
+      EMAIL_VERIFICATION_ENABLED: ${EMAIL_VERIFICATION_ENABLED:-false}
+      EMAIL_VERIFICATION_TTL_MINUTES: ${EMAIL_VERIFICATION_TTL_MINUTES:-30}
+      EMAIL_VERIFICATION_PUBLIC_URL: ${EMAIL_VERIFICATION_PUBLIC_URL:?EMAIL_VERIFICATION_PUBLIC_URL required}
+      EMAIL_DELIVERY_MODE: ${EMAIL_DELIVERY_MODE:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-false}
+      SMTP_USE_STARTTLS: ${SMTP_USE_STARTTLS:-true}
+      PRESENCE_LEASE_SECONDS: ${PRESENCE_LEASE_SECONDS:-60}
+      PRESENCE_REFRESH_SECONDS: ${PRESENCE_REFRESH_SECONDS:-20}
+      PRESENCE_REAPER_INTERVAL_SECONDS: ${PRESENCE_REAPER_INTERVAL_SECONDS:-10}
+      PRESENCE_REAPER_BATCH_SIZE: ${PRESENCE_REAPER_BATCH_SIZE:-200}
     command: >-
       sh -c "exec uvicorn app.main:app --host 0.0.0.0 --port 8000
       --ws-max-size $${WS_MAX_INBOUND_MESSAGE_BYTES:-16384}"

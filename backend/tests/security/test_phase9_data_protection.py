@@ -181,7 +181,16 @@ def test_message_unknown_key_tamper_and_plaintext_fail_closed(monkeypatch) -> No
     with pytest.raises(AppError) as missing:
         decrypt_message(unknown)
     assert missing.value.code == "DECRYPTION_FAILED"
-    tampered = ciphertext[:-2] + ("A" if ciphertext[-2] != "A" else "B") + ciphertext[-1]
+    # Mutate a character well inside the authenticated Fernet token. Changing
+    # a near-padding base64 character can alter only unused padding bits and
+    # therefore nondeterministically decode to the original bytes.
+    token_start = ciphertext.rfind(":") + 1
+    tamper_index = token_start + 16
+    tampered = (
+        ciphertext[:tamper_index]
+        + ("A" if ciphertext[tamper_index] != "A" else "B")
+        + ciphertext[tamper_index + 1 :]
+    )
     with pytest.raises(AppError):
         decrypt_message(tampered)
     with pytest.raises(AppError):

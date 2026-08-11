@@ -10,6 +10,7 @@ Global administration is modeled independently from channel membership. `users.i
   - Enforces authentication/authorization.
   - Encrypts/decrypts authorized message content through the versioned data-key ring.
   - Encrypts upload bytes into authenticated chunk frames and streams authorized decryption.
+  - Issues email-verification challenges and delivers verification links through a provider-independent mailer.
   - Persists domain data and emits outbox/event entries.
 - Worker
   - Polls outbox entries.
@@ -22,6 +23,7 @@ Global administration is modeled independently from channel membership. `users.i
   - Includes a durable dead-letter exchange/queue for operational visibility.
 - Redis + WebSocket
   - Low-latency delivery path for active subscribers.
+  - Distributed per-connection presence leases and bounded expiration index; presence is metadata only, never authorization.
   - Targeted membership updates are allowed through the socket even when the new channel is not yet in the socket subscription set, so approval-after-connect can refresh and subscribe safely.
 - PostgreSQL
   - Source of truth for users, channels, memberships, messages, normalized message/upload attachment links, outbox, and events.
@@ -120,6 +122,54 @@ cookie. Refresh/logout require the cookie, exact allowed Origin, and matching
 after reload the app refreshes before loading `/me`. WebSocket ticket issuance
 continues to use the memory bearer token and the socket URL contains only the
 existing opaque single-use ticket.
+
+## Phase 10 email verification and presence
+
+Authenticated mailbox proof uses migration `0023_phase10_email_verification`:
+
+```text
+authenticated request -> lock User -> revoke active challenges
+  -> store SHA-256(token) + normalized email snapshot + expiry -> commit
+  -> console/capture development transport or generic SMTP transport
+```
+
+The raw `secrets.token_urlsafe(32)` value exists only while the mailer builds a
+fragment URL such as `/en/verify-email#token=...`; it is not stored in
+PostgreSQL or audit events. SMTP delivery runs in `asyncio.to_thread`, uses
+Python's default certificate-verifying TLS context, and production requires
+implicit TLS or STARTTLS plus an HTTPS public URL. A provider failure revokes
+the persisted challenge and returns `EMAIL_DELIVERY_FAILED`; it never changes
+`email_verified_at`.
+
+Confirmation requires the signed-in user, locks `User` before the unique
+challenge row, and accepts only an unconsumed, unrevoked, unexpired challenge
+whose user and normalized email snapshot still equal the current account.
+Concurrent use therefore has one effective success. An email change clears the
+proof and revokes outstanding challenges in the same transaction. This makes
+the existing unresolved/pre-registration invite rule usable without changing
+immutable existing-user invite semantics.
+
+Presence preserves the worker-facing `rt.online_users` set but no longer
+updates it per socket blindly. Each admitted socket receives a random
+connection ID and an expiring member in `presence:user:<user_id>`. The same Lua
+operation prunes expired leases, updates `presence:expirations`, refreshes the
+per-user key TTL, and calculates the aggregate transition:
+
+```text
+0 -> 1: online
+1 -> N: no transition
+N -> 1: remain online
+1 -> 0: offline
+```
+
+A backend heartbeat refreshes quiet sockets before the lease expires. A
+bounded periodic reaper reads only due members from the global sorted-set
+index; it never scans Redis with `KEYS`. Lua makes heartbeat, disconnect, and
+duplicate-reaper races atomic and idempotent across backend processes. If a
+backend crashes, its connection expires and the reaper removes the final stale
+presence when appropriate. If Redis is unavailable, messaging authorization is
+unchanged and the backend does not infer a false global offline transition;
+presence may remain temporarily stale/unknown until Redis recovers.
 
 ## Message Lifecycle
 ```mermaid

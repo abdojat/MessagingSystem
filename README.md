@@ -15,6 +15,8 @@ University final-year project implementing a secure distributed channel messagin
 - Abuse resistance: atomic Redis/local-fallback rate limits, WebSocket frame/command/history budgets, message/protocol bounds, account quotas, bounded RabbitMQ user queues, and paced Redis fanout retries
 - Integrity: tamper-evident event audit hash chain, verification API, backfill script, frontend Event Log badge/check
 - Data protection: versioned message encryption, authenticated chunked upload storage, bounded migration/status tooling, and explicit historical-key rotation
+- Identity: authenticated mailbox verification with hashed one-use challenges, generic SMTP delivery, email-snapshot binding, and pre-registration invite integration
+- Presence: Redis-backed per-connection leases, heartbeats, atomic aggregate online/offline transitions, and a bounded crash reaper
 - Platform administration: environment-bootstrapped superadmin, global audit view, user/session controls, channel suspension/restoration, and global delivery recovery
 
 ## Services
@@ -100,6 +102,8 @@ Important:
 - `API_REQUEST_BODY_MAX_BYTES` (defaults to 128 KiB for ordinary `POST`/`PUT`/`PATCH`/`DELETE` bodies; the protected upload-content `PUT` keeps its separate streaming limit)
 - `MESSAGE_TEXT_MAX_BYTES`, `MESSAGE_JSON_MAX_BYTES`, `MESSAGE_JSON_MAX_DEPTH` (validated before encryption/outbox work)
 - `RATE_LIMIT_*` grouped auth/search/message/media/channel/WebSocket/sync/admin limits; `RATE_LIMIT_LOCAL_MAX_KEYS` bounds the fail-closed per-process sensitive fallback used when Redis is unavailable
+- `EMAIL_VERIFICATION_ENABLED`, `EMAIL_VERIFICATION_TTL_MINUTES`, `EMAIL_VERIFICATION_PUBLIC_URL`, `EMAIL_DELIVERY_MODE`, and `SMTP_*` configure mailbox proof. Production verification requires generic SMTP with implicit TLS or STARTTLS; credentials are injected only into the backend.
+- `PRESENCE_LEASE_SECONDS`, `PRESENCE_REFRESH_SECONDS`, `PRESENCE_REAPER_INTERVAL_SECONDS`, and `PRESENCE_REAPER_BATCH_SIZE` bound distributed per-socket presence (`refresh < lease`).
 - `MAX_CHANNELS_OWNED_PER_USER`, `MAX_ACTIVE_INVITES_PER_USER`, `MAX_UPLOADS_PER_USER_PER_DAY`, `MAX_PENDING_UPLOADS_PER_USER`, `MAX_STORED_UPLOAD_BYTES_PER_USER`, and `MAX_WEBSOCKET_CONNECTIONS_PER_USER`
 - `MAX_CONCURRENT_DOWNLOADS_PER_USER` (3), `MAX_CONCURRENT_DOWNLOADS_PER_IP` (12), and `MAX_CONCURRENT_DOWNLOADS_GLOBAL` (100) atomically bound protected streams in each backend process
 - `TRUSTED_PROXY_CIDRS` is empty in direct mode; set it only to explicit proxy peers that overwrite `X-Forwarded-For` (the hardened Compose file supplies its fixed proxy `/32`)
@@ -124,7 +128,9 @@ Development note:
 - WebSocket clients obtain a short-lived, one-time opaque ticket with `POST /auth/ws-ticket`; long-lived access JWTs are not accepted in WebSocket URLs. Redis control events close matching sockets across backend instances when Redis is available.
 - Browser clients use `/auth/browser/login`, `/refresh`, `/logout`, and `/csrf`: the access JWT exists only in the in-memory Zustand store, the rotating refresh JWT is an HttpOnly cookie, and refresh/logout require an allowed Origin plus a constant-time double-submit CSRF check. Legacy JSON token endpoints remain available for scripts and non-browser clients.
 - Established sockets use per-socket weighted command and history-row token buckets. Subscribe/resume history is capped globally per command, identical subscribe/cursor requests do not refetch history, and inbound dispatch remains one command at a time. These budgets are per backend process/socket, not a distributed global quota.
-- Generic invite links are reusable until revoked, expired, or their channel is deleted. Targeted invites are one-use and accept/revoke/delete ordering is serialized through PostgreSQL row locks. Existing-account email targets resolve once to immutable `user_id`; unresolved pre-registration email targets require verified ownership of the normalized email. Changing an account email clears verification. The repository intentionally does not implement email delivery/verification issuance, so a deployment must supply that trusted completion flow before unresolved email invites can be accepted.
+- Generic invite links are reusable until revoked, expired, or their channel is deleted. Targeted invites are one-use and accept/revoke/delete ordering is serialized through PostgreSQL row locks. Existing-account email targets resolve once to immutable `user_id`; unresolved pre-registration email targets require verified ownership of the normalized email. `POST /auth/email-verification/request` sends a one-use fragment link through the configured transport and `POST /auth/email-verification/confirm` binds proof to the authenticated user and exact current email. Changing the email clears proof and revokes outstanding challenges.
+- Local development may use explicit console/capture delivery. Production enables verification only with SMTP plus implicit TLS or STARTTLS and an HTTPS public verification URL. A production deployment with verification disabled rejects new unresolved email-targeted invitations with a controlled availability error; user-ID, existing-account email, and generic invitations remain unaffected.
+- Presence is UI/realtime metadata, never authorization. Each WebSocket registers a random connection lease in Redis. Closing one of several tabs/sessions does not mark the user offline; the last disconnect or bounded reaper transition removes the username from the worker-facing online set. Redis failure degrades to stale/unknown presence rather than a confident false offline decision.
 - Membership topology is stored as versioned desired state in PostgreSQL and snapshotted through the outbox. The worker locks the user/channel state, rejects stale generations, re-derives current authorization, removes obsolete slug bindings, and retries a complete idempotent projection. Run `python -m app.db.reconcile_broker_bindings` in the backend environment to enqueue a full repair from PostgreSQL.
 - Security-sensitive database writes follow the documented global lock order in [`backend/docs/LOCK_ORDERING.md`](backend/docs/LOCK_ORDERING.md). Worker retry/dead-letter state commits before its best-effort diagnostic event transaction, avoiding the historical binding-row/event-advisory inversion.
 - RabbitMQ user queues are bounded realtime buffers (expiry, message TTL, maximum length). Missed or evicted events are recovered through PostgreSQL-backed REST sync.
@@ -164,6 +170,11 @@ encrypted payloads opaquely. Every supplied Compose profile gives the worker
 only database/broker/fanout settings, not JWT, legacy-Fernet, or data-at-rest
 keys.
 
+Migration `0023_phase10_email_verification` creates only hashed, email-snapshot
+verification challenges and preserves every existing `email_verified_at` and
+invite row. Historical verification challenges can be removed in bounded
+batches with `python -m app.db.cleanup_email_verification`.
+
 ## Tests
 Docker backend tests (verified):
 ```bash
@@ -174,6 +185,14 @@ Local backend tests:
 ```bash
 cd backend
 python -m pytest -q
+```
+
+Focused identity/presence proof (use a disposable Redis through
+`PHASE10_TEST_REDIS_URL`):
+
+```bash
+cd backend
+python -B -m pytest -q tests/security/test_phase10_identity_presence.py
 ```
 If local PostgreSQL is unreachable for `DATABASE_URL`, tests may be skipped.
 

@@ -5,6 +5,8 @@
 - User authentication with password hashing, session-bound JWT access/refresh tokens, idle and absolute expiry, refresh replay detection, one-time WebSocket tickets, and local/distributed session revocation.
 - Channel/topic creation, listing, updates, joins, leaves, invites, approvals, role changes, and member removal.
 - Targeted invites are one-use and atomically ordered against revocation/deletion; generic invite links are reusable until revoked, expired, or their channel is deleted. Existing-account email targets bind to immutable user IDs, unresolved email targets require explicit verification, and changing an email clears verification.
+- Provider-independent mailbox verification uses authenticated request/confirm endpoints, hash-only one-use challenges bound to an exact normalized email snapshot, bounded expiry/rate limits, generic threaded SMTP, and a fragment-based frontend page. A genuine verification flow unlocks unresolved pre-registration invitations.
+- Distributed presence uses random per-WebSocket Redis leases, atomic aggregate transitions, heartbeat refresh, and a bounded duplicate-safe reaper. One of several local or cross-backend sockets can disconnect without a false offline transition; presence is not authorization.
 - Publish/subscribe message persistence with PostgreSQL as the source of truth.
 - Event logging for the key channel, membership, message, and security flows.
 - Tamper-evident audit log integrity for new events through a per-scope SHA-256 hash chain.
@@ -23,6 +25,7 @@
 - Security-sensitive database transactions use a documented lock order, and worker delivery diagnostics are isolated from authoritative retry/dead-letter commits.
 - PostgreSQL enforces that each message attachment's channel matches its authoritative message through migration `0021_phase7_attachment_integrity`.
 - Migration `0022_phase9_upload_encryption` adds constrained upload storage version/key metadata; bounded explicit CLI commands provide crypto status, legacy migration, crash recovery, and message/upload key rotation without republishing messages.
+- Migration `0023_phase10_email_verification` adds challenge history without changing existing verification timestamps or invitation identity semantics.
 - REST membership-event sync is channel-scoped while retaining self-targeted removal notifications; empty WebSocket subscriptions do not act as wildcards; pending memberships do not gain private read-derived privileges.
 - RabbitMQ membership topology uses versioned PostgreSQL desired state; stale opposite commands are rejected, obsolete slug keys are removed, and reconnect/global reconciliation covers desired bindings and stale undesired bindings.
 - Realtime message events carry membership generations and are authorized before WebSocket decryption; `/sync` message materialization is bounded by its global page limit.
@@ -51,6 +54,7 @@
 - Verified during the post-Phase-7 targeted repair on 2026-08-11 against disposable PostgreSQL 16: the new focused suite passed (`21 passed`), Phase 6–7 passed (`42 passed, 1 warning`), and the complete backend suite passed (`239 passed, 1 warning`). Frontend typecheck and direct/hardened Compose render checks passed. Nginx configuration was unchanged and no new proxy load or production-hardening claim is made.
 - Verified during Phase 8 production hardening on 2026-08-11: the focused suite passed (`13 passed`), the requested Phase 1-8/post-Phase-7 regression set passed (`128 passed, 1 warning`), and the complete backend suite passed (`252 passed, 1 warning`). Frontend typecheck and production build passed; development, hardened-demo, and production Compose rendering passed; production images built; the live TLS profile enforced redirect/security headers/host filtering/docs denial/minimal health, rejected default unauthenticated infrastructure credentials, denied runtime database role escalation, exposed only proxy ports, and passed the complete RabbitMQ -> worker -> Redis -> WebSocket demo verifier.
 - Verified during Phase 9 data protection on 2026-08-11: the focused suite passed (`35 passed`) and the complete backend passed (`287 passed, 1 warning`) against disposable PostgreSQL 16; frontend typecheck/build and all three Compose renders passed. Real filesystem tests proved plaintext markers absent from finalized upload bytes, exact bounded download, tamper rejection, crash recovery, rotation, and old-key removal. Fresh `->0022` and representative `0021->0022` schema upgrades passed. A disposable production-profile stack passed the full RabbitMQ/worker/Redis/WebSocket demo, exact encrypted-upload boundary inspection, 416 Range policy, HTTPS health/redirect checks, and idempotent migration reruns. Every supplied Compose worker receives only database/broker/fanout settings, not JWT/data-encryption keys.
+- Verified during Phase 10 identity/presence hardening on 2026-08-11: `25 passed, 1 warning` against disposable PostgreSQL 16 and real Redis 7 Lua execution; the requested Phase 2/5/6/8/9/post-repair regression group plus Phase 10 passed `150 passed, 1 warning`; the complete backend suite passed `312 passed, 1 warning`; frontend typecheck/build and 825-key locale alignment passed; all three Compose renders passed; fresh `->0023` and representative `0022->0023` upgrades preserved verified/unverified users and both invitation forms. A disposable Mailpit sink proved application-to-SMTP delivery without external mail, and an isolated hardened stack passed the full broker/WebSocket demo plus authorized encrypted download, ciphertext inspection, and logout-all revocation. The live run also identified and fixed WebSocket proxy header inheritance; `nginx -t` passed for the corrected configuration.
 - Delivery reliability tracking for the outbox, including retry scheduling, dead-letter status, RabbitMQ DLQ topology, admin APIs, and a frontend Delivery Monitor.
 - Event integrity verification through `GET /v1/channels/{id}/events/integrity` and the frontend Event Log badge/check.
 - Frontend internationalization for English and Arabic, including localized UI copy, shared accessibility labels, localized dates/numbers in the main demo screens, an in-app language switcher, and RTL document direction for Arabic.
@@ -83,7 +87,7 @@
 - The DLQ mirror depends on RabbitMQ being available at the time of dead-letter handling.
 - Event integrity is tamper-evident but not externally notarized. A fully privileged database operator could recompute hashes after rewriting rows unless hashes are anchored outside PostgreSQL.
 - Legacy rows need explicit backfill before the verifier can report them as initialized.
-- Email verification delivery/token issuance is not implemented; unresolved pre-registration email invitations remain unusable until a deployment supplies trusted mailbox verification.
+- Mailbox verification is implemented, but production delivery still depends on operator-owned TLS SMTP availability and an HTTPS public URL. There is no provider bounce/complaint webhook, MFA, or account-recovery system.
 - Protected-download limits are per backend process and proxy instance. Nginx bounds connection counts and write inactivity but this configuration does not guarantee a minimum client throughput or coordinate multiple replicas.
 
 ## What Is Demo-Grade
@@ -96,7 +100,7 @@
 - Dedicated broker/WebSocket integration tests in CI.
 - Live multi-backend WebSocket flood and Redis outage/recovery load tests; current command/fallback proofs are deterministic component tests and per-process limits remain explicit.
 - Controlled multi-account slow-reader/TCP tests and coordinated multi-replica download admission/ingress controls.
-- A real email-verification delivery and completion flow for pre-registration email invites.
+- Provider delivery monitoring/bounce handling and automated browser coverage for the email-verification page.
 - Full RabbitMQ outage/DLQ integration tests in CI.
 - Frontend automated smoke coverage.
 - Publicly trusted certificate automation, centralized KMS/HSM-backed secret management, and automated/audited rotation scheduling. Phase 9 rotation itself is an explicit operator command.
