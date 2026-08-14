@@ -3,13 +3,26 @@ import { apiClient, refreshAccessToken } from '@/services/api/client';
 import { getApiBaseUrl } from '@/services/api/runtime';
 import { browserLogoutRequest, type BrowserAccessTokenResponse } from '@/services/auth/browser-session';
 import { useAuthStore } from '../store/authStore';
-import { LoginRequest, RegisterRequest, MeResponse, SessionResponse } from '../types/api';
+import {
+  ChangePasswordRequest,
+  LoginRequest,
+  MeResponse,
+  PasswordChangeResponse,
+  RegisterRequest,
+  SessionResponse,
+} from '../types/api';
 import { useEffect } from 'react';
 
 function redirectToHomeAndReload() {
   const locale = window.location.pathname.split("/")[1];
   const homePath = locale ? `/${locale}` : "/";
   window.location.replace(homePath);
+}
+
+function redirectToLoginAndReload() {
+  const locale = window.location.pathname.split("/")[1];
+  const loginPath = locale ? `/${locale}/login` : "/login";
+  window.location.replace(loginPath);
 }
 
 function completeClientLogout(queryClient: ReturnType<typeof useQueryClient>) {
@@ -111,5 +124,20 @@ export function useLogoutAll() {
       completeClientLogout(queryClient);
       redirectToHomeAndReload();
     }
+  });
+}
+
+export function useChangePassword() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ChangePasswordRequest) =>
+      apiClient<PasswordChangeResponse>('/auth/password', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      completeClientLogout(queryClient);
+      redirectToLoginAndReload();
+    },
   });
 }

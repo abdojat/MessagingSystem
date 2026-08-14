@@ -13,7 +13,7 @@ from app.core.identifiers import normalize_username
 from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 from app.core.utils import sha256_hex, utcnow
 from app.db.models import User, UserSession
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, RegisterRequest, TokenPair
 from app.services.event_service import log_event
 
 logger = logging.getLogger(__name__)
@@ -243,6 +243,35 @@ class AuthService:
         )
         await db.commit()
         return UserRevocation(user_id=user_id, revoked_count=int(result.rowcount or 0), reason="logout all")
+
+    @staticmethod
+    async def change_password(db: AsyncSession, user_id: UUID, req: ChangePasswordRequest) -> UserRevocation:
+        """Replace a password and revoke every session in one transaction."""
+
+        user = (
+            await db.execute(select(User).where(User.id == user_id).with_for_update())
+        ).scalar_one_or_none()
+        if user is None or not verify_password(req.current_password, user.password_hash):
+            raise AppError("current password is incorrect", 400, code="CURRENT_PASSWORD_INVALID")
+        if verify_password(req.new_password, user.password_hash):
+            raise AppError("new password must be different", 400, code="PASSWORD_UNCHANGED")
+
+        user.password_hash = hash_password(req.new_password)
+        now = utcnow()
+        result = await db.execute(
+            update(UserSession)
+            .where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        revoked_count = int(result.rowcount or 0)
+        await log_event(
+            db,
+            "user.password_changed",
+            {"revoked_sessions": revoked_count},
+            actor_user_id=user_id,
+        )
+        await db.commit()
+        return UserRevocation(user_id=user_id, revoked_count=revoked_count, reason="password changed")
 
     @staticmethod
     async def _get_valid_refresh_session(

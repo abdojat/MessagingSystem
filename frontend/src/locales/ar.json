@@ -143,12 +143,16 @@
       "usernamePlaceholder": "أدخل اسم المستخدم"
     },
     "register": {
+      "confirmPassword": "تأكيد كلمة المرور",
+      "confirmPasswordPlaceholder": "أدخل كلمة المرور مرة أخرى",
       "email": "البريد الإلكتروني",
       "emailPlaceholder": "name@example.com",
       "error": "فشل إنشاء الحساب.",
       "hasAccount": "لديك حساب بالفعل؟",
       "password": "كلمة المرور",
       "passwordPlaceholder": "أنشئ كلمة مرور",
+      "passwordsDoNotMatch": "كلمتا المرور غير متطابقتين.",
+      "passwordsMatch": "كلمتا المرور متطابقتان.",
       "signIn": "تسجيل الدخول",
       "submit": "إنشاء حساب",
       "submitting": "جار إنشاء الحساب...",
@@ -157,6 +161,15 @@
       "username": "اسم المستخدم",
       "usernamePlaceholder": "اختر اسم مستخدم"
     }
+  },
+  "passwordPolicy": {
+    "lowercase": "حرف إنجليزي صغير واحد",
+    "minimumLength": "12 محرفا على الأقل",
+    "noWhitespace": "دون مسافات أو محارف فارغة",
+    "number": "رقم واحد",
+    "special": "محرف خاص واحد",
+    "title": "يجب أن تتضمن كلمة المرور:",
+    "uppercase": "حرف إنجليزي كبير واحد"
   },
   "appShell": {
     "connection": {
@@ -434,16 +447,28 @@
       "avatarPreviewAlt": "معاينة الصورة الشخصية المختارة",
       "bio": "نبذة",
       "bioPlaceholder": "شارك دورك أو تركيزك أو مسؤولياتك الحالية.",
+      "confirmNewPassword": "تأكيد كلمة المرور الجديدة",
+      "currentPassword": "كلمة المرور الحالية",
       "displayName": "اسم العرض",
       "displayNamePlaceholder": "كيف يظهر اسمك في المحادثات",
       "email": "البريد الإلكتروني",
       "emailPlaceholder": "name@example.com",
+      "newPassword": "كلمة المرور الجديدة",
       "profilePicture": "الصورة الشخصية",
       "selectedFile": "المحدد: {name}"
     },
     "lastServerUpdate": "آخر تحديث من الخادم {value}",
     "lastSynced": "آخر مزامنة {value}",
     "noUpdatesYet": "لا توجد تحديثات بعد",
+    "passwordChange": {
+      "changing": "جار تغيير كلمة المرور...",
+      "description": "تحقق من كلمة مرورك الحالية ثم اختر كلمة مرور جديدة وقوية.",
+      "doesNotMatch": "كلمتا المرور الجديدتان غير متطابقتين.",
+      "error": "تعذر تغيير كلمة المرور.",
+      "matches": "كلمتا المرور الجديدتان متطابقتان.",
+      "signOutNotice": "لحماية حسابك، سيؤدي تغيير كلمة المرور إلى تسجيل الخروج من جميع الأجهزة، بما فيها هذا الجهاز.",
+      "submit": "تغيير كلمة المرور"
+    },
     "rows": {
       "bio": "نبذة",
       "displayName": "اسم العرض",
@@ -453,6 +478,7 @@
     },
     "sections": {
       "accountDetails": "تفاصيل الحساب",
+      "changePassword": "تغيير كلمة المرور",
       "completionChecklist": "قائمة اكتمال الملف",
       "editProfile": "تعديل الملف الشخصي",
       "sessionStatus": "حالة الجلسات"

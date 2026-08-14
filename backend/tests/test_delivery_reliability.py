@@ -58,7 +58,7 @@ async def _create_channel(db_session, monkeypatch, owner_username: str = "delive
     monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username=owner_username, email=f"{owner_username}@x.com", password="password123"),
+        RegisterRequest(username=owner_username, email=f"{owner_username}@x.com", password="Password123!"),
     )
     channel = await ChannelService.create_channel(
         db_session,
@@ -164,7 +164,7 @@ async def test_admin_delivery_stats_are_scoped_to_channel_managers(db_session, m
     owner, channel = await _create_channel(db_session, monkeypatch, "deliver_stats")
     outsider = await AuthService.register(
         db_session,
-        RegisterRequest(username="deliver_outsider", email="deliver_outsider@x.com", password="password123"),
+        RegisterRequest(username="deliver_outsider", email="deliver_outsider@x.com", password="Password123!"),
     )
     await _add_outbox(db_session, channel, status=OutboxStatus.pending)
     await _add_outbox(db_session, channel, status=OutboxStatus.retry_scheduled, attempts=1)

@@ -158,7 +158,7 @@ async def _channel(db: AsyncSession, owner, name: str):
 
 @pytest.mark.asyncio
 async def test_normal_login_and_maximum_registered_password_remain_accepted(db_session) -> None:
-    password = "P" * AUTH_PASSWORD_MAX_LENGTH
+    password = "Aa1!" + "P" * (AUTH_PASSWORD_MAX_LENGTH - 4)
     user = await _register(db_session, "phase7_login_user", password)
     pair = await AuthService.login(
         db_session,

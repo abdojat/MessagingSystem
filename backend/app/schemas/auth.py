@@ -6,10 +6,11 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.core.email_identity import normalize_email
 from app.core.identifiers import validate_username as validate_username_value
+from app.core.password_policy import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, validate_new_password
 
 
 AUTH_IDENTITY_MAX_LENGTH = 255
-AUTH_PASSWORD_MAX_LENGTH = 256
+AUTH_PASSWORD_MAX_LENGTH = PASSWORD_MAX_LENGTH
 # Current HS256 refresh JWTs are only a few hundred bytes. Two KiB leaves
 # ample headroom for compatible claim growth without accepting arbitrary data.
 AUTH_REFRESH_TOKEN_MAX_LENGTH = 2048
@@ -18,7 +19,7 @@ AUTH_REFRESH_TOKEN_MAX_LENGTH = 2048
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     email: EmailStr | None = None
-    password: str = Field(min_length=8, max_length=256)
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
 
     @field_validator("username")
     @classmethod
@@ -32,6 +33,26 @@ class RegisterRequest(BaseModel):
             return None
         normalized = normalize_email(value)
         return normalized or None
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, value: str) -> str:
+        return validate_new_password(value)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=AUTH_PASSWORD_MAX_LENGTH)
+    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, value: str) -> str:
+        return validate_new_password(value)
+
+
+class PasswordChangeResponse(BaseModel):
+    status: Literal["changed"] = "changed"
+    revoked_sessions: int
 
 
 class LoginRequest(BaseModel):

@@ -67,13 +67,13 @@ async def test_superadmin_bootstrap_is_explicit_and_idempotent(db_session):
         db_session,
         username="root_admin",
         email="root@example.com",
-        password="a-strong-bootstrap-password",
+        password="A-strong-bootstrap-password1!",
     )
     same_user, created_again = await SuperadminBootstrapService.ensure(
         db_session,
         username="root_admin",
         email="root@example.com",
-        password="a-different-password-is-not-a-rotation",
+        password="A-different-password-is-not-a-rotation2!",
     )
 
     assert created is True
@@ -89,14 +89,14 @@ async def test_superadmin_bootstrap_is_explicit_and_idempotent(db_session):
 async def test_bootstrap_refuses_to_promote_existing_normal_user(db_session):
     await AuthService.register(
         db_session,
-        RegisterRequest(username="existing_user", email="existing@example.com", password="password123"),
+        RegisterRequest(username="existing_user", email="existing@example.com", password="Password123!"),
     )
     with pytest.raises(RuntimeError, match="refusing to auto-promote"):
         await SuperadminBootstrapService.ensure(
             db_session,
             username="existing_user",
             email=None,
-            password="a-strong-bootstrap-password",
+            password="A-strong-bootstrap-password1!",
         )
 
 
@@ -105,11 +105,11 @@ async def test_superadmin_can_deactivate_user_and_immediately_revoke_access(db_s
     admin, _ = await SuperadminBootstrapService.ensure(
         db_session,
         username="platform_admin",
-        password="a-strong-bootstrap-password",
+        password="A-strong-bootstrap-password1!",
     )
     user = await AuthService.register(
         db_session,
-        RegisterRequest(username="managed_user", email="managed@example.com", password="password123"),
+        RegisterRequest(username="managed_user", email="managed@example.com", password="Password123!"),
     )
     session = UserSession(
         user_id=user.id,
@@ -130,7 +130,7 @@ async def test_superadmin_can_deactivate_user_and_immediately_revoke_access(db_s
     with pytest.raises(AppError) as login_error:
         await AuthService.login(
             db_session,
-            LoginRequest(username_or_email="managed_user", password="password123"),
+            LoginRequest(username_or_email="managed_user", password="Password123!"),
             None,
             None,
             14,
@@ -148,7 +148,7 @@ async def test_superadmin_can_deactivate_user_and_immediately_revoke_access(db_s
 async def test_normal_user_is_denied_superadmin_dependency_and_attempt_is_logged(db_session):
     user = await AuthService.register(
         db_session,
-        RegisterRequest(username="ordinary_user", email=None, password="password123"),
+        RegisterRequest(username="ordinary_user", email=None, password="Password123!"),
     )
     with pytest.raises(HTTPException) as error:
         await get_current_superadmin(db_session, user)
@@ -168,11 +168,11 @@ async def test_global_event_list_includes_system_and_cross_channel_events(db_ses
     admin, _ = await SuperadminBootstrapService.ensure(
         db_session,
         username="audit_admin",
-        password="a-strong-bootstrap-password",
+        password="A-strong-bootstrap-password1!",
     )
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username="audit_owner", email=None, password="password123"),
+        RegisterRequest(username="audit_owner", email=None, password="Password123!"),
     )
     channel = await ChannelService.create_channel(
         db_session,
@@ -316,11 +316,11 @@ async def test_superadmin_can_suspend_and_restore_channel_without_membership(db_
     admin, _ = await SuperadminBootstrapService.ensure(
         db_session,
         username="channel_admin",
-        password="a-strong-bootstrap-password",
+        password="A-strong-bootstrap-password1!",
     )
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username="channel_owner", email=None, password="password123"),
+        RegisterRequest(username="channel_owner", email=None, password="Password123!"),
     )
     channel = await ChannelService.create_channel(
         db_session,

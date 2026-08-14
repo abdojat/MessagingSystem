@@ -111,7 +111,7 @@ async def test_channel_creation_generates_slug_and_logs_event(db_session, monkey
 
     monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="owner", email="owner@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="owner", email="owner@x.com", password="Password123!"))
     amqp = _FakeAmqpConnection()
 
     first = await ChannelService.create_channel(
@@ -150,7 +150,7 @@ async def test_owner_can_create_generic_invite_for_every_channel_kind(
 
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username="invite_owner", email="invite_owner@x.com", password="password123"),
+        RegisterRequest(username="invite_owner", email="invite_owner@x.com", password="Password123!"),
     )
     channel = await ChannelService.create_channel(
         db_session,
@@ -188,19 +188,19 @@ async def test_list_channels_scopes_pagination_and_preview_permissions(db_sessio
 
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username="list_owner", email="list_owner@x.com", password="password123"),
+        RegisterRequest(username="list_owner", email="list_owner@x.com", password="Password123!"),
     )
     member = await AuthService.register(
         db_session,
-        RegisterRequest(username="list_member", email="list_member@x.com", password="password123"),
+        RegisterRequest(username="list_member", email="list_member@x.com", password="Password123!"),
     )
     pending_user = await AuthService.register(
         db_session,
-        RegisterRequest(username="list_pending", email="list_pending@x.com", password="password123"),
+        RegisterRequest(username="list_pending", email="list_pending@x.com", password="Password123!"),
     )
     outsider = await AuthService.register(
         db_session,
-        RegisterRequest(username="list_outsider", email="list_outsider@x.com", password="password123"),
+        RegisterRequest(username="list_outsider", email="list_outsider@x.com", password="Password123!"),
     )
     amqp = _FakeAmqpConnection()
 
@@ -336,15 +336,15 @@ async def test_list_channels_scope_visibility_and_search_filters(db_session, mon
 
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username="filter_owner", email="filter_owner@x.com", password="password123"),
+        RegisterRequest(username="filter_owner", email="filter_owner@x.com", password="Password123!"),
     )
     member = await AuthService.register(
         db_session,
-        RegisterRequest(username="filter_member", email="filter_member@x.com", password="password123"),
+        RegisterRequest(username="filter_member", email="filter_member@x.com", password="Password123!"),
     )
     outsider = await AuthService.register(
         db_session,
-        RegisterRequest(username="filter_outsider", email="filter_outsider@x.com", password="password123"),
+        RegisterRequest(username="filter_outsider", email="filter_outsider@x.com", password="Password123!"),
     )
     amqp = _FakeAmqpConnection()
 
@@ -460,11 +460,11 @@ async def test_list_channels_scope_visibility_and_search_filters(db_session, mon
 async def test_list_channels_treats_owner_user_id_as_owner_when_membership_row_is_missing(db_session):
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username="legacy_owner", email="legacy_owner@x.com", password="password123"),
+        RegisterRequest(username="legacy_owner", email="legacy_owner@x.com", password="Password123!"),
     )
     outsider = await AuthService.register(
         db_session,
-        RegisterRequest(username="legacy_outsider", email="legacy_outsider@x.com", password="password123"),
+        RegisterRequest(username="legacy_outsider", email="legacy_outsider@x.com", password="Password123!"),
     )
 
     public_channel = Channel(
@@ -534,7 +534,7 @@ async def test_list_channels_keeps_channels_visible_when_last_preview_key_is_una
 
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username="rotated_key_owner", email="rotated_key_owner@x.com", password="password123"),
+        RegisterRequest(username="rotated_key_owner", email="rotated_key_owner@x.com", password="Password123!"),
     )
     channel = await ChannelService.create_channel(
         db_session,
@@ -581,8 +581,8 @@ async def test_message_encryption_round_trip_and_authz_and_event(db_session, mon
 
     monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="alice", email="alice@x.com", password="password123"))
-    outsider = await AuthService.register(db_session, RegisterRequest(username="bob", email="bob@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="alice", email="alice@x.com", password="Password123!"))
+    outsider = await AuthService.register(db_session, RegisterRequest(username="bob", email="bob@x.com", password="Password123!"))
     amqp = _FakeAmqpConnection()
     channel = await ChannelService.create_channel(
         db_session,
@@ -644,14 +644,14 @@ async def test_message_encryption_round_trip_and_authz_and_event(db_session, mon
 
 @pytest.mark.parametrize("username", ["alice_01", "User-02", "abc123"])
 def test_username_validation_accepts_safe_identifiers(username):
-    req = RegisterRequest(username=username, email=f"{username.lower()}@example.com", password="password123")
+    req = RegisterRequest(username=username, email=f"{username.lower()}@example.com", password="Password123!")
     assert req.username == username.strip()
 
 
 @pytest.mark.parametrize("username", ["ab", "bad.name", "bad name", "bad/name", "bad\\name", "bad#name", "bad\tname"])
 def test_username_validation_rejects_unsafe_identifiers(username):
     with pytest.raises(ValidationError):
-        RegisterRequest(username=username, email="x@example.com", password="password123")
+        RegisterRequest(username=username, email="x@example.com", password="Password123!")
 
 
 @pytest.mark.parametrize("slug", ["news-room", "team_01", "abc123"])
@@ -712,8 +712,8 @@ async def test_upload_download_requires_channel_membership(db_session, monkeypat
 
     monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="owner1", email="owner1@x.com", password="password123"))
-    outsider = await AuthService.register(db_session, RegisterRequest(username="outsider1", email="outsider1@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="owner1", email="owner1@x.com", password="Password123!"))
+    outsider = await AuthService.register(db_session, RegisterRequest(username="outsider1", email="outsider1@x.com", password="Password123!"))
     amqp = _FakeAmqpConnection()
     channel = await ChannelService.create_channel(
         db_session,
@@ -766,8 +766,8 @@ async def test_media_attachments_can_be_published_without_text_and_synced(db_ses
 
     monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="media_owner", email="media_owner@x.com", password="password123"))
-    subscriber = await AuthService.register(db_session, RegisterRequest(username="media_sub", email="media_sub@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="media_owner", email="media_owner@x.com", password="Password123!"))
+    subscriber = await AuthService.register(db_session, RegisterRequest(username="media_sub", email="media_sub@x.com", password="Password123!"))
     amqp = _FakeAmqpConnection()
     channel = await ChannelService.create_channel(
         db_session,
@@ -832,7 +832,7 @@ async def test_publishing_attachment_requires_stored_upload_content(db_session, 
 
     monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="media_pending", email="media_pending@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="media_pending", email="media_pending@x.com", password="Password123!"))
     channel = await ChannelService.create_channel(
         db_session,
         owner.id,
@@ -878,7 +878,7 @@ async def test_upload_store_errors_are_logged_and_do_not_mark_content_stored(db_
     monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
     get_settings.cache_clear()
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="media_error", email="media_error@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="media_error", email="media_error@x.com", password="Password123!"))
     upload = await MessageService.create_upload(
         db_session,
         owner.id,
@@ -906,7 +906,7 @@ async def test_upload_checksum_mismatch_is_logged_and_keeps_upload_pending(db_se
 
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username="media_checksum", email="media_checksum@x.com", password="password123"),
+        RegisterRequest(username="media_checksum", email="media_checksum@x.com", password="Password123!"),
     )
     upload = await MessageService.create_upload(
         db_session,
@@ -929,7 +929,7 @@ async def test_upload_checksum_mismatch_is_logged_and_keeps_upload_pending(db_se
 
 @pytest.mark.asyncio
 async def test_svg_uploads_are_rejected_for_protected_media(db_session):
-    owner = await AuthService.register(db_session, RegisterRequest(username="media_svg", email="media_svg@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="media_svg", email="media_svg@x.com", password="Password123!"))
 
     with pytest.raises(AppError) as exc_info:
         await MessageService.create_upload(
@@ -945,8 +945,8 @@ async def test_profile_avatar_upload_is_accessible_to_authenticated_users(db_ses
     monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
     get_settings.cache_clear()
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="avatar_owner", email="avatar_owner@x.com", password="password123"))
-    viewer = await AuthService.register(db_session, RegisterRequest(username="avatar_viewer", email="avatar_viewer@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="avatar_owner", email="avatar_owner@x.com", password="Password123!"))
+    viewer = await AuthService.register(db_session, RegisterRequest(username="avatar_viewer", email="avatar_viewer@x.com", password="Password123!"))
     upload = await MessageService.create_upload(
         db_session,
         owner.id,
@@ -965,8 +965,8 @@ async def test_profile_wallpaper_upload_is_saved_to_current_user(db_session, mon
     monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
     get_settings.cache_clear()
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="wall_owner", email="wall_owner@x.com", password="password123"))
-    viewer = await AuthService.register(db_session, RegisterRequest(username="wall_viewer", email="wall_viewer@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="wall_owner", email="wall_owner@x.com", password="Password123!"))
+    viewer = await AuthService.register(db_session, RegisterRequest(username="wall_viewer", email="wall_viewer@x.com", password="Password123!"))
     upload = await MessageService.create_upload(
         db_session,
         owner.id,
@@ -988,8 +988,8 @@ async def test_avatar_update_rejects_unowned_or_non_image_uploads(db_session, mo
     monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
     get_settings.cache_clear()
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="image_owner", email="image_owner@x.com", password="password123"))
-    other = await AuthService.register(db_session, RegisterRequest(username="image_other", email="image_other@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="image_owner", email="image_owner@x.com", password="Password123!"))
+    other = await AuthService.register(db_session, RegisterRequest(username="image_other", email="image_other@x.com", password="Password123!"))
 
     text_upload = await MessageService.create_upload(
         db_session,
@@ -1028,9 +1028,9 @@ async def test_private_channel_avatar_upload_requires_channel_membership(db_sess
 
     monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="chan_owner", email="chan_owner@x.com", password="password123"))
-    member = await AuthService.register(db_session, RegisterRequest(username="chan_member", email="chan_member@x.com", password="password123"))
-    outsider = await AuthService.register(db_session, RegisterRequest(username="chan_outside", email="chan_outside@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="chan_owner", email="chan_owner@x.com", password="Password123!"))
+    member = await AuthService.register(db_session, RegisterRequest(username="chan_member", email="chan_member@x.com", password="Password123!"))
+    outsider = await AuthService.register(db_session, RegisterRequest(username="chan_outside", email="chan_outside@x.com", password="Password123!"))
     upload = await MessageService.create_upload(
         db_session,
         owner.id,
@@ -1071,7 +1071,7 @@ async def test_upload_storage_path_sanitizes_filename_and_stays_within_base_dir(
     monkeypatch.setenv("UPLOADS_BASE_DIR", str(tmp_path))
     get_settings.cache_clear()
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="owner2", email="owner2@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="owner2", email="owner2@x.com", password="Password123!"))
     upload = await MessageService.create_upload(
         db_session,
         owner.id,
@@ -1092,8 +1092,8 @@ async def test_smoke_flow_channel_join_publish_sync_and_events(db_session, monke
 
     monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
 
-    owner = await AuthService.register(db_session, RegisterRequest(username="smoke_owner", email="smoke_owner@x.com", password="password123"))
-    subscriber = await AuthService.register(db_session, RegisterRequest(username="smoke_sub", email="smoke_sub@x.com", password="password123"))
+    owner = await AuthService.register(db_session, RegisterRequest(username="smoke_owner", email="smoke_owner@x.com", password="Password123!"))
+    subscriber = await AuthService.register(db_session, RegisterRequest(username="smoke_sub", email="smoke_sub@x.com", password="Password123!"))
     amqp = _FakeAmqpConnection()
     channel = await ChannelService.create_channel(
         db_session,

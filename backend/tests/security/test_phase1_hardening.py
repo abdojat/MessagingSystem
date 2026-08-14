@@ -82,7 +82,7 @@ async def _chunks(*values: bytes):
 async def _register(db_session, username: str):
     return await AuthService.register(
         db_session,
-        RegisterRequest(username=username, email=f"{username}@example.com", password="password123"),
+        RegisterRequest(username=username, email=f"{username}@example.com", password="Password123!"),
     )
 
 

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.email_identity import normalize_email
 from app.core.identifiers import normalize_username, validate_username
 from app.core.security import hash_password
+from app.core.password_policy import validate_new_password
 from app.db.models import User
 from app.services.event_service import log_event
 
@@ -18,10 +19,12 @@ class SuperadminBootstrapService:
         email: str | None = None,
     ) -> tuple[User, bool]:
         normalized_username = normalize_username(validate_username(username))
-        # The bootstrap path is powerful and usually configured by environment,
-        # so require a stronger password before creating the first admin.
-        if len(password) < 12:
-            raise RuntimeError("SUPERADMIN_PASSWORD must contain at least 12 characters")
+        # The bootstrap path is powerful and usually configured by environment.
+        # Its credentials obey the same policy as user-created passwords.
+        try:
+            validate_new_password(password)
+        except ValueError as exc:
+            raise RuntimeError(f"SUPERADMIN_PASSWORD is invalid: {exc}") from exc
         normalized_email = normalize_email(email) if email and email.strip() else None
 
         existing = (await db.execute(select(User).where(User.username == normalized_username))).scalar_one_or_none()

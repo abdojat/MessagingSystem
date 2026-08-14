@@ -8,20 +8,26 @@ import { useRegister } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { LanguageToggle } from "@/components/LanguageToggle";
+import { PasswordRequirements } from "@/components/shared/PasswordRequirements";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
+import { isStrongPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 
 export default function Register() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const register = useRegister();
   const router = useRouter();
   const localePath = useLocalePath();
   const t = useTranslations("auth.register");
   const commonT = useTranslations("common");
+  const passwordIsStrong = isStrongPassword(password);
+  const passwordsMatch = password === confirmPassword && confirmPassword.length > 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!passwordIsStrong || !passwordsMatch) return;
     register.mutate({ username, email, password }, {
       onSuccess: () => router.push(localePath("/app"))
     });
@@ -83,8 +89,42 @@ export default function Register() {
                 onChange={e => setPassword(e.target.value)}
                 className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-foreground"
                 placeholder={t("passwordPlaceholder")}
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={PASSWORD_MAX_LENGTH}
+                autoComplete="new-password"
+                aria-describedby="register-password-requirements"
+                aria-invalid={password.length > 0 && !passwordIsStrong}
                 required
               />
+              <PasswordRequirements password={password} id="register-password-requirements" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2" htmlFor="confirm-password">
+                {t("confirmPassword")}
+              </label>
+              <input
+                id="confirm-password"
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                className="w-full px-4 py-3 bg-background border border-border rounded-xl focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-foreground"
+                placeholder={t("confirmPasswordPlaceholder")}
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={PASSWORD_MAX_LENGTH}
+                autoComplete="new-password"
+                aria-describedby="password-match-message"
+                aria-invalid={confirmPassword.length > 0 && !passwordsMatch}
+                required
+              />
+              {confirmPassword.length > 0 ? (
+                <p
+                  id="password-match-message"
+                  className={passwordsMatch ? "mt-2 text-xs text-emerald-600 dark:text-emerald-400" : "mt-2 text-xs text-destructive"}
+                  aria-live="polite"
+                >
+                  {passwordsMatch ? t("passwordsMatch") : t("passwordsDoNotMatch")}
+                </p>
+              ) : null}
             </div>
             
             {register.isError && (
@@ -96,7 +136,7 @@ export default function Register() {
             <Button 
               type="submit" 
               className="w-full h-12 text-base font-semibold rounded-xl bg-gradient-to-r from-primary to-primary/90 shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all"
-              disabled={register.isPending}
+              disabled={register.isPending || !passwordIsStrong || !passwordsMatch}
             >
               {register.isPending ? t("submitting") : t("submit")}
             </Button>

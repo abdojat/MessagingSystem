@@ -17,12 +17,14 @@ from app.core.utils import sha256_hex
 from app.schemas.auth import (
     BrowserAccessTokenResponse,
     BrowserCsrfResponse,
+    ChangePasswordRequest,
     EmailVerificationConfirmRequest,
     EmailVerificationConfirmResponse,
     EmailVerificationRequestResponse,
     LoginRequest,
     LogoutAllResponse,
     LogoutRequest,
+    PasswordChangeResponse,
     RefreshRequest,
     RegisterRequest,
     SessionListResponse,
@@ -378,6 +380,26 @@ async def logout_all(
     # browser's stale cookies does not introduce cookie-derived authority.
     clear_browser_auth_cookies(response)
     return LogoutAllResponse(revoked_count=revocation.revoked_count)
+
+
+@router.put("/password", response_model=PasswordChangeResponse)
+async def change_password(
+    req: ChangePasswordRequest,
+    db: DBDep,
+    auth: CurrentAuthDep,
+    request: Request,
+    response: Response,
+    redis: RedisDep,
+) -> PasswordChangeResponse:
+    await _enforce_auth_rate_limits(redis, "password-change", get_client_ip(request), str(auth.user.id))
+    try:
+        revocation = await AuthService.change_password(db, auth.user.id, req)
+    except AppError as exc:
+        raise to_http_exception(exc) from exc
+
+    await dispatch_auth_control(redis, request.app.state.ws_manager, AuthControlEvent.for_user(revocation))
+    clear_browser_auth_cookies(response)
+    return PasswordChangeResponse(revoked_sessions=revocation.revoked_count)
 
 
 @router.delete("/sessions/{session_id}")

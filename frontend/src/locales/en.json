@@ -143,12 +143,16 @@
       "usernamePlaceholder": "Enter your username"
     },
     "register": {
+      "confirmPassword": "Confirm password",
+      "confirmPasswordPlaceholder": "Enter the password again",
       "email": "Email",
       "emailPlaceholder": "name@example.com",
       "error": "Failed to register.",
       "hasAccount": "Already have an account?",
       "password": "Password",
       "passwordPlaceholder": "Create a password",
+      "passwordsDoNotMatch": "Passwords do not match.",
+      "passwordsMatch": "Passwords match.",
       "signIn": "Sign in",
       "submit": "Sign up",
       "submitting": "Creating account...",
@@ -157,6 +161,15 @@
       "username": "Username",
       "usernamePlaceholder": "Choose a username"
     }
+  },
+  "passwordPolicy": {
+    "lowercase": "One lowercase letter",
+    "minimumLength": "At least 12 characters",
+    "noWhitespace": "No spaces or whitespace",
+    "number": "One number",
+    "special": "One special character",
+    "title": "Your password must include:",
+    "uppercase": "One uppercase letter"
   },
   "appShell": {
     "connection": {
@@ -434,16 +447,28 @@
       "avatarPreviewAlt": "Selected profile avatar preview",
       "bio": "Bio",
       "bioPlaceholder": "Share your role, focus, or current responsibilities.",
+      "confirmNewPassword": "Confirm new password",
+      "currentPassword": "Current password",
       "displayName": "Display name",
       "displayNamePlaceholder": "How your name appears in chats",
       "email": "Email",
       "emailPlaceholder": "name@example.com",
+      "newPassword": "New password",
       "profilePicture": "Profile picture",
       "selectedFile": "Selected: {name}"
     },
     "lastServerUpdate": "Last server update {value}",
     "lastSynced": "Last synced {value}",
     "noUpdatesYet": "No updates yet",
+    "passwordChange": {
+      "changing": "Changing password...",
+      "description": "Verify your current password, then choose a new strong password.",
+      "doesNotMatch": "The new passwords do not match.",
+      "error": "The password could not be changed.",
+      "matches": "The new passwords match.",
+      "signOutNotice": "For your security, changing the password signs out every device, including this one.",
+      "submit": "Change password"
+    },
     "rows": {
       "bio": "Bio",
       "displayName": "Display name",
@@ -453,6 +478,7 @@
     },
     "sections": {
       "accountDetails": "Account details",
+      "changePassword": "Change password",
       "completionChecklist": "Completion checklist",
       "editProfile": "Edit profile",
       "sessionStatus": "Session status"

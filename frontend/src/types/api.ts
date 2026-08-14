@@ -171,6 +171,16 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+export interface PasswordChangeResponse {
+  status: "changed";
+  revoked_sessions: number;
+}
+
 export interface ChannelPermissions {
   can_publish: boolean;
   can_invite: boolean;

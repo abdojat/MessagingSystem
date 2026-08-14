@@ -18,8 +18,9 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { useSessions } from "@/hooks/use-auth";
+import { useChangePassword, useSessions } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
+import { PasswordRequirements } from "@/components/shared/PasswordRequirements";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -35,6 +36,7 @@ import { useAuthStore } from "@/store/authStore";
 import type { EmailVerificationRequestResponse, MeResponse, UpdateMeRequest } from "@/types/api";
 import { useLocalePath } from "@/components/features/chat/lib/locale-path";
 import { resolveApiMediaUrl } from "@/lib/mediaUrl";
+import { isStrongPassword, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import {
   formatDateLocalized,
   formatDateTimeLocalized,
@@ -210,10 +212,14 @@ export default function ProfilePage() {
   const accessToken = useAuthStore((state) => state.accessToken);
   const updateUser = useAuthStore((state) => state.updateUser);
   const { data: sessions = [], isLoading: isSessionsLoading } = useSessions(isAuthenticated);
+  const changePassword = useChangePassword();
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [verificationRequested, setVerificationRequested] = useState(false);
   const [verificationCooldown, setVerificationCooldown] = useState(0);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [formState, setFormState] = useState<ProfileFormState>({
     display_name: user?.display_name ?? "",
     email: user?.email ?? "",
@@ -562,6 +568,18 @@ export default function ProfilePage() {
     updateProfile.mutate(payload);
   };
 
+  const newPasswordIsStrong = isStrongPassword(newPassword);
+  const newPasswordsMatch = newPassword === confirmPassword && confirmPassword.length > 0;
+
+  const handleChangePassword = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!currentPassword || !newPasswordIsStrong || !newPasswordsMatch) return;
+    changePassword.mutate({
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+  };
+
   return (
     <div className="h-full min-h-0 overflow-y-auto bg-background p-6 text-foreground sm:p-8">
       <div className="mx-auto max-w-5xl space-y-6 pb-6">
@@ -794,6 +812,91 @@ export default function ProfilePage() {
                         </Button>
                       </Link>
                     </div>
+                  </Card>
+
+                  <Card className="rounded-2xl p-5">
+                    <h3 className="text-lg font-semibold">{t("sections.changePassword")}</h3>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {t("passwordChange.description")}
+                    </p>
+                    <form className="mt-4 space-y-3" onSubmit={handleChangePassword}>
+                      <div>
+                        <label htmlFor="current-password" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                          {t("fields.currentPassword")}
+                        </label>
+                        <Input
+                          id="current-password"
+                          type="password"
+                          value={currentPassword}
+                          onChange={(event) => setCurrentPassword(event.target.value)}
+                          autoComplete="current-password"
+                          maxLength={PASSWORD_MAX_LENGTH}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="new-password" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                          {t("fields.newPassword")}
+                        </label>
+                        <Input
+                          id="new-password"
+                          type="password"
+                          value={newPassword}
+                          onChange={(event) => setNewPassword(event.target.value)}
+                          autoComplete="new-password"
+                          minLength={PASSWORD_MIN_LENGTH}
+                          maxLength={PASSWORD_MAX_LENGTH}
+                          aria-describedby="change-password-requirements"
+                          aria-invalid={newPassword.length > 0 && !newPasswordIsStrong}
+                          required
+                        />
+                        <PasswordRequirements password={newPassword} id="change-password-requirements" />
+                      </div>
+                      <div>
+                        <label htmlFor="confirm-new-password" className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                          {t("fields.confirmNewPassword")}
+                        </label>
+                        <Input
+                          id="confirm-new-password"
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(event) => setConfirmPassword(event.target.value)}
+                          autoComplete="new-password"
+                          minLength={PASSWORD_MIN_LENGTH}
+                          maxLength={PASSWORD_MAX_LENGTH}
+                          aria-describedby="change-password-match"
+                          aria-invalid={confirmPassword.length > 0 && !newPasswordsMatch}
+                          required
+                        />
+                        {confirmPassword.length > 0 ? (
+                          <p
+                            id="change-password-match"
+                            className={newPasswordsMatch ? "mt-2 text-xs text-emerald-600 dark:text-emerald-400" : "mt-2 text-xs text-destructive"}
+                            aria-live="polite"
+                          >
+                            {newPasswordsMatch ? t("passwordChange.matches") : t("passwordChange.doesNotMatch")}
+                          </p>
+                        ) : null}
+                      </div>
+                      {changePassword.isError ? (
+                        <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-sm font-medium text-destructive">
+                          {getErrorMessage(changePassword.error, t("passwordChange.error"))}
+                        </div>
+                      ) : null}
+                      <p className="text-xs text-muted-foreground">{t("passwordChange.signOutNotice")}</p>
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={
+                          changePassword.isPending ||
+                          !currentPassword ||
+                          !newPasswordIsStrong ||
+                          !newPasswordsMatch
+                        }
+                      >
+                        {changePassword.isPending ? t("passwordChange.changing") : t("passwordChange.submit")}
+                      </Button>
+                    </form>
                   </Card>
 
                   <Card className="rounded-2xl p-5">

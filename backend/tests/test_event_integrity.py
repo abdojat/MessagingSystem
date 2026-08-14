@@ -28,7 +28,7 @@ async def _create_open_channel(db_session, monkeypatch, owner_username: str = "i
     monkeypatch.setattr("app.services.channel_service.bind_user_channel", _noop_bind)
     owner = await AuthService.register(
         db_session,
-        RegisterRequest(username=owner_username, email=f"{owner_username}@x.com", password="password123"),
+        RegisterRequest(username=owner_username, email=f"{owner_username}@x.com", password="Password123!"),
     )
     channel = await ChannelService.create_channel(
         db_session,
@@ -51,7 +51,7 @@ async def test_new_events_receive_hash_chain_metadata(db_session, monkeypatch):
     owner, channel = await _create_open_channel(db_session, monkeypatch)
     subscriber = await AuthService.register(
         db_session,
-        RegisterRequest(username="integrity_sub", email="integrity_sub@x.com", password="password123"),
+        RegisterRequest(username="integrity_sub", email="integrity_sub@x.com", password="Password123!"),
     )
     await ChannelService.join_channel(db_session, _FakeAmqpConnection(), channel.id, subscriber.id, JoinRequest())
 
@@ -114,7 +114,7 @@ async def test_integrity_verification_detects_previous_hash_tampering(db_session
     _, channel = await _create_open_channel(db_session, monkeypatch, "integrity_previous")
     subscriber = await AuthService.register(
         db_session,
-        RegisterRequest(username="integrity_prev_sub", email="integrity_prev_sub@x.com", password="password123"),
+        RegisterRequest(username="integrity_prev_sub", email="integrity_prev_sub@x.com", password="Password123!"),
     )
     await ChannelService.join_channel(db_session, _FakeAmqpConnection(), channel.id, subscriber.id, JoinRequest())
     events = await _channel_events(db_session, channel.id)
@@ -153,7 +153,7 @@ async def test_unauthorized_user_cannot_verify_channel_event_integrity(db_sessio
     _, channel = await _create_open_channel(db_session, monkeypatch, "integrity_authz")
     outsider = await AuthService.register(
         db_session,
-        RegisterRequest(username="integrity_outsider", email="integrity_outsider@x.com", password="password123"),
+        RegisterRequest(username="integrity_outsider", email="integrity_outsider@x.com", password="Password123!"),
     )
 
     with pytest.raises(HTTPException) as exc_info:
