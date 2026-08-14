@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 !.env.production.example
+!.env.merkle-checkpointer.example
 secrets/
 *.key
 *.pem

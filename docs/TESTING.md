@@ -47,7 +47,8 @@ python -B -m pytest -q \
   tests/security/test_phase8_production_hardening.py \
   tests/security/test_phase9_data_protection.py \
   tests/security/test_phase10_identity_presence.py \
-  tests/security/test_phase11_merkle_integrity.py
+  tests/security/test_phase11_merkle_integrity.py \
+  tests/security/test_merkle_checkpointer.py
 ```
 
 Important coverage groups:
@@ -65,6 +66,7 @@ Important coverage groups:
 | Distributed presence and email verification | `tests/security/test_phase10_identity_presence.py` |
 | Event hash chains | `tests/test_event_integrity.py` |
 | Merkle roots, proofs, signatures, chain, tamper, anchors, concurrency, API | `tests/security/test_phase11_merkle_integrity.py` |
+| Automatic checkpoint scheduling/configuration, bounded drain, transient retry, shutdown, CLI compatibility, pending UI projection | `tests/security/test_merkle_checkpointer.py` |
 
 ## Frontend validation
 
@@ -153,6 +155,19 @@ This script creates users, channels, messages, uploads, sessions, and audit evid
 
 ## Merkle demonstration
 
+For the automatic service, configure a short non-production interval if desired
+(minimum 10 seconds), generate several audit events, and watch:
+
+```bash
+docker compose logs -f merkle-checkpointer
+python -m app.db.merkle_tool status
+```
+
+The expected transition is `pending checkpoint > 0`, followed by one or more
+bounded checkpoint creation logs and `pending checkpoint: 0`. The Superadmin
+table changes the affected rows from **Pending checkpoint** to **Verify Merkle
+proof** without per-row proof requests.
+
 The script requires a reachable PostgreSQL database and an explicit matching Ed25519 signing/private-key environment:
 
 ```bash
@@ -203,7 +218,7 @@ The final manual proof should show:
 4. User C cannot read the private channel or attachment.
 5. Event/activity records exist and the channel hash chain verifies.
 6. PostgreSQL/upload storage contains ciphertext while authorized API download returns original data.
-7. A signed Merkle checkpoint and inclusion proof verify; a tampered proof copy fails.
+7. A pending hashed event automatically becomes a signed Merkle checkpoint; its inclusion proof verifies and a tampered proof copy fails.
 
 Use [Demo Guide](DEMO_GUIDE.md) and [Final Demo Checklist](FINAL_DEMO_CHECKLIST.md).
 

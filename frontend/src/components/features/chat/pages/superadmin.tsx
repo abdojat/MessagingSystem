@@ -257,7 +257,15 @@ export default function SuperadminPage() {
                         />
                       </TableCell>
                       <TableCell className="whitespace-nowrap"><DateCell value={event.created_at} /></TableCell>
-                      <TableCell><Button size="sm" variant="outline" disabled={!event.event_hash} onClick={() => setProofEventId(event.id)}>{t("merkle.verifyProof")}</Button></TableCell>
+                      <TableCell>
+                        {event.merkle_checkpointed ? (
+                          <Button size="sm" variant="outline" onClick={() => setProofEventId(event.id)}>{t("merkle.verifyProof")}</Button>
+                        ) : event.event_hash ? (
+                          <Badge variant="secondary">{t("merkle.pendingCheckpoint")}</Badge>
+                        ) : (
+                          <Badge variant="destructive">{t("merkle.missingIntegrity")}</Badge>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                   {!events.isLoading && events.data?.items.length === 0 && <EmptyRow columns={6}>{t("events.empty")}</EmptyRow>}

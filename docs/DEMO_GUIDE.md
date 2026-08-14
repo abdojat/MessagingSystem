@@ -104,6 +104,18 @@ State the limitations: PostgreSQL is authoritative; ordering is per channel; enc
 
 ## Mandatory Merkle demonstration
 
+With development/hardened automatic checkpointing enabled, first create or
+trigger an audit event and open the Superadmin event table. A hashed row shows
+**Pending checkpoint**. Watch `docker compose logs -f merkle-checkpointer`; the
+startup/next cycle creates one or more bounded signed batches. Refresh the table
+and show **Verify Merkle proof**, then open the proof. This demonstrates the
+normal automatic path without giving FastAPI the private signing seed.
+
+For a fast supervised run, `AUDIT_MERKLE_CHECKPOINT_INTERVAL_SECONDS=10` is the
+minimum allowed test interval; restore the normal 300-second development value
+afterward. The deterministic CLI demonstration below remains useful for showing
+tamper rejection and anchor behavior.
+
 Generate a dedicated demo key pair in a private terminal before the presentation:
 
 ```bash

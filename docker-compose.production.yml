@@ -49,7 +49,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
-    networks: [internal]
+    networks: [internal, checkpoint_db]
     pids_limit: 200
     mem_limit: 768m
     cpus: 1.0
@@ -277,8 +277,9 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      # This one-shot operator process is the only service that receives the
-      # Ed25519 private seed. It does not receive JWT or data-encryption keys.
+      # This one-shot operator/scheduler target is the only service that
+      # receives the Ed25519 private seed. It does not receive JWT,
+      # data-encryption, RabbitMQ, or Redis credentials.
       ENVIRONMENT: production
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:?POSTGRES_APP_USER required}:${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD required}@postgres:5432/${POSTGRES_DB:-channels}
       AUDIT_MERKLE_BATCH_SIZE: ${AUDIT_MERKLE_BATCH_SIZE:-256}
@@ -290,7 +291,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    networks: [internal]
+    networks: [checkpoint_db]
     <<: *app-restrictions
     tmpfs:
       - /tmp:rw,nosuid,noexec,size=64m,uid=10001,gid=10001,mode=1777
@@ -306,6 +307,8 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
+  checkpoint_db:
+    internal: true
 
 volumes:
   production_pg_data:

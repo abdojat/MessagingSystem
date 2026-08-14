@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError
 from app.core.utils import utcnow
 from app.db.models import (
+    AuditMerkleLeaf,
     Channel,
     ChannelMembership,
     Event,
@@ -492,9 +493,16 @@ class AdminService:
             )
 
         stmt = (
-            select(Event, User.username, Channel.name, Channel.channel_slug)
+            select(
+                Event,
+                User.username,
+                Channel.name,
+                Channel.channel_slug,
+                AuditMerkleLeaf.event_id.is_not(None).label("merkle_checkpointed"),
+            )
             .outerjoin(User, User.id == Event.actor_user_id)
             .outerjoin(Channel, Channel.id == Event.channel_id)
+            .outerjoin(AuditMerkleLeaf, AuditMerkleLeaf.event_id == Event.id)
         )
         total_stmt = (
             select(func.count(Event.id))
@@ -556,8 +564,9 @@ class AdminService:
                 created_at=event.created_at,
                 event_hash=event.event_hash,
                 integrity_scope=event.integrity_scope,
+                merkle_checkpointed=bool(merkle_checkpointed),
             )
-            for event, actor_username, channel_name, channel_slug in rows
+            for event, actor_username, channel_name, channel_slug, merkle_checkpointed in rows
         ], total
 
     @staticmethod

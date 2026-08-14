@@ -9,6 +9,7 @@ flowchart LR
   C[Browser or API client] -->|REST and authentication| API[FastAPI backend]
   C -->|one-use ticket then WebSocket| API
   API -->|users, channels, messages, outbox, audit| DB[(PostgreSQL)]
+  MC[Merkle checkpointer] -->|pending hashes, signed bounded checkpoints| DB
   API -->|topology and membership projection| MQ[(RabbitMQ topic exchange)]
   W[Worker] -->|claim committed outbox rows| DB
   W -->|publish and consume bounded user queues| MQ
@@ -26,6 +27,7 @@ flowchart LR
 |---|---|
 | `backend/` | FastAPI routes, authentication, authorization, validation, business services, encryption/decryption, persistence orchestration, WebSockets, audit/Merkle APIs, and operator CLIs. |
 | `worker/` | Poll committed outbox rows, publish persistent AMQP messages, project membership bindings, consume queues for online users, retry/dead-letter failures, and fan out through Redis. |
+| `merkle-checkpointer` | Isolated periodic PostgreSQL process that drains eligible audit events into bounded, chained, Ed25519-signed checkpoints. |
 | `frontend/` | Next.js UI for authentication, channels, membership, publishing, protected media, event logs, delivery monitoring, presence, and superadmin operations. |
 | PostgreSQL | Durable source of truth for users, sessions, channels, memberships, messages, uploads, outbox, events, desired broker bindings, and Merkle checkpoints/leaves. |
 | RabbitMQ | Topic exchange, bounded durable per-user queues, membership bindings, publisher confirms, acknowledgements, and diagnostic dead-letter exchange/queue. |
@@ -119,7 +121,18 @@ Application action
   -> compact proof and optional external anchor
 ```
 
-A normal event write updates only its scope hash chain; it does not synchronously rebuild a Merkle tree. Events accumulate until an operator or external scheduler runs a bounded checkpoint job. Production may schedule that one-shot command with cron, a systemd timer, or a deployment scheduler without adding a scheduler service to the application.
+A normal event write updates only its scope hash chain; it does not synchronously rebuild a Merkle tree. In development and hardened Compose, a separate `merkle-checkpointer` process runs once on startup and then at the validated interval, draining all eligible pending events through bounded batches. It connects only to PostgreSQL and holds the signing seed; FastAPI and the worker do not. The manual CLI calls the same orchestration and Merkle service. PostgreSQL's existing advisory transaction lock serializes accidental overlapping checkpoint attempts.
+
+Transient database failures are logged without connection details and retried on
+the next cycle. Missing/malformed/mismatched signing configuration fails before
+the database loop; event/checkpoint integrity failures stop the service rather
+than being silently retried. An `asyncio.Event`-based interval wait allows
+`SIGTERM`/`SIGINT` to end the process without waiting for a long sleep.
+
+Production keeps the existing restricted one-shot integrity profile so an
+external cron/systemd/Kubernetes/deployment scheduler can inject the signing
+identity only for each checkpoint run. This is an intentional deployment
+choice, not FastAPI in-process scheduling.
 
 Why all four integrity layers exist:
 
@@ -132,9 +145,9 @@ This is tamper evidence under the documented key and anchor assumptions, not imm
 
 ## Deployment boundaries
 
-- `docker-compose.yml`: development convenience; direct host ports, HTTP, development credentials, automatic migrations, and optional idempotent superadmin bootstrap.
-- `docker-compose.hardened.yml`: local/demo HTTP through Nginx on port 8080; state services and applications stay on a private Compose network.
-- `docker-compose.production.yml`: single-host production-oriented reference; TLS Nginx edge, authenticated private state services, one-shot migration/grant service, non-superuser runtime database role, non-root read-only application containers, explicit bootstrap profile, and isolated Merkle signing profile.
+- `docker-compose.yml`: development convenience; direct host ports, HTTP, development credentials, automatic migrations, optional idempotent superadmin bootstrap, and automatic isolated Merkle checkpoints.
+- `docker-compose.hardened.yml`: local/demo HTTP through Nginx on port 8080; state services/applications stay private and the restricted checkpointer has a PostgreSQL-only network.
+- `docker-compose.production.yml`: single-host production-oriented reference; TLS Nginx edge, authenticated private state services, one-shot migration/grant service, non-superuser runtime database role, non-root read-only application containers, explicit bootstrap profile, and scheduler-friendly one-shot Merkle signing profile.
 
 See [Development](DEVELOPMENT.md) and [Deployment](DEPLOYMENT.md) for exact commands.
 

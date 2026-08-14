@@ -1,6 +1,6 @@
 # Final Repository Assessment
 
-Last updated: 2026-08-11
+Last updated: 2026-08-14
 
 ## Executive assessment
 
@@ -16,7 +16,7 @@ Strengths:
 - PostgreSQL remains the source of truth while realtime infrastructure is recoverable/replaceable.
 - Transactional outbox and versioned desired broker bindings address database/broker consistency gaps.
 - Per-channel ordering, bounded realtime queues, guarded retained-queue topology migration, REST sync, retry/dead-letter state, and publisher confirms create an explainable reliability model.
-- Production Compose separates administrative migrations from a restricted runtime database identity and isolates the Merkle signing seed.
+- Development/hardened Compose automatically drains pending Merkle events in a PostgreSQL-only checkpointer; production preserves a scheduler-friendly one-shot signer. FastAPI and the worker never require the signing seed.
 
 Remaining operational risks:
 
@@ -58,7 +58,7 @@ Python dependencies are locked separately for backend and worker. Frontend depen
 | Authentication/authorization/upload protection | Complete university baseline |
 | Encryption and key operations | Complete university baseline; operator key custody remains |
 | Event log and hash-chain integrity | Complete; legacy initialization is explicit |
-| Mandatory Merkle tree | Implemented, tested, signed, demonstrable, and documented |
+| Mandatory Merkle tree | Implemented, automatically checkpointed in development/hardened profiles, isolated, tested, signed, demonstrable, and documented |
 | Frontend management/demo UI | Complete for supervisor flow; no automated browser suite |
 | Deployment | Development/hardened complete; production-oriented single-host reference only |
 | Documentation/handoff | Complete once fresh validation results are recorded |

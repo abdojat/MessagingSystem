@@ -993,6 +993,8 @@
       "signingKey": "مفتاح التوقيع",
       "integrity": "السلامة",
       "verifyProof": "تحقق من برهان ميركل",
+      "pendingCheckpoint": "بانتظار نقطة الفحص",
+      "missingIntegrity": "بصمة السلامة مفقودة",
       "proofTitle": "برهان إدراج ميركل",
       "proofDescription": "تحقق موجز من انتماء بصمة حدث التدقيق إلى نقطة الفحص الموقعة.",
       "notCheckpointed": "الحدث غير مثبت أو فشل التحقق من سلامته.",

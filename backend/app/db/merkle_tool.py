@@ -38,6 +38,7 @@ from app.services.merkle_audit_service import (
     verify_anchor_signature,
     verify_proof_bundle,
 )
+from app.services.merkle_checkpoint_service import checkpoint_pending_events
 
 
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@postgres:5432/channels"
@@ -119,28 +120,21 @@ async def _status() -> None:
 
 async def _checkpoint(args: argparse.Namespace) -> None:
     key_id, private_key, public_keys = _signing_values()
-    created: list[AuditMerkleBatch] = []
     async with _maintenance_session() as db:
-        while True:
-            batch = await MerkleAuditService.create_checkpoint(
-                db,
-                max_leaves=args.max_leaves,
-                signing_key_id=key_id,
-                private_key_base64=private_key,
-                public_keys=public_keys,
-            )
-            if batch is None:
-                await db.rollback()
-                break
-            await db.commit()
-            created.append(batch)
-            print(
-                f"created checkpoint #{batch.sequence_no}: leaves={batch.leaf_count} "
-                f"root={batch.merkle_root}"
-            )
-            if not args.all:
-                break
-    if not created:
+        result = await checkpoint_pending_events(
+            db,
+            max_leaves=args.max_leaves,
+            signing_key_id=key_id,
+            private_key_base64=private_key,
+            public_keys=public_keys,
+            all_pending=args.all,
+        )
+    for batch in result.batches:
+        print(
+            f"created checkpoint #{batch.sequence_no}: leaves={batch.leaf_count} "
+            f"root={batch.merkle_root}"
+        )
+    if not result.batches:
         print("no checkpoint created: no eligible uncheckpointed audit events")
 
 

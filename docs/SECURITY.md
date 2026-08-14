@@ -84,15 +84,30 @@ The hash chain and Merkle tree are intentionally both present:
 - Signed checkpoint: protects the committed root against a database-only rewrite without the private Ed25519 seed.
 - External anchor: adds rollback/tail-deletion evidence only when copied to independent operator-controlled storage.
 
-Normal event writes do not rebuild a tree. An explicit one-shot operator/scheduled job checkpoints accumulated, integrity-initialized events in bounded batches. The normal backend and worker do not receive the signing private seed; production Compose injects it only into `merkle-checkpoint`. Public keys remain available for verification and key rotation history.
+Normal event writes do not rebuild a tree. The isolated development/hardened
+`merkle-checkpointer` periodically checkpoints accumulated,
+integrity-initialized events in bounded batches; the production profile keeps a
+restricted one-shot scheduler target. Both paths and the manual CLI reuse the
+same checkpoint orchestration and existing Merkle algorithm. The normal backend
+and worker do not receive the signing private seed. Public keys remain available
+to FastAPI for verification and key-rotation history.
 
 The implementation is tamper-evident, not immutable, not a blockchain, and not automatic third-party notarization. Exact commands are in [Deployment](DEPLOYMENT.md#merkle-checkpoint-operations); the presentation path is in [Demo Guide](DEMO_GUIDE.md#mandatory-merkle-demonstration).
 
 ## Secret handling
 
-Tracked files contain templates only. Do not commit `.env`, `.env.production`, JWT/data/Merkle private keys, service passwords, SMTP passwords, TLS private keys, proof/anchor exports, uploads, dumps, or logs. Generate secrets outside captured CI logs and remove optional bootstrap credentials after use.
+Tracked files contain templates only. Do not commit `.env`,
+`.env.merkle-checkpointer`, `.env.production`, JWT/data/Merkle private keys,
+service passwords, SMTP passwords, TLS private keys, proof/anchor exports,
+uploads, dumps, or logs. Generate secrets outside captured CI logs and remove
+optional bootstrap credentials after use.
 
-The production worker deliberately receives database/broker/Redis settings but no JWT, data-encryption, legacy-Fernet, or Merkle signing keys. The checkpoint service receives the Merkle private seed but not JWT or application data-encryption keys.
+The production worker deliberately receives database/broker/Redis settings but
+no JWT, data-encryption, legacy-Fernet, or Merkle signing keys. A checkpointer
+receives the Merkle private seed plus PostgreSQL/public checkpoint settings, but
+not JWT, application data-encryption, RabbitMQ, or Redis credentials. Its
+dedicated Compose network contains only it and PostgreSQL. Configuration errors
+hide input values; logs never dump settings or key material.
 
 ## Event logging
 
