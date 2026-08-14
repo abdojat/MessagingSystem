@@ -47,7 +47,7 @@ This is server-side encryption at rest, not end-to-end encryption: the authorize
 - Upload metadata creation and content storage require authentication.
 - Upload bodies are streamed, size/checksum validated, and finalized once; interrupted or invalid temporary files are cleaned up.
 - New upload files use chunked authenticated AES-256-GCM storage. The upload ID, key ID, framing, logical size, and checksum context are authenticated.
-- Downloads complete database authorization/audit work before bounded streaming decryption. Per-user, per-client-IP, and process-global leases bound concurrent protected streams.
+- Downloads complete database authorization/audit work before bounded streaming decryption. Authorized reads have a separate default budget of 600 requests/minute, while upload creation/body writes retain the stricter 60 requests/minute budget. Per-user, per-client-IP, and process-global leases bound concurrent protected streams at configurable defaults of 20, 100, and 1,000 respectively.
 - Encrypted range requests are rejected, and APIs do not expose host filesystem paths.
 - Profile avatars, wallpapers, and message media use the same protected-media authorization path.
 

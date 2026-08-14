@@ -178,7 +178,11 @@ class Settings(BaseSettings):
     rate_limit_search_per_minute: int = Field(default=60, gt=0)
     rate_limit_message_write_per_10_seconds: int = Field(default=200, gt=0)
     rate_limit_message_write_burst_per_second: int = Field(default=40, gt=0)
+    # Upload creation/body writes retain the stricter media budget. Authorized
+    # reads use a separate, larger budget so attachment-heavy views do not
+    # consume write capacity or fail after loading only a small gallery.
     rate_limit_media_per_minute: int = Field(default=60, gt=0)
+    rate_limit_upload_read_per_minute: int = Field(default=600, gt=0)
     rate_limit_channel_management_per_minute: int = Field(default=30, gt=0)
     rate_limit_websocket_per_minute: int = Field(default=30, gt=0)
     rate_limit_sync_per_minute: int = Field(default=60, gt=0)
@@ -199,9 +203,9 @@ class Settings(BaseSettings):
     max_pending_uploads_per_user: int = Field(default=10, ge=1)
     max_stored_upload_bytes_per_user: int = Field(default=1024 * 1024 * 1024, ge=1)
     max_websocket_connections_per_user: int = Field(default=5, ge=1, le=100)
-    max_concurrent_downloads_per_user: int = Field(default=3, ge=1, le=100)
-    max_concurrent_downloads_per_ip: int = Field(default=12, ge=1, le=10_000)
-    max_concurrent_downloads_global: int = Field(default=100, ge=1, le=100_000)
+    max_concurrent_downloads_per_user: int = Field(default=20, ge=1, le=100)
+    max_concurrent_downloads_per_ip: int = Field(default=100, ge=1, le=10_000)
+    max_concurrent_downloads_global: int = Field(default=1_000, ge=1, le=100_000)
     # Empty in direct-development mode. The hardened Compose network sets one
     # private CIDR and its proxy overwrites X-Forwarded-For with one client IP.
     trusted_proxy_cidrs: list[str] = Field(default_factory=list)

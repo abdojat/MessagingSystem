@@ -57,11 +57,16 @@ async def _enforce_message_write(redis: RedisDep, user_id: UUID, operation: str)
 
 
 async def _enforce_media(redis: RedisDep, user_id: UUID, operation: str) -> None:
-    _ = operation
+    settings = get_settings()
+    is_read = operation == "get"
     await enforce_rate_limit(
         redis,
-        f"rl:media:{user_id}",
-        limit=get_settings().rate_limit_media_per_minute,
+        f"rl:{'upload-read' if is_read else 'media-write'}:{user_id}",
+        limit=(
+            settings.rate_limit_upload_read_per_minute
+            if is_read
+            else settings.rate_limit_media_per_minute
+        ),
         window_seconds=60,
     )
 

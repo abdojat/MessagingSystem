@@ -57,7 +57,7 @@ Important coverage groups:
 | Registration, login, sessions, replay/revocation | `tests/security/test_phase2_auth_hardening.py`, `test_phase8_production_hardening.py` |
 | Browser cookie/Origin/CSRF and WebSocket tickets | `tests/security/test_phase8_production_hardening.py` |
 | Invite identity and concurrency | `tests/security/test_phase5_medium_hardening.py`, `test_phase6_medium_hardening.py`, `test_phase10_identity_presence.py` |
-| Routing identifiers, uploads, and authorization repairs | `tests/test_p0_requirements.py`, `tests/security/test_post_phase7_repairs.py` |
+| Routing identifiers, uploads, read/write rate separation, download concurrency, and authorization repairs | `tests/test_p0_requirements.py`, `tests/security/test_phase6_medium_hardening.py`, `tests/security/test_post_phase7_repairs.py` |
 | Retained-data attachment migration shapes | `tests/security/test_phase3_abuse_hardening.py::test_attachment_migration_backfill_skips_json_null_and_non_array_legacy_values` |
 | Retained RabbitMQ user-queue topology migration | `tests/security/test_phase3_abuse_hardening.py::test_worker_migrates_only_legacy_unbounded_managed_user_queue`, `test_worker_does_not_delete_user_queue_for_unrecognized_topology_mismatch` |
 | Outbox retry/dead-letter and broker projections | `tests/test_delivery_reliability.py`, Phase 3/4/7 regressions |

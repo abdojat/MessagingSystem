@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.requests import Request
 
-from app.api.routes.messages import get_upload_content
+from app.api.routes.messages import _enforce_media, get_upload_content
 from app.api.routes.users import update_me
 from app.core.client_ip import get_client_ip
 from app.core.config import get_settings
@@ -35,6 +35,16 @@ class _NoDirectAmqp:
 class _RateRedis:
     async def eval(self, script: str, numkeys: int, key: str, window_seconds: int):
         return [1, window_seconds]
+
+
+class _FixedCountRateRedis:
+    def __init__(self, count: int) -> None:
+        self.count = count
+        self.keys: list[str] = []
+
+    async def eval(self, script: str, numkeys: int, key: str, window_seconds: int):
+        self.keys.append(key)
+        return [self.count, window_seconds]
 
 
 class _TrackingSession:
@@ -314,6 +324,31 @@ async def test_concurrent_email_reassignment_has_one_owner_and_cannot_transfer_i
 
 
 # P5V-02 --------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upload_reads_have_a_separate_higher_rate_limit(monkeypatch) -> None:
+    monkeypatch.setenv("RATE_LIMIT_MEDIA_PER_MINUTE", "60")
+    monkeypatch.setenv("RATE_LIMIT_UPLOAD_READ_PER_MINUTE", "600")
+    get_settings.cache_clear()
+    user_id = uuid4()
+
+    read_redis = _FixedCountRateRedis(61)
+    await _enforce_media(read_redis, user_id, "get")
+    assert read_redis.keys == [f"rl:upload-read:{user_id}"]
+
+    write_redis = _FixedCountRateRedis(61)
+    with pytest.raises(HTTPException) as exc_info:
+        await _enforce_media(write_redis, user_id, "put")
+    assert exc_info.value.status_code == 429
+    assert write_redis.keys == [f"rl:media-write:{user_id}"]
+
+
+def test_protected_download_defaults_allow_attachment_heavy_views() -> None:
+    fields = type(get_settings()).model_fields
+    assert fields["max_concurrent_downloads_per_user"].default == 20
+    assert fields["max_concurrent_downloads_per_ip"].default == 100
+    assert fields["max_concurrent_downloads_global"].default == 1_000
 
 
 @pytest.mark.asyncio

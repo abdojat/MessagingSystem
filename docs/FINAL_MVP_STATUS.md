@@ -1,6 +1,6 @@
 # Final MVP Status
 
-Last updated: 2026-08-11
+Last updated: 2026-08-14
 
 ## Final status
 
@@ -11,7 +11,7 @@ The system is functionally complete for the defined university MVP. It remains a
 - Registration, login, Argon2 password storage, session-bound JWTs, refresh rotation/replay detection, browser cookie/CSRF flow, logout/revocation, and single-use WebSocket tickets.
 - Public/private channel creation, safe slugs, join policies, invitations, approvals, roles, permissions, removal, update, and deletion/suspension controls.
 - Persistent encrypted text/media messages, transactional outbox, RabbitMQ topic routing, worker retries/dead-letter visibility, Redis fanout, realtime WebSockets, and offline backfill.
-- Protected upload metadata/content endpoints, streamed validation, authenticated AES-GCM storage, authorized bounded download/decryption, and profile/message media use.
+- Protected upload metadata/content endpoints, streamed validation, authenticated AES-GCM storage, authorized bounded download/decryption, a higher read-specific request/concurrency allowance for attachment-heavy views, and profile/message media use.
 - Event/activity logging, delivery monitoring, per-scope SHA-256 event hash chains, and superadmin audit/operations interface.
 - Email verification tied to exact email identity and distributed multi-socket presence as non-authoritative metadata.
 - Supervisor-mandated Merkle trees: bounded batches, compact inclusion proofs, Ed25519-signed linked checkpoints, offline verification, and manual external-anchor export/verification.
