@@ -1,5 +1,7 @@
 # Requirements Mapping
 
+Last updated: 2026-08-14
+
 This table maps the final university MVP to concrete implementation, tests/verifiers, and presentation evidence. “Complete” means complete for the defined project scope, not enterprise production certification.
 
 | Requirement | Status | Implementation evidence | Test/verification evidence | Supervisor demo |
@@ -19,7 +21,7 @@ This table maps the final university MVP to concrete implementation, tests/verif
 | Distributed presence | Complete as non-authoritative metadata | Redis per-connection leases, heartbeat/reaper, aggregate transitions | `test_phase10_identity_presence.py`, cross-backend release-candidate scenario | Two sockets keep online until final socket closes. |
 | Event/activity log | Complete | `event_service.py`, events/channel/admin APIs, frontend Event Log/admin table | `test_event_integrity.py`, security tests, demo/release-candidate checks | Show channel/member/message/security activity. |
 | Event hash-chain integrity | Complete; legacy rows need explicit initialization | `event_integrity_service.py`, event integrity fields/migration `0013_event_integrity.py`, backfill tool | `test_event_integrity.py`, backfill dry-run, release-candidate scenario | Click Verify integrity and explain ordered per-scope continuity. |
-| Mandatory Merkle Tree | Implemented and validated | `backend/app/services/merkle_service.py`, `backend/app/services/merkle_audit_service.py`, `backend/app/db/merkle_tool.py`, `backend/alembic/versions/0024_phase11_merkle_audit.py`, superadmin Merkle API/UI, isolated `merkle-checkpoint` profile | `backend/tests/security/test_phase11_merkle_integrity.py`, `scripts/demo_merkle_integrity.py`, release-candidate proof/anchor checks | Create signed checkpoint, verify one inclusion proof/signature/chain, then show tampered proof copy fails. |
+| Mandatory Merkle Tree | Implemented and validated | Existing Merkle/audit services and schema; shared CLI/automatic orchestration; isolated periodic `merkle-checkpointer` in development/hardened Compose; scheduler-friendly one-shot production profile; Superadmin pending/checkpointed projection | `test_phase11_merkle_integrity.py`, `test_merkle_checkpointer.py`, `scripts/demo_merkle_integrity.py`, proof/anchor checks | Show pending event automatically checkpointed, verify inclusion/signature/chain, then show tampered proof copy fails. |
 | Delivery/event management interfaces | Complete for MVP operations | Frontend Delivery Monitor, channel Event Log, superadmin overview/events/users/channels, retry controls | `test_delivery_reliability.py`, `test_superadmin.py`, Phase 11 admin API tests | Inspect outbox status/events; optionally retry a disposable failed item. |
 | Dockerized run/deployment | Complete for development/demo and single-host reference | Three Compose files, backend/worker/frontend Dockerfiles, Nginx, PostgreSQL runtime-role init | Compose renders, image builds, Nginx syntax, release verifier, fresh migration/stack validation | Show healthy services and explain direct vs hardened vs production profiles. |
 

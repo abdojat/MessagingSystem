@@ -77,6 +77,7 @@ export interface AdminEventItem {
   created_at: string;
   event_hash?: string | null;
   integrity_scope?: string | null;
+  merkle_checkpointed: boolean;
 }
 
 export interface AdminMerkleStatusResponse {

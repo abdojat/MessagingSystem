@@ -993,6 +993,8 @@
       "signingKey": "Signing key",
       "integrity": "Integrity",
       "verifyProof": "Verify Merkle proof",
+      "pendingCheckpoint": "Pending checkpoint",
+      "missingIntegrity": "Missing integrity hash",
       "proofTitle": "Merkle inclusion proof",
       "proofDescription": "Compact verification that this audit-event hash belongs to the signed checkpoint.",
       "notCheckpointed": "This event is not checkpointed or its integrity verification failed.",

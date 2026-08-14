@@ -16,6 +16,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    networks: [default, checkpoint_db]
 
   rabbitmq:
     image: rabbitmq:3.13-management
@@ -111,6 +112,31 @@ services:
         - path: ./worker
           action: rebuild
 
+  merkle-checkpointer:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      # Untracked and intentionally not loaded by backend/worker.
+      - path: .env.merkle-checkpointer
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@postgres:5432/channels}
+      AUDIT_MERKLE_PUBLIC_KEYS: '${AUDIT_MERKLE_PUBLIC_KEYS:-{}}'
+      AUDIT_MERKLE_BATCH_SIZE: "${AUDIT_MERKLE_BATCH_SIZE:-256}"
+      AUDIT_MERKLE_CHECKPOINT_ENABLED: "${AUDIT_MERKLE_CHECKPOINT_ENABLED:-true}"
+      AUDIT_MERKLE_CHECKPOINT_INTERVAL_SECONDS: "${AUDIT_MERKLE_CHECKPOINT_INTERVAL_SECONDS:-300}"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    command: ["python", "-m", "app.db.merkle_checkpointer"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [checkpoint_db]
+    develop:
+      watch:
+        - path: ./backend
+          action: rebuild
+
   frontend:
     build:
       context: ./frontend
@@ -128,6 +154,10 @@ services:
       watch:
         - path: ./frontend
           action: rebuild
+
+networks:
+  checkpoint_db:
+    internal: true
 
 volumes:
   pg_data:

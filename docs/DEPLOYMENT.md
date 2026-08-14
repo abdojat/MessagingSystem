@@ -4,8 +4,8 @@
 
 | Profile | Purpose | Host exposure | Initialization |
 |---|---|---|---|
-| `docker-compose.yml` | Convenient development | PostgreSQL `5432`, RabbitMQ `5672/15672`, Redis `6379`, API `8000`, UI `3000` | Backend automatically migrates, reconciles schema, and optionally bootstraps superadmin. |
-| `docker-compose.hardened.yml` | Proxy-bounded local/supervisor demo | Nginx HTTP `8080` only | Backend automatically migrates/reconciles and optionally bootstraps. |
+| `docker-compose.yml` | Convenient development | PostgreSQL `5432`, RabbitMQ `5672/15672`, Redis `6379`, API `8000`, UI `3000` | Backend migrates/reconciles; isolated checkpointer runs periodically when enabled. |
+| `docker-compose.hardened.yml` | Proxy-bounded local/supervisor demo | Nginx HTTP `8080` only | Backend migrates/reconciles; restricted isolated checkpointer runs periodically when enabled. |
 | `docker-compose.production.yml` | Single-host production-oriented reference | Configured HTTP/HTTPS Nginx edge only | One-shot `migrate` service; explicit bootstrap and Merkle integrity profiles. |
 
 The production-oriented profile is not production certification, multi-host HA, or a replacement for operator-managed DNS, trusted certificates, secret storage, backups, monitoring, and recovery procedures.
@@ -16,12 +16,18 @@ This profile uses the development `.env` and credentials but puts PostgreSQL, Ra
 
 ```bash
 cp .env.example .env
+cp .env.merkle-checkpointer.example .env.merkle-checkpointer
 docker compose -f docker-compose.hardened.yml config --quiet
 docker compose -f docker-compose.hardened.yml up -d --build
 docker compose -f docker-compose.hardened.yml ps -a
 ```
 
 Open `http://localhost:8080`. RabbitMQ management and direct API/frontend ports are not published in this profile.
+
+Before startup, generate an Ed25519 pair as described below, put the public key
+ring in `.env`, and put only the active signing key ID/private seed in the
+untracked `.env.merkle-checkpointer`. If automatic checkpoints are intentionally
+disabled, set `AUDIT_MERKLE_CHECKPOINT_ENABLED=false` and omit that secret file.
 
 Stop while preserving volumes:
 
@@ -124,7 +130,7 @@ The authoritative variable template is [`.env.production.example`](../.env.produ
 | Authentication | `JWT_SECRET` | Access/refresh JWT signing; must be independent from other secrets. |
 | Email | `EMAIL_VERIFICATION_*`, `EMAIL_DELIVERY_MODE`, `SMTP_*` | HTTPS verification URL and TLS/STARTTLS SMTP transport. |
 | Data encryption | `DATA_ENCRYPTION_ACTIVE_KEY_ID`, `DATA_ENCRYPTION_KEYS`, optional legacy `MESSAGE_ENCRYPTION_KEY` | Current/historical server-side at-rest key ring and legacy migration compatibility. |
-| Merkle integrity | `AUDIT_MERKLE_*` | Bounded checkpoint size, trusted public-key ring, and one-shot signing identity. |
+| Merkle integrity | `AUDIT_MERKLE_*` | Bounded batch size, automatic enable/interval, trusted public-key ring, and isolated signing identity. |
 | Public edge | `PUBLIC_HOST`, `HTTP_PORT`, `HTTPS_PORT`, `TLS_CERT_PATH`, `TLS_KEY_PATH` | Nginx hostname, port, and external certificate mounts. |
 | Bootstrap | `SUPERADMIN_*` | Explicit one-shot first administrator only. |
 
@@ -181,11 +187,39 @@ Plaintext migration is deliberately incompatible with a listening production ser
 
 ## Merkle checkpoint operations
 
-Normal audit writes update the event hash chain only. Events accumulate until a one-shot checkpoint command selects bounded batches:
+Normal audit writes update the event hash chain only. Signing is never embedded
+in FastAPI's write path. Eligible events accumulate as `pending` until the
+isolated periodic process or a one-shot operator command selects bounded batches:
 
 ```text
-events accumulate -> operator/scheduled job -> bounded batch -> signed checkpoint
+events accumulate -> isolated checkpointer -> bounded batches -> signed checkpoints
 ```
+
+Development and hardened Compose run `merkle-checkpointer` as a separate
+PostgreSQL-only process. It performs one cycle immediately at startup, then
+waits the configured interval:
+
+```dotenv
+AUDIT_MERKLE_CHECKPOINT_ENABLED=true
+AUDIT_MERKLE_CHECKPOINT_INTERVAL_SECONDS=300  # every 5 minutes
+# AUDIT_MERKLE_CHECKPOINT_INTERVAL_SECONDS=60 # every minute
+AUDIT_MERKLE_BATCH_SIZE=256                   # leaves per bounded batch
+```
+
+The interval must be 10-86400 seconds. One cycle drains all currently eligible
+events through as many bounded batches as needed. No pending events is a normal
+no-op. Transient PostgreSQL errors are retried after the interval; configuration
+and cryptographic-integrity errors stop the process for operator review. Check
+concise cycle output with:
+
+```bash
+docker compose logs -f merkle-checkpointer
+```
+
+The Superadmin event table receives checkpoint membership in the paginated
+event query itself. A hashed event without a leaf shows **Pending checkpoint**;
+an included event shows **Verify Merkle proof**. Missing integrity metadata is
+shown separately and is not disguised as pending.
 
 The production-isolated checkpoint command is:
 
@@ -194,7 +228,14 @@ docker compose --env-file .env.production -f docker-compose.production.yml \
   --profile integrity run --rm merkle-checkpoint
 ```
 
-Schedule that same one-shot command with cron, a systemd timer, or a deployment scheduler if periodic checkpoints are required. The application does not include an internal scheduler.
+Production deliberately preserves this hardened one-shot target rather than
+holding the signing key in an always-running container. Schedule the same
+command every five minutes (or the required operational cadence) with cron, a
+systemd timer, Kubernetes CronJob, or a deployment scheduler. The
+`AUDIT_MERKLE_CHECKPOINT_INTERVAL_SECONDS` variable belongs to the development/
+hardened periodic process and is not consumed by the production one-shot job.
+The one-shot service shares only a private PostgreSQL network with the database;
+it receives no JWT, data-encryption, RabbitMQ, or Redis credentials.
 
 All supported CLI commands, run from an operator backend environment with the necessary database/public-key configuration, are:
 
@@ -210,7 +251,7 @@ python -m app.db.merkle_tool verify-anchor --file latest-audit-anchor.json --off
 python -m app.db.merkle_tool generate-keypair --key-id audit-2026-01
 ```
 
-Checkpoint creation needs `AUDIT_MERKLE_SIGNING_KEY_ID`, `AUDIT_MERKLE_SIGNING_PRIVATE_KEY`, and a matching entry in `AUDIT_MERKLE_PUBLIC_KEYS`. Status/verify/proof operations need the public-key ring but not the private seed. Output files are not overwritten unless `--force` is supplied.
+Checkpoint creation needs `AUDIT_MERKLE_SIGNING_KEY_ID`, `AUDIT_MERKLE_SIGNING_PRIVATE_KEY`, and a matching entry in `AUDIT_MERKLE_PUBLIC_KEYS`. The manual CLI and automatic process call the same shared bounded orchestration and existing `MerkleAuditService.create_checkpoint`; there is no second Merkle algorithm. Status/verify/proof operations need the public-key ring but not the private seed. Output files are not overwritten unless `--force` is supplied.
 
 After exporting an anchor:
 

@@ -69,6 +69,7 @@ class AdminEventItem(BaseModel):
     created_at: datetime
     event_hash: str | None
     integrity_scope: str | None
+    merkle_checkpointed: bool
 
 
 class AdminEventListResponse(BaseModel):

@@ -21,6 +21,10 @@ From the repository root:
 
 ```bash
 cp .env.example .env
+cp .env.merkle-checkpointer.example .env.merkle-checkpointer
+# Generate a key pair in a private terminal, then put the public key ring in
+# .env and the matching key ID/private seed in .env.merkle-checkpointer.
+cd backend && python -m app.db.merkle_tool generate-keypair --key-id audit-demo && cd ..
 docker compose config --quiet
 docker compose up --build
 ```
@@ -29,7 +33,15 @@ PowerShell copy equivalent:
 
 ```powershell
 Copy-Item .env.example .env
+Copy-Item .env.merkle-checkpointer.example .env.merkle-checkpointer
 ```
+
+Replace the two placeholders in `.env.merkle-checkpointer` with the generated
+key ID/private seed and copy the generated `AUDIT_MERKLE_PUBLIC_KEYS` value to
+`.env`. Never copy the private seed to `.env`: the backend loads `.env`, while
+only `merkle-checkpointer` loads the separate untracked secret file. To run the
+application without automatic checkpoints, set
+`AUDIT_MERKLE_CHECKPOINT_ENABLED=false`; then the secret file may be omitted.
 
 Development Compose publishes:
 
@@ -42,6 +54,7 @@ Development Compose publishes:
 | PostgreSQL | `localhost:5432` |
 | RabbitMQ AMQP | `localhost:5672` |
 | Redis | `localhost:6379` |
+| Merkle checkpointer | No public port; PostgreSQL-only internal network |
 
 On every development backend start, Compose waits for PostgreSQL, RabbitMQ, and Redis health, runs:
 
@@ -58,7 +71,7 @@ Useful commands:
 
 ```bash
 docker compose ps -a
-docker compose logs -f backend worker frontend
+docker compose logs -f backend worker frontend merkle-checkpointer
 docker compose up --build --watch
 docker compose down
 ```
@@ -105,7 +118,26 @@ SUPERADMIN_PASSWORD=<unique-password>
 
 The bootstrap refuses to promote an existing normal user and does not reset an existing administrator password. Remove the password from `.env` after the account exists.
 
-Do not place a real Merkle private signing seed in the development `.env`; that file is loaded by the normal backend. Use the isolated production-oriented integrity profile or an explicitly scoped one-shot environment described in [Deployment](DEPLOYMENT.md#merkle-checkpoint-operations).
+Do not place a real Merkle private signing seed in the development `.env`; that file is loaded by the normal backend. Put it only in the untracked `.env.merkle-checkpointer`, which Compose injects only into the isolated checkpointer container.
+
+Automatic checkpointing is enabled in `.env.example` and uses two independent controls:
+
+```dotenv
+# Every 5 minutes (development default)
+AUDIT_MERKLE_CHECKPOINT_ENABLED=true
+AUDIT_MERKLE_CHECKPOINT_INTERVAL_SECONDS=300
+
+# Every minute
+AUDIT_MERKLE_CHECKPOINT_INTERVAL_SECONDS=60
+```
+
+The minimum accepted interval is 10 seconds and the maximum is one day. The
+interval is scheduling time only; `AUDIT_MERKLE_BATCH_SIZE` still bounds each
+signed batch. On startup the process performs one cycle immediately, checkpoints
+all currently eligible events in bounded batches, and then waits for the
+interval. A PostgreSQL outage is retried on the next cycle; malformed/missing or
+mismatched signing configuration fails at startup. `SIGTERM`/`SIGINT` interrupts
+the wait without waiting for the full interval.
 
 ## Run only infrastructure in Docker
 
@@ -213,7 +245,7 @@ docker compose exec backend python -m alembic upgrade head
 
 Expected single head: `0024_phase11_merkle_audit`.
 
-Schema migration does not create historical Merkle checkpoints. Legacy event-chain backfill and Merkle checkpointing remain explicit operator actions; see [Deployment](DEPLOYMENT.md).
+Schema migration does not create historical Merkle checkpoints. Legacy event-chain backfill remains an explicit operator action. Once integrity metadata and the isolated signing configuration exist, the development/hardened checkpointer automatically processes eligible pending events; manual commands remain available in [Deployment](DEPLOYMENT.md).
 
 ## Repository scripts
 
