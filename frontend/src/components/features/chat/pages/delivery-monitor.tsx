@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -279,24 +280,40 @@ export default function DeliveryMonitorPage() {
           <StatCard label={t("stats.dead")} value={stats.dead_lettered} icon={AlertTriangle} />
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-2">
-          <DeliveryTable
-            title={t("tables.failedTitle")}
-            items={failedItems}
-            isLoading={failedQuery.isLoading}
-            emptyMessage={t("tables.failedEmpty")}
-            onRetry={handleRetry}
-            retryingId={retryingId}
-          />
-          <DeliveryTable
-            title={t("tables.deadLetteredTitle")}
-            items={deadLetteredItems}
-            isLoading={deadLetteredQuery.isLoading}
-            emptyMessage={t("tables.deadLetteredEmpty")}
-            onRetry={handleRetry}
-            retryingId={retryingId}
-          />
-        </div>
+        <Tabs defaultValue="failed" className="space-y-4">
+          <TabsList className="h-auto w-full justify-start overflow-x-auto sm:w-auto">
+            <TabsTrigger value="failed" className="gap-2">
+              {t("tables.failedTitle")}
+              <Badge variant="outline">{failedItems.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="dead-lettered" className="gap-2">
+              {t("tables.deadLetteredTitle")}
+              <Badge variant="outline">{deadLetteredItems.length}</Badge>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="failed" className="mt-0">
+            <DeliveryTable
+              title={t("tables.failedTitle")}
+              items={failedItems}
+              isLoading={failedQuery.isLoading}
+              emptyMessage={t("tables.failedEmpty")}
+              onRetry={handleRetry}
+              retryingId={retryingId}
+            />
+          </TabsContent>
+
+          <TabsContent value="dead-lettered" className="mt-0">
+            <DeliveryTable
+              title={t("tables.deadLetteredTitle")}
+              items={deadLetteredItems}
+              isLoading={deadLetteredQuery.isLoading}
+              emptyMessage={t("tables.deadLetteredEmpty")}
+              onRetry={handleRetry}
+              retryingId={retryingId}
+            />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
